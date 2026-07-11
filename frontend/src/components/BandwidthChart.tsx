@@ -27,10 +27,12 @@ const RIGHT_COL = 46
 // ---------------------------------------------------------------------------
 const COMPACT_VIS: SeriesVisibility = {dl: true, ul: true, conn: false, rtt: false}
 
-export function BandwidthPanel({historyUnsupported, compact = false, onExpand}: {
+export function BandwidthPanel({historyUnsupported, compact = false, hero = false, onExpand}: {
   historyUnsupported?: boolean
   /** Compact teaser: fixed 1h line view, no controls, optional jump-off. */
   compact?: boolean
+  /** Hero: the Traffic centerpiece — a taller plot, same controls. */
+  hero?: boolean
   onExpand?: () => void
 }) {
   const [rangePref, setRange] = useState<RangeKey>(loadRangePref)
@@ -123,6 +125,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, onExpand}: 
         bucketMs={data?.bucketMs ?? 1000}
         mode={mode}
         vis={vis}
+        height={hero ? 320 : H}
         emptyHint={historyUnsupported
           ? 'History is unavailable — the background service is an older version.'
           : 'Collecting data — history builds while the app runs.'}
@@ -303,12 +306,14 @@ function useTweenedPlots(target: Plot[]): Plot[] {
 // (thin line) are recessive overlays, each on its own outboard right axis added
 // only when enabled, so they never overlap the download/upload scales.
 // ---------------------------------------------------------------------------
-export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode, vis, emptyHint}: {
+export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode, vis, emptyHint, height = H}: {
   buckets: Bucket[]
   bucketMs: number
   mode: ChartMode
   vis: SeriesVisibility
   emptyHint?: string
+  /** viewBox height; the plot area absorbs the change (default 260). */
+  height?: number
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [hoverX, setHoverX] = useState<number | null>(null)
@@ -350,7 +355,7 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
   const W = BASE_W + outboard.length * RIGHT_COL
   const PAD = {l: 68, r: (mode === 'bars' ? 16 : 68) + outboard.length * RIGHT_COL, t: 10, b: 22}
   const plotW = W - PAD.l - PAD.r
-  const plotH = H - PAD.t - PAD.b
+  const plotH = height - PAD.t - PAD.b
   const baseY = PAD.t + plotH
   const plotRight = PAD.l + plotW
 
@@ -408,9 +413,9 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
   if (!view) {
     return (
       <div className="pf-well relative p-1.5">
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+        <svg viewBox={`0 0 ${W} ${height}`} className="w-full">
           <EmptyGrid pad={PAD} plotW={plotW} plotH={plotH} />
-          <text x={W / 2} y={H / 2} textAnchor="middle" fontSize="11" fill="var(--text-3)" fontFamily={MONO}>
+          <text x={W / 2} y={height / 2} textAnchor="middle" fontSize="11" fill="var(--text-3)" fontFamily={MONO}>
             {emptyHint ?? 'no data'}
           </text>
         </svg>
@@ -435,7 +440,7 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
     <div className="pf-well relative p-1.5">
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
+        viewBox={`0 0 ${W} ${height}`}
         className="w-full"
         onMouseMove={e => {
           const r = svgRef.current!.getBoundingClientRect()
@@ -475,15 +480,15 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
           {/* time labels — skip the ones that would collide with the corner
               direction glyphs at the plot edges */}
           {timeTicks.map((t, i) => (t.x > PAD.l + 11 && t.x < plotRight - 11) && (
-            <text key={`t${i}`} x={t.x} y={H - 8} textAnchor="middle" fill="var(--text-3)">{t.label}</text>
+            <text key={`t${i}`} x={t.x} y={height - 8} textAnchor="middle" fill="var(--text-3)">{t.label}</text>
           ))}
         </g>
         {/* axis direction / unit markers, in the time-label row's empty corners */}
         <g fontSize="9" fontFamily={MONO}>
-          {showDn && <text x={PAD.l - 6} y={H - 8} textAnchor="end" fill="var(--dl)">↓</text>}
-          {showUp && <text x={plotRight + 6} y={H - 8} textAnchor="start" fill="var(--ul)">↑</text>}
-          {view.connScale && <text x={axisX(connIdx)} y={H - 8} textAnchor="start" fill="var(--conn)">#</text>}
-          {view.rttScale && <text x={axisX(rttIdx)} y={H - 8} textAnchor="start" fill="var(--rtt)">ms</text>}
+          {showDn && <text x={PAD.l - 6} y={height - 8} textAnchor="end" fill="var(--dl)">↓</text>}
+          {showUp && <text x={plotRight + 6} y={height - 8} textAnchor="start" fill="var(--ul)">↑</text>}
+          {view.connScale && <text x={axisX(connIdx)} y={height - 8} textAnchor="start" fill="var(--conn)">#</text>}
+          {view.rttScale && <text x={axisX(rttIdx)} y={height - 8} textAnchor="start" fill="var(--rtt)">ms</text>}
         </g>
 
         {mode === 'line' && (

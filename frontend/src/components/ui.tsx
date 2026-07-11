@@ -53,6 +53,53 @@ export function Card({title, subtitle, action, children, className = '', pad = t
   )
 }
 
+/** StatTile: a headline metric on a hot glass tile. `value` takes a ReactNode
+ * so callers pass a NumberTicker when the numeral should glide. `tone` tints
+ * the numeral with a status color; `accent` with the mode accent. */
+export function StatTile({label, value, sub, icon, accent, tone, size = 'md'}: {
+  label: string
+  value: ReactNode
+  sub?: string
+  icon?: ReactNode
+  accent?: boolean
+  tone?: 'good' | 'warn' | 'bad'
+  size?: 'md' | 'lg'
+}) {
+  const color = tone ? `var(--${tone})` : accent ? 'var(--accent)' : undefined
+  return (
+    <div className={`pf-card pf-lift pf-hot ${size === 'lg' ? 'p-4' : 'p-3.5'}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs text-[var(--text-3)]">{label}</div>
+        {icon && <span className="shrink-0 text-[var(--text-3)]">{icon}</span>}
+      </div>
+      <div
+        className={`mt-1 font-semibold tabular-nums ${size === 'lg' ? 'text-[22px] leading-tight' : 'text-lg'}`}
+        style={color ? {color} : undefined}
+      >{value}</div>
+      {sub && <div className="mt-0.5 truncate text-[11px] tabular-nums text-[var(--text-3)]">{sub}</div>}
+    </div>
+  )
+}
+
+/** SectionHeader: in-card section titling — one treatment for grouped rows
+ * and tables everywhere. `count` renders quietly beside the title. */
+export function SectionHeader({title, hint, count, action}: {
+  title: string; hint?: string; count?: ReactNode; action?: ReactNode
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-[var(--text)]">
+          {title}
+          {count !== undefined && <span className="font-normal tabular-nums text-[var(--text-3)]">{count}</span>}
+        </div>
+        {hint && <div className="mt-0.5 text-xs text-[var(--text-3)]">{hint}</div>}
+      </div>
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
+  )
+}
+
 export function Button({children, onClick, variant = 'primary', size = 'md', disabled, className = '', title}: {
   children: ReactNode
   onClick?: () => void
@@ -265,6 +312,50 @@ export function Badge({children, tone = 'neutral'}: {children: ReactNode; tone?:
     accent: 'bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--accent)] border-[color-mix(in_srgb,var(--accent)_30%,transparent)]',
   }[tone]
   return <span className={`inline-flex items-center gap-1 rounded-[var(--r-sm)] border px-1.5 py-0.5 text-[11px] font-semibold ${tones}`}>{children}</span>
+}
+
+/** MonoChip: compact monospaced chip for ports, counts, and addresses that
+ * ride inline with table text. */
+export function MonoChip({children, tone = 'neutral'}: {children: ReactNode; tone?: 'neutral' | 'accent'}) {
+  const cls = tone === 'accent'
+    ? 'border-[color-mix(in_srgb,var(--accent)_35%,transparent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--accent)]'
+    : 'border-[var(--border)] bg-[var(--panel-2)] text-[var(--text-2)]'
+  return (
+    <span className={`rounded-[var(--r-sm)] border px-1.5 py-0.5 font-mono text-[11px] tabular-nums ${cls}`}>
+      {children}
+    </span>
+  )
+}
+
+/** FormRow: label + hint on the left, control on the right — the shared
+ * settings-row treatment. */
+export function FormRow({label, hint, children}: {label: string; hint?: ReactNode; children: ReactNode}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2">
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-[var(--text)]">{label}</div>
+        {hint && <div className="mt-0.5 text-xs text-[var(--text-3)]">{hint}</div>}
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  )
+}
+
+/** WarnWash: an amber internal glow behind a row that needs eyes on it — the
+ * light seeps into the glass right where the problem is. */
+export function WarnWash({on, children}: {on: boolean; children: ReactNode}) {
+  if (!on) return <>{children}</>
+  return (
+    <div
+      className="relative -mx-2 rounded-[var(--r-md)] px-2"
+      style={{
+        background: 'color-mix(in srgb, var(--warn) 6%, transparent)',
+        boxShadow: 'inset 0 0 24px -8px color-mix(in srgb, var(--warn) 25%, transparent)',
+      }}
+    >
+      {children}
+    </div>
+  )
 }
 
 /** Kbd: keyboard shortcut chip. Pass keys like "Ctrl K" — spaces split chips. */
