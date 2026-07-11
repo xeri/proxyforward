@@ -1,7 +1,8 @@
 import {UIStatus} from '../state'
 import {NAV_MAIN, NAV_SETTINGS, NavId, NavItem} from '../nav'
 import {Badge, Kbd} from '../components/ui'
-import {IconBroadcast, IconChip, IconServer} from '../components/icons'
+import {Emblem} from '../components/Emblem'
+import {IconServer} from '../components/icons'
 
 // Nav geometry shared by the buttons and the sliding indicator. ITEM_H must
 // equal --nav-item-h (tokens.css); the indicator's translateY math needs the
@@ -32,11 +33,10 @@ export function Sidebar({status, nav, onNav}: {
         <span className="text-[13px] font-semibold tracking-tight">proxyforward</span>
       </div>
 
-      {/* Mode identity anchor. */}
-      <div className="mx-3 mt-2 flex items-center gap-2 rounded-[var(--r-md)] border border-[color-mix(in_srgb,var(--accent)_22%,var(--border))] bg-[color-mix(in_srgb,var(--accent)_7%,transparent)] px-3 py-2 transition-colors duration-500">
-        <span className="text-[var(--accent)]">
-          {isAgent ? <IconChip size={16} /> : <IconBroadcast size={16} />}
-        </span>
+      {/* Mode identity anchor: the role's emblem, riding the live accent so
+          a role swap washes through it with the rest of the chrome. */}
+      <div className="mx-3 mt-2 flex items-center gap-2.5 rounded-[var(--r-md)] border border-[color-mix(in_srgb,var(--accent)_22%,var(--border))] bg-[color-mix(in_srgb,var(--accent)_7%,transparent)] px-2.5 py-2 transition-colors duration-500">
+        <Emblem role={isAgent ? 'agent' : 'gateway'} size={26} glow />
         <span className="text-xs font-semibold tracking-tight">{isAgent ? 'Agent' : 'Gateway'}</span>
         <span className="ml-auto flex items-center gap-1">
           {status.mode === 'attached' && <Badge tone="good">Service</Badge>}
