@@ -150,7 +150,7 @@ export default function App() {
         <div key={nav} className={supportsVT ? '' : 'pf-page'}>
           {nav === 'overview' && <Overview status={s} onNavigate={go} />}
           {nav === 'traffic' && <Traffic status={s} />}
-          {nav === 'tunnels' && <div className="mx-auto max-w-5xl"><Tunnels status={s} /></div>}
+          {nav === 'tunnels' && <Tunnels status={s} />}
           {nav === 'activity' && <div className="mx-auto max-w-5xl"><Activity attached={s.mode === 'attached'} /></div>}
           {nav === 'settings' && <div className="mx-auto max-w-5xl"><Settings status={s} /></div>}
         </div>
