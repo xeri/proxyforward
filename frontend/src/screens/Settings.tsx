@@ -67,12 +67,12 @@ export function Settings({status}: {status: UIStatus}) {
     // Forms read best in a measured column — Settings caps its own width
     // instead of stretching across the full canvas.
     <div className="mx-auto max-w-[74rem]">
-      <PageHeader title="Settings" subtitle="Appearance, connection, and system integration." />
+      <PageHeader title="Settings" subtitle="Appearance, behavior, connection, and system integration." />
       {err && <div className="mb-4"><ErrorBanner message={err} onDismiss={() => setErr('')} /></div>}
       {attached && (
         <div className="mb-4">
           <Banner tone="info">
-            A background service owns this configuration. Changes save to this user's config and take effect when the service stops and this app runs the engine directly.
+            The Windows service owns this setup. Changes save here and apply once the service stops and this app runs the engine itself.
           </Banner>
         </div>
       )}

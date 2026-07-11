@@ -126,7 +126,7 @@ export function Traffic({status}: {status: UIStatus}) {
           />
         </Card>
 
-        <Card title="Every client" subtitle="Lifetime stats for every IP that has ever connected" pad={false}
+        <Card title="Every client" subtitle="Lifetime totals for every IP that has ever connected" pad={false}
           action={<div className="pr-4"><Badge tone="neutral">{clients.length}</Badge></div>}>
           <DataTable
             columns={clientCols} rows={clients} rowKey={cl => cl.ip}

@@ -112,7 +112,7 @@ export function Wizard({status, onDone}: {status: UIStatus | null; onDone: () =>
 
         {act === 'gateway' && (
           <Panel>
-            <Field label="Public address" hint="The hostname or IP players and the agent will use. A plain IP works; a stable DNS name (DDNS is fine) survives IP changes — Minecraft clients cache DNS, so stability matters. You can change this later.">
+            <Field label="Public address" hint="The address players and the agent will use — a plain IP works, but a stable DNS name (DDNS is fine) survives IP changes. You can change this later.">
               <TextInput value={publicHost} onChange={setPublicHost} placeholder="play.example.com" autoFocus onEnter={doGateway} />
             </Field>
 
