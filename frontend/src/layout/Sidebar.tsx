@@ -3,7 +3,9 @@ import {NAV_MAIN, NAV_SETTINGS, NavId, NavItem} from '../nav'
 import {Badge, Kbd} from '../components/ui'
 import {IconBroadcast, IconChip, IconServer} from '../components/icons'
 
-// Nav geometry shared by the buttons and the sliding indicator.
+// Nav geometry shared by the buttons and the sliding indicator. ITEM_H must
+// equal --nav-item-h (tokens.css); the indicator's translateY math needs the
+// same number in px. The indicator's top-4 must match the nav's pt-4.
 const ITEM_H = 36
 const GAP = 2
 

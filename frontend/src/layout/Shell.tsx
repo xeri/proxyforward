@@ -2,6 +2,8 @@ import {ReactNode, useEffect, useRef} from 'react'
 import {prefersReduced} from '../theme'
 
 // Content slides this many px beneath the sidebar's edge before clipping.
+// Inline px math — must stay a plain number; documented for token readers
+// as the design system's "underlap" (no CSS var: used in style calc below).
 const UNDERLAP = 10
 
 /**
@@ -74,7 +76,7 @@ export function Shell({sidebar, titlebar, children}: {
       className="grid h-full"
       style={{
         gridTemplateRows: 'var(--chrome-top) 1fr',
-        gridTemplateColumns: sidebar ? '224px 1fr' : '1fr',
+        gridTemplateColumns: sidebar ? 'var(--sidebar-w) 1fr' : '1fr',
       }}
     >
       {sidebar && (

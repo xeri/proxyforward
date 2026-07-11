@@ -138,16 +138,21 @@ export default function App() {
       sidebar={<Sidebar status={s} nav={nav} onNav={go} />}
       titlebar={<TitleBar status={s} onPalette={() => setPalette(true)} />}
     >
+      {/* The wide adaptive canvas: screens lay out against this container's
+          real width (@container queries), not the viewport, so the sidebar
+          is automatically accounted for. Interim max-w-5xl clamps keep the
+          not-yet-redesigned screens at their designed width; each redesign
+          deletes its own clamp. */}
       <div
-        className="mx-auto max-w-5xl p-6"
+        className="@container mx-auto w-full max-w-[var(--content-max)] px-[var(--page-pad)] py-6"
         style={{viewTransitionName: 'pf-content'} as CSSProperties}
       >
         <div key={nav} className={supportsVT ? '' : 'pf-page'}>
-          {nav === 'overview' && <Overview status={s} onNavigate={go} />}
-          {nav === 'traffic' && <Traffic status={s} />}
-          {nav === 'tunnels' && <Tunnels status={s} />}
-          {nav === 'activity' && <Activity attached={s.mode === 'attached'} />}
-          {nav === 'settings' && <Settings status={s} />}
+          {nav === 'overview' && <div className="mx-auto max-w-5xl"><Overview status={s} onNavigate={go} /></div>}
+          {nav === 'traffic' && <div className="mx-auto max-w-5xl"><Traffic status={s} /></div>}
+          {nav === 'tunnels' && <div className="mx-auto max-w-5xl"><Tunnels status={s} /></div>}
+          {nav === 'activity' && <div className="mx-auto max-w-5xl"><Activity attached={s.mode === 'attached'} /></div>}
+          {nav === 'settings' && <div className="mx-auto max-w-5xl"><Settings status={s} /></div>}
         </div>
       </div>
       {palette && <CommandPalette ctx={{status: s, go}} onClose={() => setPalette(false)} />}
