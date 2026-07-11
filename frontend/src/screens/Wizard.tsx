@@ -1,8 +1,9 @@
 import {useEffect, useMemo, useState} from 'react'
 import {GetConfig, PairingCode, SetupAgent, SetupGateway} from '../../wailsjs/go/app/App'
 import {Button, Codebox, CopyButton, ErrorBanner, Field, Spinner, TextInput} from '../components/ui'
+import {Emblem} from '../components/Emblem'
 import {ImportSetupFlow} from '../components/SetupBackup'
-import {IconBroadcast, IconCheck, IconChip, IconGlobe, IconRefresh, IconServer, IconShield, IconSpark} from '../components/icons'
+import {IconCheck, IconGlobe, IconRefresh, IconServer, IconShield, IconSpark} from '../components/icons'
 import {UIStatus} from '../state'
 
 const DEFAULT_CONTROL_PORT = 8474
@@ -77,13 +78,13 @@ export function Wizard({status, onDone}: {status: UIStatus | null; onDone: () =>
           <>
             <div className="pf-stagger grid grid-cols-1 gap-3 sm:grid-cols-2">
               <RoleCard
-                icon={<IconChip size={22} />} hue="#22d3ee"
+                role="agent"
                 title="This hosts Minecraft"
                 sub="Agent — dials out to the gateway. Nothing to forward here."
                 onHover={on => preview(on ? 'agent' : '')}
                 onClick={() => { setErr(''); setAct('agent') }} />
               <RoleCard
-                icon={<IconBroadcast size={22} />} hue="#8b5cf6"
+                role="gateway"
                 title="This faces the internet"
                 sub="Gateway — players connect here; it relays traffic to the agent."
                 onHover={on => preview(on ? 'gateway' : '')}
@@ -300,15 +301,17 @@ function Stepper({act}: {act: Act}) {
             {i < idx ? <IconCheck size={12} /> : i + 1}
           </span>
           <span className={`text-xs transition-colors duration-300 ${i <= idx ? 'text-[var(--text)]' : 'text-[var(--text-3)]'}`}>{label}</span>
-          {i < labels.length - 1 && <span className="mx-1 h-px w-8 bg-[var(--border)]" />}
+          {i < labels.length - 1 && (
+            <span className={`mx-1 h-px w-8 transition-colors duration-300 ${i < idx ? 'bg-[color-mix(in_srgb,var(--accent)_55%,var(--border))]' : 'bg-[var(--border)]'}`} />
+          )}
         </div>
       ))}
     </div>
   )
 }
 
-function RoleCard({icon, title, sub, hue, onClick, onHover}: {
-  icon: React.ReactNode; title: string; sub: string; hue: string
+function RoleCard({role, title, sub, onClick, onHover}: {
+  role: 'agent' | 'gateway'; title: string; sub: string
   onClick: () => void; onHover: (on: boolean) => void
 }) {
   return (
@@ -316,11 +319,11 @@ function RoleCard({icon, title, sub, hue, onClick, onHover}: {
       onClick={() => { onHover(false); onClick() }}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
-      style={{['--hue' as string]: hue}}
+      style={{['--hue' as string]: `var(--role-${role})`}}
       className="group pf-card p-5 text-left transition-all duration-300 [transition-timing-function:var(--ease-out)] hover:-translate-y-1 hover:shadow-[inset_0_1px_0_var(--bevel-top),inset_0_-1px_0_var(--bevel-bot),0_16px_40px_-16px_color-mix(in_srgb,var(--hue)_40%,transparent)] active:translate-y-0 active:scale-[0.99]"
     >
-      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-[var(--r-md)] bg-[var(--panel-2)] text-[var(--text-2)] transition-all duration-300 group-hover:scale-110 group-hover:bg-[var(--hue)] group-hover:text-white">
-        {icon}
+      <div className="mb-3 inline-flex transition-transform duration-300 group-hover:scale-110">
+        <Emblem role={role} fixed size={40} />
       </div>
       <div className="text-base font-semibold">{title}</div>
       <div className="mt-1 text-sm text-[var(--text-2)]">{sub}</div>
