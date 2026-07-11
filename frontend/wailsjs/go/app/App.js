@@ -10,6 +10,14 @@ export function ChooseAndInspectSetupFile() {
   return window['go']['app']['App']['ChooseAndInspectSetupFile']();
 }
 
+export function CreatorAvatar() {
+  return window['go']['app']['App']['CreatorAvatar']();
+}
+
+export function CreatorInfo() {
+  return window['go']['app']['App']['CreatorInfo']();
+}
+
 export function ExportDiagnostics() {
   return window['go']['app']['App']['ExportDiagnostics']();
 }
@@ -42,8 +50,16 @@ export function LogsSince(arg1) {
   return window['go']['app']['App']['LogsSince'](arg1);
 }
 
+export function MeasureLatency() {
+  return window['go']['app']['App']['MeasureLatency']();
+}
+
 export function OpenConfigDir() {
   return window['go']['app']['App']['OpenConfigDir']();
+}
+
+export function OpenCreatorURL() {
+  return window['go']['app']['App']['OpenCreatorURL']();
 }
 
 export function PairingCode() {

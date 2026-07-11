@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"proxyforward/internal/control"
+	"proxyforward/internal/linkquality"
 	"proxyforward/internal/portowner"
 	"proxyforward/internal/stats"
 	"proxyforward/internal/transport"
@@ -30,6 +31,11 @@ type agentSession struct {
 	remoteIP    string
 	link        stats.LinkCounters
 
+	// hostname/localIPs are the agent machine's identity from its hello, shown
+	// in the gateway GUI's identity badges. Set at admission, immutable after.
+	hostname string
+	localIPs []string
+
 	// caps is the negotiated capability set, fixed before admission —
 	// immutable for the session's lifetime, so reads need no locking.
 	caps control.CapSet
@@ -37,10 +43,45 @@ type agentSession struct {
 	sess    atomic.Pointer[sessionBox]
 	evicted atomic.Bool
 
+	// The gateway runs its own ping loop toward the agent (bidirectional
+	// heartbeat) so it reports the same RTT/jitter/loss stats the agent does.
+	// ctrlWriteMu serializes control-stream writes between the read loop's
+	// responses, the ping goroutine, and an on-demand probe; it also guards
+	// ctrl, which is live only while serveControl runs.
+	ctrlWriteMu sync.Mutex
+	ctrl        transport.Stream
+	pingSeq     atomic.Uint64
+	rttMillis   atomic.Int64
+	quality     *linkquality.Tracker
+	// probe holds an in-flight on-demand latency measurement; nil otherwise.
+	probe atomic.Pointer[linkquality.ProbeCollector]
+
 	// health maps tunnelID → the agent's last reported local-backend state;
 	// the offline responder consults it.
 	health sync.Map
 }
+
+// setCtrl publishes (or clears, with nil) the control stream for writers.
+func (s *agentSession) setCtrl(ctrl transport.Stream) {
+	s.ctrlWriteMu.Lock()
+	s.ctrl = ctrl
+	s.ctrlWriteMu.Unlock()
+}
+
+// writeControl serializes a control-stream write against the ping goroutine and
+// any probe. It errors once the stream is gone.
+func (s *agentSession) writeControl(msgType string, payload any) error {
+	s.ctrlWriteMu.Lock()
+	defer s.ctrlWriteMu.Unlock()
+	if s.ctrl == nil {
+		return errNoControlStream
+	}
+	s.ctrl.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
+	defer s.ctrl.SetWriteDeadline(time.Time{})
+	return control.WriteMsg(s.ctrl, msgType, payload)
+}
+
+var errNoControlStream = fmt.Errorf("control stream is not active")
 
 // sessionBox exists because atomic.Pointer needs a concrete type and
 // transport.Session is an interface.

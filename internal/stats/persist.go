@@ -13,12 +13,13 @@ import (
 	"time"
 )
 
-const fileVersion = 2
+const fileVersion = 3
 
-// packedBucket is [t,in,out,io,ih,il,ic,oo,oh,ol,oc,co,ch,cl,cc]. Unix-ms
-// timestamps and realistic byte counts sit far below float64's 2^53 integer
-// ceiling. v1 rows had only the first 11 elements (no connection gauge).
-type packedBucket [15]float64
+// packedBucket is [t,in,out,io,ih,il,ic,oo,oh,ol,oc,co,ch,cl,cc,ro,rh,rl,rc].
+// Unix-ms timestamps and realistic byte counts sit far below float64's 2^53
+// integer ceiling. v1 rows had only the first 11 elements (no connection
+// gauge); v2 rows had 15 (no RTT gauge).
+type packedBucket [19]float64
 
 func pack(b Bucket) packedBucket {
 	return packedBucket{
@@ -26,6 +27,7 @@ func pack(b Bucket) packedBucket {
 		b.InO, b.InH, b.InL, b.InC,
 		b.OutO, b.OutH, b.OutL, b.OutC,
 		b.ConnO, b.ConnH, b.ConnL, b.ConnC,
+		b.RttO, b.RttH, b.RttL, b.RttC,
 	}
 }
 
@@ -35,6 +37,7 @@ func unpack(p packedBucket) Bucket {
 		InO: p[3], InH: p[4], InL: p[5], InC: p[6],
 		OutO: p[7], OutH: p[8], OutL: p[9], OutC: p[10],
 		ConnO: p[11], ConnH: p[12], ConnL: p[13], ConnC: p[14],
+		RttO: p[15], RttH: p[16], RttL: p[17], RttC: p[18],
 	}
 }
 
@@ -63,13 +66,20 @@ func (s *Store) load() {
 		} else if f.V < 1 || f.V > fileVersion {
 			err = fmt.Errorf("unsupported stats file version %d", f.V)
 		} else {
-			if f.V == 1 {
-				// v1 rows carry no connection gauge; json zero-filled the
-				// missing trailing elements, so stamp them unknown (-1) —
-				// 0 would read as "0 connections".
+			if f.V < 3 {
+				// Older rows carry fewer gauges; json zero-filled the missing
+				// trailing elements, so stamp them unknown (-1) — 0 would read
+				// as a real "0 connections" / "0 ms". v1 lacks conn+rtt
+				// (indices 11-18); v2 lacks only rtt (indices 15-18).
+				connStart := 15 // v2: only RTT is missing
+				if f.V == 1 {
+					connStart = 11 // v1: both conn and RTT are missing
+				}
 				for _, rows := range f.Tiers {
 					for i := range rows {
-						rows[i][11], rows[i][12], rows[i][13], rows[i][14] = -1, -1, -1, -1
+						for j := connStart; j < 19; j++ {
+							rows[i][j] = -1
+						}
 					}
 				}
 			}

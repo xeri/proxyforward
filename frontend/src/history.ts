@@ -104,17 +104,19 @@ export function loadCandlePref(): boolean {
 }
 export function saveCandlePref(on: boolean) { localStorage.setItem('pf-chart-candles', on ? '1' : '0') }
 
-/** Per-series visibility: download / upload / connections. */
-export type SeriesVisibility = {dl: boolean; ul: boolean; conn: boolean}
+/** Per-series visibility: download / upload / connections / RTT. */
+export type SeriesVisibility = {dl: boolean; ul: boolean; conn: boolean; rtt: boolean}
 
 export function loadSeriesPref(): SeriesVisibility {
   try {
     const raw = localStorage.getItem('pf-chart-series')
-    if (!raw) return {dl: true, ul: true, conn: true}
+    // Connections and RTT default OFF so download/upload stay the primary read;
+    // the user opts into the recessive overlays.
+    if (!raw) return {dl: true, ul: true, conn: false, rtt: false}
     const p = JSON.parse(raw)
-    return {dl: p.dl !== false, ul: p.ul !== false, conn: p.conn !== false}
+    return {dl: p.dl !== false, ul: p.ul !== false, conn: p.conn === true, rtt: p.rtt === true}
   } catch {
-    return {dl: true, ul: true, conn: true}
+    return {dl: true, ul: true, conn: false, rtt: false}
   }
 }
 export function saveSeriesPref(s: SeriesVisibility) {

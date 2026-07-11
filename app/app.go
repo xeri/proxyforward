@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"proxyforward/internal/engine"
 	"proxyforward/internal/ipc"
 	"proxyforward/internal/link"
+	"proxyforward/internal/linkquality"
 	"proxyforward/internal/logging"
 	"proxyforward/internal/stats"
 	"proxyforward/internal/svc"
@@ -42,6 +44,7 @@ type App struct {
 	ctx        context.Context
 	configPath string
 	configDir  string
+	hostname   string
 	ring       *logging.Ring
 	logger     *slog.Logger
 
@@ -59,12 +62,17 @@ type App struct {
 	// request (older version): stop asking instead of eating a timeout per
 	// poll.
 	historyUnsupported bool
+
+	// avatarMu serializes creator-avatar cache reads/refreshes.
+	avatarMu sync.Mutex
 }
 
 func New(configPath string, cfg *config.Config, ring *logging.Ring, logger *slog.Logger) *App {
+	hn, _ := os.Hostname()
 	return &App{
 		configPath: configPath,
 		configDir:  filepath.Dir(configPath),
+		hostname:   hn,
 		cfg:        cfg,
 		ring:       ring,
 		logger:     logger,
@@ -158,12 +166,28 @@ type UIStatus struct {
 	Mode       string `json:"mode"`
 	Role       string `json:"role"`
 	Version    string `json:"version"`
+	Hostname   string `json:"hostname"`
 	PID        int    `json:"pid"`
 	ConfigPath string `json:"configPath"`
 
 	LinkUp         bool  `json:"linkUp"`
 	RTTMillis      int64 `json:"rttMillis"`
 	AgentConnected bool  `json:"agentConnected"`
+
+	// Link quality + health rollup. Both roles run their own heartbeat and
+	// report the same stats; values are -1/"unknown" until the link is up.
+	JitterMillis  float64 `json:"jitterMillis"`
+	PacketLossPct float64 `json:"packetLossPct"`
+	HealthScore   string  `json:"healthScore"`
+
+	// Identity of the peer machine, for the dashboard's identity badges.
+	// (This machine's own hostname is Hostname above.) Public addresses are
+	// shown prominently; LAN IPs are secondary.
+	PeerHostname string   `json:"peerHostname"`
+	PublicIP     string   `json:"publicIp"`
+	PeerPublicIP string   `json:"peerPublicIp"`
+	LocalLANIPs  []string `json:"localLanIps"`
+	PeerLANIPs   []string `json:"peerLanIps"`
 
 	Tunnels       []TunnelUI `json:"tunnels"`
 	Connections   []ConnUI   `json:"connections"`
@@ -220,9 +244,20 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 	if s.ConfigPath != "" {
 		st.ConfigPath = s.ConfigPath
 	}
+	if s.LocalHostname != "" {
+		st.Hostname = s.LocalHostname
+	}
 	st.LinkUp = s.LinkUp
 	st.RTTMillis = s.RTTMillis
+	st.JitterMillis = s.JitterMillis
+	st.PacketLossPct = s.PacketLossPct
+	st.HealthScore = s.HealthScore
 	st.AgentConnected = s.AgentConnected
+	st.PeerHostname = s.PeerHostname
+	st.PublicIP = s.PublicIP
+	st.PeerPublicIP = s.PeerPublicIP
+	st.LocalLANIPs = s.LocalLANIPs
+	st.PeerLANIPs = s.PeerLANIPs
 	st.TotalBytesIn = s.TotalBytesIn
 	st.TotalBytesOut = s.TotalBytesOut
 	st.LinkUpSinceMs = s.LinkUpSinceMs
@@ -260,8 +295,13 @@ func (a *App) Status() UIStatus {
 func (a *App) statusLocked() UIStatus {
 	st := UIStatus{Mode: a.mode}
 	st.Version = version.String()
+	st.Hostname = a.hostname
 	st.ConfigPath = a.configPath
 	st.Role = string(a.cfg.Role)
+	// Defaults for the "no live link" case; applyIPCStatus overwrites them.
+	st.JitterMillis = -1
+	st.PacketLossPct = -1
+	st.HealthScore = "unknown"
 
 	switch a.mode {
 	case ModeEngine:
@@ -431,11 +471,12 @@ func (a *App) SaveSettings(cfg config.Config) error {
 	return a.cfg.Save(a.configPath)
 }
 
-// SetTheme persists just the UI theme ("dark"|"light"). It is a narrow,
-// engine-independent write so the toggle can't fail on unrelated validation.
+// SetTheme persists just the UI theme ("dark"|"light"|"system"). It is a
+// narrow, engine-independent write so the toggle can't fail on unrelated
+// validation.
 func (a *App) SetTheme(theme string) error {
-	if theme != "dark" && theme != "light" {
-		return fmt.Errorf("theme must be dark or light")
+	if theme != "dark" && theme != "light" && theme != "system" {
+		return fmt.Errorf("theme must be dark, light or system")
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -605,6 +646,70 @@ func (a *App) TestReachability(tunnelID string) (string, error) {
 	return testReachability(host, port)
 }
 
+// LatencyResult is the outcome of the one-click latency test. Round-trip
+// values are always meaningful; the one-way estimate is half the RTT, and the
+// raw per-direction values (OneWayUp/Down) are only populated when the gateway
+// echoed its receive time — they depend on both clocks being NTP-synced, which
+// the frontend surfaces via ClockSyncCaveat.
+type LatencyResult struct {
+	Samples          int     `json:"samples"`
+	RTTAvgMs         float64 `json:"rttAvgMs"`
+	RTTMinMs         float64 `json:"rttMinMs"`
+	RTTMaxMs         float64 `json:"rttMaxMs"`
+	JitterMs         float64 `json:"jitterMs"`
+	OneWayEstimateMs float64 `json:"oneWayEstimateMs"`
+	OneWayUpMs       float64 `json:"oneWayUpMs"`
+	OneWayDownMs     float64 `json:"oneWayDownMs"`
+	HaveOneWay       bool    `json:"haveOneWay"`
+	ClockSyncCaveat  bool    `json:"clockSyncCaveat"`
+}
+
+// MeasureLatency runs an on-demand latency burst on the live link and reports
+// round-trip stats, a ½-RTT one-way estimate, and (when available) raw
+// per-direction one-way latency. Works from either role — the agent probes the
+// gateway, the gateway probes the agent. Engine mode only.
+func (a *App) MeasureLatency() (LatencyResult, error) {
+	a.mu.Lock()
+	var probe func(ctx context.Context, count int, interval time.Duration) (linkquality.ProbeResult, error)
+	if a.eng != nil {
+		switch {
+		case a.eng.Agent != nil:
+			probe = a.eng.Agent.ProbeLatency
+		case a.eng.Gateway != nil:
+			probe = a.eng.Gateway.ProbeLatency
+		}
+	}
+	a.mu.Unlock()
+
+	if probe == nil {
+		return LatencyResult{}, fmt.Errorf("latency test needs the in-process engine (unavailable while attached to a service daemon)")
+	}
+
+	ctx, cancel := context.WithTimeout(a.ctx, 8*time.Second)
+	defer cancel()
+	res, err := probe(ctx, 10, 150*time.Millisecond)
+	if err != nil {
+		return LatencyResult{}, err
+	}
+
+	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
+	out := LatencyResult{
+		Samples:          res.Samples,
+		RTTAvgMs:         ms(res.RTTAvg),
+		RTTMinMs:         ms(res.RTTMin),
+		RTTMaxMs:         ms(res.RTTMax),
+		JitterMs:         ms(res.Jitter),
+		OneWayEstimateMs: ms(res.RTTAvg) / 2,
+		HaveOneWay:       res.HaveOneWay,
+	}
+	if res.HaveOneWay {
+		out.OneWayUpMs = ms(res.OneWayUp)
+		out.OneWayDownMs = ms(res.OneWayDown)
+		out.ClockSyncCaveat = true
+	}
+	return out, nil
+}
+
 // ExportDiagnostics writes a support bundle (logs + redacted config +
 // version) to a user-chosen path and returns it.
 func (a *App) ExportDiagnostics() (string, error) {
@@ -619,8 +724,12 @@ func (a *App) ExportDiagnostics() (string, error) {
 	}
 	a.mu.Lock()
 	cfg := *a.cfg
+	var health string
+	if a.eng != nil {
+		health = diagnosticsHealth(a.eng.Status())
+	}
 	a.mu.Unlock()
-	if err := writeDiagnostics(path, &cfg, a.configDir, a.ring); err != nil {
+	if err := writeDiagnostics(path, &cfg, a.configDir, health, a.ring); err != nil {
 		return "", err
 	}
 	return path, nil

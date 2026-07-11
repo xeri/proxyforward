@@ -17,6 +17,7 @@ import (
 	wailslogger "github.com/wailsapp/wails/v2/pkg/logger"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	wailswin "github.com/wailsapp/wails/v2/pkg/options/windows"
 
 	"proxyforward/app"
 	"proxyforward/internal/config"
@@ -427,17 +428,34 @@ func runGUI() error {
 	// is invisible, so route it to a file next to the crash log.
 	wailsLog := wailslogger.NewFileLogger(filepath.Join(config.DefaultDir(false), "logs", "wails.log"))
 	return wails.Run(&options.App{
-		Title:              "proxyforward",
-		Width:              1100,
-		Height:             720,
-		MinWidth:           900,
-		MinHeight:          600,
-		AssetServer:        &assetserver.Options{Assets: assets},
-		BackgroundColour:   &options.RGBA{R: 15, G: 17, B: 21, A: 1},
+		Title:     "proxyforward",
+		Width:     1360,
+		Height:    820,
+		MinWidth:  1280,
+		MinHeight: 760,
+		// The window is frameless: the frontend draws its own title bar and
+		// window controls. DWM decorations stay on (default) so the frameless
+		// window keeps its drop shadow, rounded corners and Snap Layouts.
+		Frameless:        true,
+		AssetServer:      &assetserver.Options{Assets: assets},
+		BackgroundColour: startupBackground(cfg.UI.Theme),
+		Windows: &wailswin.Options{
+			Theme: wailswin.SystemDefault,
+		},
 		OnStartup:          a.Startup,
 		OnShutdown:         a.Shutdown,
 		Bind:               []interface{}{a},
 		Logger:             wailsLog,
 		LogLevelProduction: wailslogger.ERROR,
 	})
+}
+
+// startupBackground picks the pre-paint window colour so the first frame (and
+// resize flash) matches the theme the frontend is about to render. "system"
+// resolves in the frontend; dark is the safer first frame for it here.
+func startupBackground(theme string) *options.RGBA {
+	if theme == "light" {
+		return &options.RGBA{R: 236, G: 238, B: 246, A: 1}
+	}
+	return &options.RGBA{R: 11, G: 13, B: 19, A: 1}
 }

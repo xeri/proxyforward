@@ -1,0 +1,100 @@
+/* ---------------------------------------------------------------------------
+   Base chrome: document setup, ambient depth background, selection rules,
+   scrollbars, focus rings, drag regions.
+--------------------------------------------------------------------------- */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-size: 13.5px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+/* The luminance ramp lives on html so the blob layer above it can drift with
+   pure transforms (no background repaints, no ramp smearing). */
+html { background: linear-gradient(155deg, var(--bg) 0%, var(--bg-base) 100%); }
+
+/* Ambient depth: three chroma blobs the glass surfaces can visibly diffuse —
+   one parked under the L-sheet corner, one drifting through center screen
+   where Modal and CommandPalette open, one low-right in the secondary hue.
+   The layer is oversized so transform drift never exposes an edge; blob
+   softness is baked into the gradient stops (no filter). Role swaps re-tint
+   via --mode-glow, cross-faded by the background transition. */
+body { position: relative; overflow: hidden; }
+body::before {
+  content: "";
+  position: fixed;
+  inset: -30%;
+  pointer-events: none;
+  background:
+    radial-gradient(30% 26% at 22% 26%, color-mix(in srgb, var(--mode-glow) 42%, transparent), transparent 70%),
+    radial-gradient(26% 22% at 50% 40%, color-mix(in srgb, var(--mode-glow) 22%, transparent), transparent 72%),
+    radial-gradient(32% 27% at 74% 76%, color-mix(in srgb, var(--mode-glow-2) 15%, transparent), transparent 72%);
+  transition: --mode-glow 0.5s ease, --mode-glow-2 0.5s ease, filter 0.6s ease;
+  animation: pf-aurora 75s ease-in-out infinite alternate;
+}
+/* Light theme: pastel blobs — high lightness reads through blur as color,
+   not gray mush. */
+:root[data-theme="light"] body::before {
+  background:
+    radial-gradient(30% 26% at 22% 26%, color-mix(in srgb, var(--mode-glow) 26%, rgba(255, 255, 255, 0.5)), transparent 70%),
+    radial-gradient(26% 22% at 50% 40%, color-mix(in srgb, var(--mode-glow) 14%, rgba(255, 255, 255, 0.4)), transparent 72%),
+    radial-gradient(32% 27% at 74% 76%, color-mix(in srgb, var(--mode-glow-2) 10%, rgba(255, 255, 255, 0.35)), transparent 72%);
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.022;
+  background-image: var(--noise);
+}
+:root[data-theme="light"] body::after { opacity: 0.03; mix-blend-mode: multiply; }
+#root { position: relative; z-index: 1; }
+
+/* Data is selectable; chrome is not. */
+input, textarea, select { user-select: text; }
+.select-text, .select-text * { user-select: text; cursor: auto; }
+button { cursor: pointer; font: inherit; }
+:disabled { cursor: default; }
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* Keyboard focus: a calm accent ring, mouse clicks stay clean. */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+  border-radius: var(--r-sm);
+}
+
+/* Frameless window drag regions (Wails --wails-draggable). */
+.pf-drag { --wails-draggable: drag; }
+.pf-no-drag { --wails-draggable: no-drag; }
+
+/* WebView2/Edge injects its own black reveal + clear glyphs into inputs; they
+   don't theme, clip when the field narrows, and are inconsistent across roles.
+   Suppress them so our own eye toggle (TextInput) is the only affordance. */
+input::-ms-reveal, input::-ms-clear { display: none; width: 0; height: 0; }
+input[type="search"]::-webkit-search-decoration,
+input[type="search"]::-webkit-search-cancel-button { display: none; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Numerals line up everywhere they matter. */
+.tabular, table { font-variant-numeric: tabular-nums; }

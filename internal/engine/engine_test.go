@@ -71,7 +71,7 @@ func TestStatsLifecycle(t *testing.T) {
 	var f struct {
 		V int `json:"v"`
 	}
-	if err := json.Unmarshal(data, &f); err != nil || f.V != 2 {
+	if err := json.Unmarshal(data, &f); err != nil || f.V != 3 {
 		t.Fatalf("stats.json malformed (v=%d, err=%v)", f.V, err)
 	}
 }

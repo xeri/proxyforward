@@ -1,0 +1,196 @@
+/* ---------------------------------------------------------------------------
+   Design tokens. Dark is the default set; [data-theme="light"] swaps surfaces;
+   [data-role] swaps the accent ramp so the whole app re-tints per mode:
+
+     gateway  → violet  (the public beacon)
+     agent    → cyan    (the machine room)
+     unset    → violet  (wizard / not yet configured)
+
+   Every interactive surface consumes var(--accent); the ambient background
+   consumes var(--mode-glow). Chart series tokens (--dl/--ul/--conn/--rtt) are
+   load-bearing for BandwidthChart — names must not change.
+--------------------------------------------------------------------------- */
+
+/* Accent colors are registered so gradients and glows that consume them can
+   transition when [data-role] remaps the ramp (the role-swap wash). */
+@property --accent {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #8b5cf6;
+}
+@property --accent-2 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #a78bfa;
+}
+@property --mode-glow {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #8b5cf6;
+}
+@property --mode-glow-2 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #4f46e5;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Surface ladder, deepest → most raised. */
+  --bg-base: #07090e;
+  --bg: #0b0d13;
+  --bg-2: #07090e; /* legacy alias */
+  --panel: #10131b;
+  --panel-2: #161a24;
+  --panel-3: #1c2130;
+
+  --border: #1f2534;
+  --border-strong: #313a52;
+  --hairline: rgba(255, 255, 255, 0.06);
+
+  --text: #edeff7;
+  --text-2: #9aa3ba;
+  --text-3: #646d85;
+
+  /* Accent ramp (violet by default; role selectors below re-map it). */
+  --accent: #8b5cf6;
+  --accent-2: #a78bfa;
+  --accent-hover: #9d73f8;
+  --accent-contrast: #ffffff;
+  --mode-glow: #8b5cf6;
+  --mode-glow-2: #4f46e5;
+
+  /* Semantic status. Color is reserved for these + chart series. */
+  --good: #34d399;
+  --warn: #fbbf24;
+  --bad: #f87171;
+
+  /* Chart series — CVD-validated (deutan/protan-safe). Do not rename. */
+  --dl: #ec4899;
+  --ul: #3b82f6;
+  --conn: #d7a13b;
+  --rtt: #2dd4bf;
+
+  --glass: rgba(13, 16, 24, 0.66);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.55);
+  --shadow-pop: 0 24px 64px -16px rgba(0, 0, 0, 0.65);
+
+  /* Light model. One source, top-left along --light-angle: rims brighten
+     facing it, bevels pair a catch-light with a seat, shadows stack
+     contact + key + ambient. Consumed by glass.css; chart tokens above are
+     untouched. */
+  --titlebar-h: 44px;
+  --light-angle: 135deg;
+  --edge-hi: rgba(255, 255, 255, 0.3);
+  --edge-mid: rgba(255, 255, 255, 0.07);
+  --edge-lo: rgba(255, 255, 255, 0.02);
+  --bevel-top: rgba(255, 255, 255, 0.12);
+  --bevel-bot: rgba(0, 0, 0, 0.35);
+  --sheen: rgba(255, 255, 255, 0.06);
+  --glare: rgba(255, 255, 255, 0.09);
+  --glass-tint: color-mix(in oklab, var(--panel) 62%, transparent);
+  --shadow-key: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-ambient: 0 16px 40px -16px rgba(0, 0, 0, 0.55);
+  --shadow-ambient-card: 0 8px 24px -12px rgba(0, 0, 0, 0.55);
+  --shadow-contact: 0 0 0 1px rgba(0, 0, 0, 0.28);
+
+  /* Shared grain. --noise is full-strength (layers set their own opacity);
+     --noise-glass has its alpha baked in (feFuncA slope) so it can ride as a
+     plain background layer inside glass fills. */
+  --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  --noise-glass: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.015'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+
+  /* Precision-milled radii. No pills: rounded-full survives only on status
+     dots and toggle knobs. */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 14px;
+
+  /* Motion. */
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+/* Agent mode: cyan ramp. Cyan is bright — primary buttons flip to dark text. */
+:root[data-role="agent"] {
+  --accent: #22d3ee;
+  --accent-2: #67e8f9;
+  --accent-hover: #52dcf3;
+  --accent-contrast: #04222b;
+  --mode-glow: #06b6d4;
+  --mode-glow-2: #0ea5e9;
+}
+
+/* ---------------------------------------------------------------------------
+   Light theme — frosted ice, not blinding white. Tinted shadows, layered
+   grey-blue depths, crisp near-black type.
+--------------------------------------------------------------------------- */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-base: #d8dde9;
+  --bg: #eceef6;
+  --bg-2: #e3e6f1;
+  --panel: #f7f8fc;
+  --panel-2: #eef0f8;
+  --panel-3: #ffffff;
+
+  --border: #dde1ec;
+  --border-strong: #c3cadd;
+  --hairline: rgba(255, 255, 255, 0.7);
+
+  --text: #191c26;
+  --text-2: #4b5266;
+  --text-3: #7e879e;
+
+  --accent: #7048e8;
+  --accent-2: #9775fa;
+  --accent-hover: #5f3dc4;
+  --accent-contrast: #ffffff;
+  --mode-glow: #7048e8;
+  --mode-glow-2: #4f46e5;
+
+  --good: #0c9f6e;
+  --warn: #b47607;
+  --bad: #dc4d4d;
+
+  --dl: #db2777;
+  --ul: #2563eb;
+  --conn: #b45309;
+  --rtt: #0d9488;
+
+  --glass: rgba(247, 248, 252, 0.72);
+  --shadow-soft: 0 1px 2px rgba(30, 34, 58, 0.06), 0 8px 24px -12px rgba(30, 34, 58, 0.14);
+  --shadow-pop: 0 24px 64px -16px rgba(30, 34, 58, 0.28);
+
+  /* Light model, inverted: frosted ice is lit from within, so the rim facing
+     the light stays white-hot but the shadow side goes DARKER than the fill.
+     Shadows are tinted navy (never gray) at roughly half the dark alphas. */
+  --edge-hi: rgba(255, 255, 255, 0.9);
+  --edge-mid: rgba(255, 255, 255, 0.35);
+  --edge-lo: rgba(25, 28, 38, 0.14);
+  --bevel-top: rgba(255, 255, 255, 0.85);
+  --bevel-bot: rgba(60, 70, 110, 0.18);
+  --sheen: rgba(255, 255, 255, 0.55);
+  --glare: rgba(255, 255, 255, 0.05);
+  --shadow-key: 0 1px 2px rgba(30, 34, 58, 0.2);
+  --shadow-ambient: 0 16px 40px -16px rgba(30, 34, 58, 0.26);
+  --shadow-ambient-card: 0 8px 24px -12px rgba(30, 34, 58, 0.26);
+  --shadow-contact: 0 0 0 1px rgba(30, 34, 58, 0.12);
+  --noise-glass: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.03'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+:root[data-theme="light"][data-role="agent"] {
+  --accent: #0e7490;
+  --accent-2: #06b6d4;
+  --accent-hover: #0c647c;
+  --accent-contrast: #ffffff;
+  --mode-glow: #0891b2;
+  --mode-glow-2: #0284c7;
+}

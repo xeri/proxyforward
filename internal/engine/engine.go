@@ -21,6 +21,7 @@ import (
 	"proxyforward/internal/gateway"
 	"proxyforward/internal/ipc"
 	"proxyforward/internal/link"
+	"proxyforward/internal/netid"
 	"proxyforward/internal/stats"
 	"proxyforward/internal/version"
 )
@@ -139,18 +140,27 @@ func (e *Engine) runSampler(ctx context.Context) {
 		case now := <-sample.C:
 			var appIn, appOut, linkIn, linkOut, upSince int64
 			var conns int
+			// Both roles run a heartbeat and measure RTT; -1 means unknown
+			// (no live link yet).
+			rtt := float64(-1)
 			if e.Agent != nil {
 				appIn, appOut = e.Agent.Conns.Totals()
 				linkIn, linkOut = e.Agent.LinkTotalBytes()
 				upSince = e.Agent.LinkUpSinceMs()
 				conns = e.Agent.Conns.Count()
+				if r := e.Agent.RTTMillis(); r > 0 {
+					rtt = float64(r)
+				}
 			} else {
 				appIn, appOut = e.Gateway.Conns.Totals()
 				linkIn, linkOut = e.Gateway.LinkTotalBytes()
 				upSince = e.Gateway.AgentLinkUpSinceMs()
 				conns = e.Gateway.Conns.Count()
+				if r := e.Gateway.RTTMillis(); r > 0 {
+					rtt = float64(r)
+				}
 			}
-			e.Stats.Sample(now, appIn, appOut, linkIn, linkOut, conns)
+			e.Stats.Sample(now, appIn, appOut, linkIn, linkOut, conns, rtt)
 			if upSince != 0 && upSince != prevUpSince {
 				e.Stats.LinkSessionStarted()
 			}
@@ -173,14 +183,42 @@ func (e *Engine) Peers() []stats.PeerStat {
 	return e.Stats.Peers()
 }
 
+// healthScore rolls jitter, packet loss, and link uptime into a single
+// green/yellow/red verdict for the GUI's tunnel-health badge. Unknown metrics
+// (-1) never push the score toward bad on their own; a brand-new link is only
+// "warn" until it has been up for a minute.
+func healthScore(linkUp bool, jitterMs, lossPct float64, upSinceMs int64) string {
+	if !linkUp {
+		return "bad"
+	}
+	var up time.Duration
+	if upSinceMs > 0 {
+		up = time.Since(time.UnixMilli(upSinceMs))
+	}
+	switch {
+	case lossPct > 5 || jitterMs > 100:
+		return "bad"
+	case lossPct > 1 || jitterMs > 30 || up < time.Minute:
+		return "warn"
+	default:
+		return "good"
+	}
+}
+
 // Status snapshots the engine for the IPC pipe and the GUI.
 func (e *Engine) Status() ipc.Status {
+	localHost, _ := os.Hostname()
 	st := ipc.Status{
 		Role:           string(e.cfg.Role),
 		Version:        version.String(),
 		PID:            os.Getpid(),
 		ConfigPath:     e.configPath,
 		ProcessStartMs: processStart.UnixMilli(),
+		LocalHostname:  localHost,
+		LocalLANIPs:    netid.LocalIPv4s(),
+		JitterMillis:   -1,
+		PacketLossPct:  -1,
+		HealthScore:    "unknown",
 	}
 	life := e.Stats.Lifetime()
 	st.AllTimeBytesIn, st.AllTimeBytesOut = life.BytesIn, life.BytesOut
@@ -190,9 +228,16 @@ func (e *Engine) Status() ipc.Status {
 	case e.Agent != nil:
 		st.LinkUp = e.Agent.LinkUp()
 		st.RTTMillis = e.Agent.RTTMillis()
+		st.JitterMillis = e.Agent.JitterMillis()
+		st.PacketLossPct = e.Agent.PacketLossPct()
 		st.LinkUpSinceMs = e.Agent.LinkUpSinceMs()
 		st.LinkBytesIn, st.LinkBytesOut = e.Agent.LinkSessionBytes()
 		st.PeerAddr = net.JoinHostPort(e.cfg.Agent.GatewayHost, strconv.Itoa(e.cfg.Agent.GatewayPort))
+		st.PeerHostname = e.Agent.PeerHostname()
+		st.PeerLANIPs = e.Agent.PeerLANIPs()
+		st.PublicIP = e.Agent.ObservedIP()
+		st.PeerPublicIP = e.cfg.Agent.GatewayHost
+		st.HealthScore = healthScore(st.LinkUp, st.JitterMillis, st.PacketLossPct, st.LinkUpSinceMs)
 		for _, t := range e.Agent.Tunnels() {
 			ts := ipc.TunnelStatus{ID: t.ID, Name: t.Name}
 			ts.PublicPort, _ = e.Agent.TunnelPublicPort(t.ID)
@@ -206,6 +251,19 @@ func (e *Engine) Status() ipc.Status {
 		st.LinkUpSinceMs = e.Gateway.AgentLinkUpSinceMs()
 		st.LinkBytesIn, st.LinkBytesOut = e.Gateway.LinkSessionBytes()
 		st.PeerAddr = e.Gateway.AgentRemoteIP()
+		st.PeerHostname = e.Gateway.AgentHostname()
+		st.PeerLANIPs = e.Gateway.AgentLANIPs()
+		st.PublicIP = e.cfg.Gateway.PublicHost
+		st.PeerPublicIP = e.Gateway.AgentRemoteIP()
+		// The gateway runs its own heartbeat toward the agent, so it reports the
+		// same link-quality stats. RTT/jitter/loss are only meaningful while an
+		// agent is connected.
+		if st.AgentConnected {
+			st.RTTMillis = e.Gateway.RTTMillis()
+			st.JitterMillis = e.Gateway.JitterMillis()
+			st.PacketLossPct = e.Gateway.PacketLossPct()
+		}
+		st.HealthScore = healthScore(st.AgentConnected, st.JitterMillis, st.PacketLossPct, st.LinkUpSinceMs)
 		for _, t := range e.Gateway.Tunnels() {
 			st.Tunnels = append(st.Tunnels, ipc.TunnelStatus{
 				ID: t.ID, Name: t.Name, PublicPort: t.PublicPort,

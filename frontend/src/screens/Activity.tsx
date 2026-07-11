@@ -1,18 +1,18 @@
 import {useEffect, useMemo, useRef, useState} from 'react'
 import {ExportDiagnostics, LogsSince} from '../../wailsjs/go/app/App'
 import {logging} from '../../wailsjs/go/models'
-import {Badge, Button, Card, EmptyState, Select, TextInput} from '../components/ui'
-import {IconExternal, IconLogs} from '../components/icons'
+import {Badge, Button, Card, Checkbox, EmptyState, PageHeader, Select, TextInput, copyText} from '../components/ui'
+import {IconExternal, IconLogs, IconTerminal} from '../components/icons'
 
 type Entry = logging.Entry
 const CAP = 2000
 const LEVELS = ['debug', 'info', 'warn', 'error']
 
-/** Logs: tails the in-memory ring, filterable by level and text, with copy and
- * one-click diagnostics export. */
-export function Logs() {
+/** Activity: a live tail of the engine's log ring, filterable by level and
+ * text, with copy and one-click diagnostics export. */
+export function Activity({attached}: {attached: boolean}) {
   const [entries, setEntries] = useState<Entry[]>([])
-  const [level, setLevel] = useState('all')
+  const [level, setLevel] = useState('info')
   const [query, setQuery] = useState('')
   const [follow, setFollow] = useState(true)
   const [exportMsg, setExportMsg] = useState('')
@@ -52,10 +52,7 @@ export function Logs() {
     if (follow && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
   }, [filtered, follow])
 
-  const copyAll = () => {
-    const text = filtered.map(fmtLine).join('\n')
-    navigator.clipboard.writeText(text)
-  }
+  const copyAll = () => copyText(filtered.map(fmtLine).join('\n'))
   const doExport = async () => {
     setExportMsg('')
     try {
@@ -66,29 +63,36 @@ export function Logs() {
 
   return (
     <div className="pf-stagger space-y-3">
+      <PageHeader
+        title="Activity"
+        subtitle="A live tail of the engine's log."
+        action={<Button variant="ghost" size="sm" onClick={doExport}><IconExternal size={14} /> Export diagnostics</Button>}
+      />
+
       <div className="flex flex-wrap items-center gap-2">
         <div className="w-36"><Select value={level} onChange={setLevel} options={[
           {value: 'all', label: 'All levels'},
           ...LEVELS.map(l => ({value: l, label: l[0].toUpperCase() + l.slice(1) + '+'})),
         ]} /></div>
         <div className="min-w-40 flex-1"><TextInput value={query} onChange={setQuery} placeholder="Filter messages…" /></div>
-        <label className="flex items-center gap-1.5 text-xs text-[var(--text-2)]">
-          <input type="checkbox" checked={follow} onChange={e => setFollow(e.target.checked)} /> Follow
-        </label>
+        <Checkbox checked={follow} onChange={setFollow} label="Follow" />
         <Button variant="ghost" size="sm" onClick={copyAll}>Copy</Button>
-        <Button variant="ghost" size="sm" onClick={doExport}><IconExternal size={14} /> Diagnostics</Button>
       </div>
 
-      {exportMsg && <div className="text-xs text-[var(--text-3)]">{exportMsg}</div>}
+      {exportMsg && <div className="pf-fade select-text text-xs text-[var(--text-3)]">{exportMsg}</div>}
 
       <Card pad={false} className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2 text-xs text-[var(--text-3)]">
           <span>Showing {filtered.length} of {entries.length} lines</span>
           <Badge tone="neutral">ring · {CAP} max</Badge>
         </div>
-        <div ref={bodyRef} className="h-[calc(100vh-19rem)] overflow-y-auto bg-[var(--bg-2)] px-3 py-2 font-mono text-[12px] leading-relaxed">
+        <div ref={bodyRef} className="pf-well-flush h-[calc(100vh-21rem)] select-text overflow-y-auto px-3 py-2 font-mono text-[12px] leading-relaxed">
           {filtered.length === 0
-            ? <EmptyState icon={<IconLogs size={26} />} title="No log lines" hint="Activity will stream here as the engine runs." />
+            ? (attached && entries.length === 0
+              ? <EmptyState icon={<IconTerminal size={26} />} title="The service keeps its own logs"
+                  hint="This window views a background service, which logs to its own files. Export diagnostics to collect them." />
+              : <EmptyState icon={<IconLogs size={26} />} title="No log lines"
+                  hint="Activity streams here as the engine runs." />)
             : filtered.map(e => <LogLine key={e.seq} e={e} />)}
         </div>
       </Card>
@@ -107,7 +111,7 @@ function LogLine({e}: {e: Entry}) {
     <div className="pf-fade flex items-baseline gap-2 whitespace-pre-wrap break-words py-0.5 transition-colors duration-150 hover:bg-[var(--panel)]/40">
       <span className="shrink-0 text-[var(--text-3)]">{time}</span>
       <span
-        className="w-12 shrink-0 rounded px-1 text-center text-[10px] font-bold uppercase leading-4"
+        className="w-12 shrink-0 rounded-[var(--r-xs)] px-1 text-center text-[10px] font-bold uppercase leading-4"
         style={{color: c, background: `color-mix(in srgb, ${c} 12%, transparent)`}}
       >{e.level}</span>
       <span className="min-w-0 flex-1 text-[var(--text)]">

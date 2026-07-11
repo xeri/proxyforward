@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,8 @@ import (
 	"proxyforward/internal/conntrack"
 	"proxyforward/internal/control"
 	"proxyforward/internal/link"
+	"proxyforward/internal/linkquality"
+	"proxyforward/internal/netid"
 	"proxyforward/internal/netnotify"
 	"proxyforward/internal/proxyproto"
 	"proxyforward/internal/relay"
@@ -38,6 +41,13 @@ const (
 	controlIdleTimeout  = 15 * time.Second
 	controlWriteTimeout = 10 * time.Second
 	openConnTimeout     = 10 * time.Second
+
+	// lossWindow is how many finalized heartbeats the packet-loss ratio
+	// averages over; lossTimeout is how long a ping waits for its pong before
+	// counting as lost (two intervals tolerates one reorder without a false
+	// positive, and lands well inside controlIdleTimeout).
+	lossWindow  = 32
+	lossTimeout = 2 * pingInterval
 )
 
 // Fatal configuration errors: retrying cannot fix these, so Run returns
@@ -55,6 +65,10 @@ type Agent struct {
 
 	// rttMillis is the latest heartbeat round-trip, for status surfaces.
 	rttMillis atomic.Int64
+	// peer holds the gateway's identity (hostname/LAN IPs) and our own public
+	// IP as the gateway observed it, learned in the hello exchange. nil while
+	// the link is down.
+	peer atomic.Pointer[peerIdentity]
 	// linkUp reflects an established, authenticated session.
 	linkUp atomic.Bool
 	// linkUpSinceMs is when the current session came up (unix ms; 0 = down).
@@ -105,6 +119,56 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 func (a *Agent) LinkUp() bool     { return a.linkUp.Load() }
 func (a *Agent) RTTMillis() int64 { return a.rttMillis.Load() }
+
+// peerIdentity captures what the agent learned about the gateway (and about
+// itself) during the hello exchange.
+type peerIdentity struct {
+	hostname   string
+	localIPs   []string
+	observedIP string // our public IP as the gateway saw it
+}
+
+// PeerHostname reports the gateway's hostname, or "" while the link is down.
+func (a *Agent) PeerHostname() string {
+	if p := a.peer.Load(); p != nil {
+		return p.hostname
+	}
+	return ""
+}
+
+// PeerLANIPs reports the gateway's LAN IPv4s, or nil while the link is down.
+func (a *Agent) PeerLANIPs() []string {
+	if p := a.peer.Load(); p != nil {
+		return p.localIPs
+	}
+	return nil
+}
+
+// ObservedIP reports this agent's public IP as the gateway saw it, or "" while
+// the link is down.
+func (a *Agent) ObservedIP() string {
+	if p := a.peer.Load(); p != nil {
+		return p.observedIP
+	}
+	return ""
+}
+
+// JitterMillis reports the current control-link jitter EWMA in milliseconds,
+// or -1 when unknown (link down or too few samples).
+func (a *Agent) JitterMillis() float64 {
+	if s := a.curSession.Load(); s != nil && s.quality != nil {
+		return s.quality.JitterMillis()
+	}
+	return -1
+}
+
+// PacketLossPct reports the control-link ping loss (0–100), or -1 when unknown.
+func (a *Agent) PacketLossPct() float64 {
+	if s := a.curSession.Load(); s != nil && s.quality != nil {
+		return s.quality.LossPct()
+	}
+	return -1
+}
 
 // LinkUpSinceMs reports when the current session was established (unix
 // millis), or 0 while the link is down.
@@ -215,6 +279,7 @@ func (a *Agent) runSession(ctx context.Context) error {
 		offer = control.SupportedCapabilities
 	}
 	conn.SetDeadline(time.Now().Add(helloTimeout))
+	hn, _ := os.Hostname()
 	err = control.WriteMsg(conn, control.TypeHello, control.Hello{
 		ProtocolVersion: control.ProtocolVersion,
 		Kind:            control.KindControl,
@@ -222,6 +287,8 @@ func (a *Agent) runSession(ctx context.Context) error {
 		Token:           a.cfg.Agent.Token,
 		AppVersion:      version.String(),
 		Capabilities:    offer,
+		Hostname:        hn,
+		LocalIPs:        netid.LocalIPv4s(),
 	})
 	if err != nil {
 		return fmt.Errorf("send hello: %w", err)
@@ -238,7 +305,8 @@ func (a *Agent) runSession(ctx context.Context) error {
 			return err
 		}
 		caps = control.NewCapSet(ok.Capabilities)
-		a.logger.Info("connected to gateway", "gateway", addr, "generation", ok.Generation, "gateway_version", ok.AppVersion, "capabilities", ok.Capabilities)
+		a.peer.Store(&peerIdentity{hostname: ok.Hostname, localIPs: ok.LocalIPs, observedIP: ok.ObservedIP})
+		a.logger.Info("connected to gateway", "gateway", addr, "generation", ok.Generation, "gateway_version", ok.AppVersion, "gateway_host", ok.Hostname, "observed_ip", ok.ObservedIP, "capabilities", ok.Capabilities)
 	case control.TypeHelloErr:
 		he, err := control.Decode[control.HelloErr](env)
 		if err != nil {
@@ -277,9 +345,10 @@ func (a *Agent) runSession(ctx context.Context) error {
 	}
 	defer ctrl.Close()
 
-	sess := &session{agent: a, mux: mux, ctrl: ctrl, caps: caps}
+	sess := &session{agent: a, mux: mux, ctrl: ctrl, caps: caps, quality: linkquality.New(lossWindow)}
 	a.curSession.Store(sess)
 	defer a.curSession.Store(nil)
+	defer a.peer.Store(nil)
 	if err := sess.registerTunnels(); err != nil {
 		return err
 	}
@@ -302,9 +371,15 @@ type session struct {
 	caps control.CapSet
 
 	writeMu sync.Mutex
-	pingSeq uint64
+	pingSeq atomic.Uint64
 	// syncSeq numbers SyncTunnels frames so stale SyncResults are dropped.
 	syncSeq atomic.Uint64
+
+	// quality derives jitter/packet-loss from the ping/pong heartbeat.
+	quality *linkquality.Tracker
+	// probe, when non-nil, is an in-flight on-demand latency measurement that
+	// steals matching pongs; see probe.go.
+	probe atomic.Pointer[linkquality.ProbeCollector]
 
 	loopWG sync.WaitGroup // control reader + stream acceptor
 	dataWG sync.WaitGroup // active data-stream splices
@@ -424,8 +499,11 @@ func (s *session) serve(ctx context.Context) error {
 			s.mux.Close()
 			return err
 		case <-ticker.C:
-			s.pingSeq++
-			err := s.write(control.TypePing, control.Ping{Seq: s.pingSeq, SentUnixNano: time.Now().UnixNano()})
+			s.quality.Sweep(time.Now(), lossTimeout)
+			seq := s.pingSeq.Add(1)
+			sent := time.Now()
+			s.quality.OnSent(seq, sent)
+			err := s.write(control.TypePing, control.Ping{Seq: seq, SentUnixNano: sent.UnixNano()})
 			if err != nil {
 				s.mux.Close()
 				return fmt.Errorf("send ping: %w", err)
@@ -436,13 +514,28 @@ func (s *session) serve(ctx context.Context) error {
 
 func (s *session) handleControlMsg(env *control.Envelope) error {
 	switch env.Type {
+	case control.TypePing:
+		// The gateway pings us too (bidirectional heartbeat) so it can measure
+		// its own RTT/jitter/loss; echo with our receive time for its one-way
+		// estimate.
+		ping, err := control.Decode[control.Ping](env)
+		if err != nil {
+			return err
+		}
+		return s.write(control.TypePong, control.Pong{Seq: ping.Seq, SentUnixNano: ping.SentUnixNano, RecvUnixNano: time.Now().UnixNano()})
+
 	case control.TypePong:
 		pong, err := control.Decode[control.Pong](env)
 		if err != nil {
 			return err
 		}
-		rtt := time.Since(time.Unix(0, pong.SentUnixNano))
+		now := time.Now()
+		rtt := now.Sub(time.Unix(0, pong.SentUnixNano))
 		s.agent.rttMillis.Store(rtt.Milliseconds())
+		s.quality.OnPong(pong.Seq, rtt)
+		if pc := s.probe.Load(); pc != nil {
+			pc.Record(*pong, now)
+		}
 		return nil
 
 	case control.TypeRegisterOK:

@@ -24,7 +24,7 @@ func fresh(t *testing.T) (*Store, string) {
 // deterministically over 3..6 so conn OHLC survives aggregation checks.
 func feed(s *Store, start int64, stepMs, durMs int64, inRate, outRate int64) (appIn, appOut int64) {
 	for t := start; t <= start+durMs; t += stepMs {
-		s.Sample(time.UnixMilli(t), appIn, appOut, appIn+appIn/10, appOut+appOut/10, int(3+((t-start)/stepMs)%4))
+		s.Sample(time.UnixMilli(t), appIn, appOut, appIn+appIn/10, appOut+appOut/10, int(3+((t-start)/stepMs)%4), 25)
 		appIn += inRate * stepMs / 1000
 		appOut += outRate * stepMs / 1000
 	}
@@ -85,11 +85,11 @@ func TestAggregationOHLC(t *testing.T) {
 	var out int64
 	for i, r := range rates {
 		ts := base + int64(i+1)*100
-		s.Sample(time.UnixMilli(ts), 0, out, 0, 0, 2)
+		s.Sample(time.UnixMilli(ts), 0, out, 0, 0, 2, -1)
 		out += r / 10 // bytes accrued in the NEXT 100ms at rate r
 	}
 	// One more sample to land the last delta.
-	s.Sample(time.UnixMilli(base+500), 0, out, 0, 0, 2)
+	s.Sample(time.UnixMilli(base+500), 0, out, 0, 0, 2, -1)
 
 	// Aggregating the four 100ms buckets down to ≤2 groups (groups align to
 	// absolute boundaries, so the window may straddle two): byte sums must be
@@ -160,7 +160,7 @@ func TestPersistRoundTrip(t *testing.T) {
 	// The cascade must resume: new samples fold into the restored tiers.
 	in, out := int64(50_000*600), int64(500_000*600)
 	for ts := end + 1000; ts <= end+60_000; ts += 1000 {
-		s2.Sample(time.UnixMilli(ts), in, out, 0, 0, 2)
+		s2.Sample(time.UnixMilli(ts), in, out, 0, 0, 2, -1)
 		in += 50_000
 		out += 500_000
 	}
@@ -188,20 +188,20 @@ func TestPeerEviction(t *testing.T) {
 
 func TestRebaselineOnCounterReset(t *testing.T) {
 	s, _ := fresh(t)
-	s.Sample(time.UnixMilli(base), 1_000_000, 2_000_000, 0, 0, 2)
-	s.Sample(time.UnixMilli(base+100), 1_001_000, 2_010_000, 0, 0, 2)
+	s.Sample(time.UnixMilli(base), 1_000_000, 2_000_000, 0, 0, 2, -1)
+	s.Sample(time.UnixMilli(base+100), 1_001_000, 2_010_000, 0, 0, 2, -1)
 	life := s.Lifetime()
 	if life.BytesIn != 1000 || life.BytesOut != 10_000 {
 		t.Fatalf("lifetime after 2 samples = %+v", life)
 	}
 	// Engine restart: totals drop to near zero. Must not go negative or spike.
-	s.Sample(time.UnixMilli(base+200), 500, 700, 0, 0, 2)
+	s.Sample(time.UnixMilli(base+200), 500, 700, 0, 0, 2, -1)
 	life = s.Lifetime()
 	if life.BytesIn != 1000 || life.BytesOut != 10_000 {
 		t.Fatalf("lifetime after reset = %+v, want unchanged", life)
 	}
 	// Deltas accumulate again from the new baseline.
-	s.Sample(time.UnixMilli(base+300), 1500, 1700, 0, 0, 2)
+	s.Sample(time.UnixMilli(base+300), 1500, 1700, 0, 0, 2, -1)
 	life = s.Lifetime()
 	if life.BytesIn != 2000 || life.BytesOut != 11_000 {
 		t.Fatalf("lifetime after re-baseline = %+v", life)
@@ -245,10 +245,10 @@ func TestHistoryEmptyAndAll(t *testing.T) {
 func TestConnGaugeSampleAndMerge(t *testing.T) {
 	s, _ := fresh(t)
 	// Baseline sample (no bucket), then three samples with varying counts.
-	s.Sample(time.UnixMilli(base), 0, 0, 0, 0, 3)
-	s.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 5)
-	s.Sample(time.UnixMilli(base+200), 0, 2000, 0, 0, 2)
-	s.Sample(time.UnixMilli(base+300), 0, 3000, 0, 0, 7)
+	s.Sample(time.UnixMilli(base), 0, 0, 0, 0, 3, -1)
+	s.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 5, -1)
+	s.Sample(time.UnixMilli(base+200), 0, 2000, 0, 0, 2, -1)
+	s.Sample(time.UnixMilli(base+300), 0, 3000, 0, 0, 7, -1)
 
 	// Raw T0 buckets: the gauge is flat within a slot.
 	h := s.historyAt(base+400, 15_000, 300)
@@ -301,6 +301,84 @@ func TestConnCascadeToCoarseTiers(t *testing.T) {
 	}
 }
 
+func TestRttGaugeSampleAndMerge(t *testing.T) {
+	s, _ := fresh(t)
+	// Baseline (no bucket), then three samples with varying RTTs. A -1 reading
+	// (no link) must record as unknown, not a real 0 ms.
+	s.Sample(time.UnixMilli(base), 0, 0, 0, 0, 3, 30)
+	s.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 5, 40)
+	s.Sample(time.UnixMilli(base+200), 0, 2000, 0, 0, 2, 20)
+	s.Sample(time.UnixMilli(base+300), 0, 3000, 0, 0, 7, 55)
+
+	// Raw T0 buckets: the gauge is flat within a slot.
+	h := s.historyAt(base+400, 15_000, 300)
+	want := []float64{40, 20, 55}
+	if len(h.Buckets) != len(want) {
+		t.Fatalf("raw bucket count = %d, want %d", len(h.Buckets), len(want))
+	}
+	for i, b := range h.Buckets {
+		if b.RttO != want[i] || b.RttH != want[i] || b.RttL != want[i] || b.RttC != want[i] {
+			t.Fatalf("bucket %d rtt OHLC = %f/%f/%f/%f, want all %f", i, b.RttO, b.RttH, b.RttL, b.RttC, want[i])
+		}
+	}
+
+	// Regrouped: o = first, h = max, l = min, c = last.
+	h = s.historyAt(base+400, 400, 1)
+	m := h.Buckets[len(h.Buckets)-1]
+	var lo, hi float64 = 1 << 30, -1
+	for _, b := range h.Buckets {
+		lo = min(lo, b.RttL)
+		hi = max(hi, b.RttH)
+	}
+	if hi != 55 || lo != 20 {
+		t.Fatalf("merged rtt H/L = %f/%f, want 55/20", hi, lo)
+	}
+	if m.RttC != 55 {
+		t.Fatalf("merged RttC = %f, want 55", m.RttC)
+	}
+	if f := h.Buckets[0].RttO; f != 40 {
+		t.Fatalf("merged RttO = %f, want 40", f)
+	}
+}
+
+func TestRttUnknownWhenNonPositive(t *testing.T) {
+	s, _ := fresh(t)
+	s.Sample(time.UnixMilli(base), 0, 0, 0, 0, 2, -1)
+	s.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 2, -1)
+	h := s.historyAt(base+200, 15_000, 300)
+	if len(h.Buckets) == 0 {
+		t.Fatal("no buckets")
+	}
+	if b := h.Buckets[0]; b.RttC != -1 {
+		t.Fatalf("non-positive RTT should record unknown (-1), got %f", b.RttC)
+	}
+}
+
+func TestStatsV2ToV3Migration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stats.json")
+	// A v2 file: 15-element packed rows (conn gauge present, no RTT gauge).
+	v2 := `{"v":2,"lifetime":{"bytesIn":1000,"bytesOut":10000,"firstRunMs":1},"peers":[],` +
+		`"tiers":{"t2":[[` + strconv.FormatInt(base, 10) + `,1000,10000,10,20,5,15,100,200,50,150,4,6,3,5]]}}`
+	if err := os.WriteFile(path, []byte(v2), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := Open(path, nil)
+	if _, err := os.Stat(path + ".bad"); err == nil {
+		t.Fatal("v2 file was renamed aside instead of migrated")
+	}
+	h := s.historyAt(base+15_000, 3_600_000, 300)
+	if len(h.Buckets) != 1 {
+		t.Fatalf("restored bucket count = %d, want 1", len(h.Buckets))
+	}
+	b := h.Buckets[0]
+	if b.ConnC != 5 || b.ConnH != 6 || b.ConnL != 3 {
+		t.Fatalf("v2 conn gauge should survive migration, got %+v", b)
+	}
+	if b.RttO != -1 || b.RttH != -1 || b.RttL != -1 || b.RttC != -1 {
+		t.Fatalf("v2 rtt gauge should be unknown (-1), got %+v", b)
+	}
+}
+
 func TestStatsV1Migration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "stats.json")
 	// A v1 file: 11-element packed rows, no connection gauge.
@@ -328,6 +406,9 @@ func TestStatsV1Migration(t *testing.T) {
 	if b.ConnO != -1 || b.ConnH != -1 || b.ConnL != -1 || b.ConnC != -1 {
 		t.Fatalf("v1 conn gauge should be unknown (-1), got %+v", b)
 	}
+	if b.RttO != -1 || b.RttH != -1 || b.RttL != -1 || b.RttC != -1 {
+		t.Fatalf("v1 rtt gauge should be unknown (-1), got %+v", b)
+	}
 
 	// Rewrite and reload: the sentinel must survive a v2 round-trip.
 	if err := s.Flush(); err != nil {
@@ -337,8 +418,8 @@ func TestStatsV1Migration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"v":2`) {
-		t.Fatalf("rewritten file is not v2: %.100s", data)
+	if !strings.Contains(string(data), `"v":3`) {
+		t.Fatalf("rewritten file is not v3: %.100s", data)
 	}
 	s2 := Open(path, nil)
 	h = s2.historyAt(base+15_000, 3_600_000, 300)
@@ -348,11 +429,11 @@ func TestStatsV1Migration(t *testing.T) {
 
 	// New samples inside the migrated bucket's 15s slot cascade into it; the
 	// unknown (-1) side must adopt the first known value, not poison it.
-	s2.Sample(time.UnixMilli(base+100), 0, 0, 0, 0, 4) // baseline only
+	s2.Sample(time.UnixMilli(base+100), 0, 0, 0, 0, 4, -1) // baseline only
 	var out int64
 	for ts := base + 200; ts <= base+2_500; ts += 100 {
 		out += 50
-		s2.Sample(time.UnixMilli(ts), 0, out, 0, 0, 4)
+		s2.Sample(time.UnixMilli(ts), 0, out, 0, 0, 4, -1)
 	}
 	h = s2.historyAt(base+2_500, 3_600_000, 300)
 	if len(h.Buckets) != 1 {

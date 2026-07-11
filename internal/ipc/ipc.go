@@ -61,6 +61,26 @@ type Status struct {
 	LinkUp    bool  `json:"linkUp,omitempty"`
 	RTTMillis int64 `json:"rttMillis,omitempty"`
 
+	// Link quality (agent-side; the gateway reports -1/unknown). Jitter and
+	// packet loss drive the tunnel health badge alongside RTT and uptime.
+	JitterMillis  float64 `json:"jitterMillis"`
+	PacketLossPct float64 `json:"packetLossPct"`
+	// HealthScore is the green/yellow/red rollup: good|warn|bad|unknown.
+	HealthScore string `json:"healthScore,omitempty"`
+
+	// Identity of this machine and the peer, for the GUI's identity badges.
+	// LocalHostname is always this machine; the Peer* fields populate once the
+	// link is up (empty against a legacy peer that sent no hostname).
+	LocalHostname string   `json:"localHostname,omitempty"`
+	PeerHostname  string   `json:"peerHostname,omitempty"`
+	LocalLANIPs   []string `json:"localLanIps,omitempty"`
+	PeerLANIPs    []string `json:"peerLanIps,omitempty"`
+	// PublicIP is this machine's public address; PeerPublicIP is the other
+	// end's. On the agent, PublicIP is the gateway-observed source address and
+	// PeerPublicIP is the configured gateway host; on the gateway they swap.
+	PublicIP     string `json:"publicIp,omitempty"`
+	PeerPublicIP string `json:"peerPublicIp,omitempty"`
+
 	// Gateway-side fields.
 	AgentConnected bool `json:"agentConnected,omitempty"`
 

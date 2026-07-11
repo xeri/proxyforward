@@ -9,6 +9,10 @@ export function BandwidthHistory(arg1:number,arg2:number):Promise<stats.HistoryR
 
 export function ChooseAndInspectSetupFile():Promise<app.SetupFileInfo>;
 
+export function CreatorAvatar():Promise<string>;
+
+export function CreatorInfo():Promise<Record<string, string>>;
+
 export function ExportDiagnostics():Promise<string>;
 
 export function ExportSetup(arg1:string):Promise<string>;
@@ -25,7 +29,11 @@ export function InstallService():Promise<void>;
 
 export function LogsSince(arg1:number):Promise<Array<logging.Entry>>;
 
+export function MeasureLatency():Promise<app.LatencyResult>;
+
 export function OpenConfigDir():Promise<void>;
+
+export function OpenCreatorURL():Promise<void>;
 
 export function PairingCode():Promise<string>;
 

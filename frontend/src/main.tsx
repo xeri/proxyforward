@@ -2,11 +2,11 @@ import React from 'react'
 import {createRoot} from 'react-dom/client'
 import './style.css'
 import App from './App'
+import {initTheme} from './theme'
 
-// Apply the persisted theme before first paint to avoid a flash. The backend
-// config is the source of truth; localStorage mirrors it for instant startup.
-const saved = localStorage.getItem('pf-theme')
-document.documentElement.setAttribute('data-theme', saved === 'light' ? 'light' : 'dark')
+// Resolve and apply the persisted theme before first paint (no flash). The
+// backend config is the source of truth; localStorage mirrors it for startup.
+initTheme()
 
 function mount() {
   createRoot(document.getElementById('root')!).render(

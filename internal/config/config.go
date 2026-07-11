@@ -115,7 +115,7 @@ type LoggingConfig struct {
 }
 
 type UIConfig struct {
-	Theme          string `toml:"theme"` // dark|light
+	Theme          string `toml:"theme"` // dark|light|system
 	MinimizeToTray bool   `toml:"minimize_to_tray"`
 	Autostart      bool   `toml:"autostart"`
 }
@@ -256,9 +256,9 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("logging.level: unknown level %q", c.Logging.Level))
 	}
 	switch c.UI.Theme {
-	case "dark", "light":
+	case "dark", "light", "system":
 	default:
-		errs = append(errs, fmt.Errorf("ui.theme: must be dark or light, got %q", c.UI.Theme))
+		errs = append(errs, fmt.Errorf("ui.theme: must be dark, light or system, got %q", c.UI.Theme))
 	}
 	if c.Metrics.PrometheusEnabled {
 		if _, _, err := net.SplitHostPort(c.Metrics.PrometheusAddr); err != nil {

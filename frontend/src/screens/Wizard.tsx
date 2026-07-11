@@ -1,24 +1,27 @@
 import {useEffect, useMemo, useState} from 'react'
 import {GetConfig, PairingCode, SetupAgent, SetupGateway} from '../../wailsjs/go/app/App'
-import {Button, Codebox, CopyButton, ErrorBanner, Field, TextInput} from '../components/ui'
+import {Button, Codebox, CopyButton, ErrorBanner, Field, Spinner, TextInput} from '../components/ui'
 import {ImportSetupFlow} from '../components/SetupBackup'
-import {IconCheck, IconGlobe, IconRefresh, IconServer, IconShield} from '../components/icons'
+import {IconBroadcast, IconCheck, IconChip, IconGlobe, IconRefresh, IconServer, IconShield, IconSpark} from '../components/icons'
+import {UIStatus} from '../state'
 
 const DEFAULT_CONTROL_PORT = 8474
 
-type Step = 'role' | 'gateway' | 'gateway-done' | 'agent' | 'import'
+type Act = 'role' | 'gateway' | 'agent' | 'import' | 'live'
+type Kind = 'gateway' | 'agent'
 
-/** First-run setup: pick a role, then show the pairing code (gateway) or
- * paste one (agent). Designed so a non-technical user can finish in under a
- * minute — the pairing code is the only thing that moves between machines. */
-export function Wizard() {
-  const [step, setStep] = useState<Step>('role')
+/** First-run setup in three acts: choose a role, configure it, go live. The
+ * final act is driven by real ticks — it listens for the actual handshake
+ * before handing over to the console. Designed so a non-technical user can
+ * finish in under a minute; the pairing code is the only thing that moves
+ * between machines. */
+export function Wizard({status, onDone}: {status: UIStatus | null; onDone: () => void}) {
+  const [act, setAct] = useState<Act>('role')
+  const [kind, setKind] = useState<Kind>('gateway')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
   const [publicHost, setPublicHost] = useState('')
-  const [code, setCode] = useState('')
-
   const [pairing, setPairing] = useState('')
   const [localAddr, setLocalAddr] = useState('127.0.0.1:25565')
   const [publicPort, setPublicPort] = useState('25565')
@@ -32,92 +35,83 @@ export function Wizard() {
       .catch(() => {})
   }, [])
 
-  useEffect(() => {
-    if (step !== 'gateway-done' || code) return
-    let cancelled = false
-    const poll = async (attempt: number) => {
-      try {
-        const c = await PairingCode()
-        if (!cancelled) setCode(c)
-      } catch (e) {
-        if (!cancelled && attempt < 20) setTimeout(() => poll(attempt + 1), 250)
-        else if (!cancelled) setErr(String(e))
-      }
-    }
-    poll(0)
-    return () => { cancelled = true }
-  }, [step, code])
+  // Preview a role's ambient hue on hover — the whole backdrop leans in.
+  const preview = (role: '' | Kind) => {
+    document.documentElement.dataset.role = role || 'unset'
+  }
 
   const doGateway = async () => {
     setBusy(true); setErr('')
-    try { await SetupGateway(publicHost.trim()); setStep('gateway-done') }
+    try { await SetupGateway(publicHost.trim()); setKind('gateway'); setAct('live') }
     catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
   const doAgent = async () => {
     setBusy(true); setErr('')
-    try { await SetupAgent(pairing.trim(), localAddr.trim(), parseInt(publicPort, 10) || 25565) }
-    catch (e) { setErr(String(e)) } finally { setBusy(false) }
+    try {
+      await SetupAgent(pairing.trim(), localAddr.trim(), parseInt(publicPort, 10) || 25565)
+      setKind('agent'); setAct('live')
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
   const parsed = useMemo(() => parsePairing(pairing), [pairing])
 
   return (
-    <div className="flex h-full items-center justify-center p-6">
+    <div className="flex h-full items-center justify-center overflow-y-auto p-6">
       <div className="pf-stagger w-full max-w-xl">
-        {/* Brand */}
+        {/* Brand hero */}
         <div className="mb-7 text-center">
-          <div
-            className="pf-breathe mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl text-white"
-            style={{background: 'linear-gradient(135deg, var(--accent), var(--accent-2))'}}
-          >
+          <div className="pf-breathe mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-[var(--r-xl)] bg-[var(--accent)] text-[var(--accent-contrast)]">
             <IconServer size={28} />
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Welcome to proxyforward</h1>
-          <p className="mt-1.5 text-sm text-[var(--text-2)]">
-            Expose a Minecraft server behind NAT through a machine that can port-forward.
+          <h1 className="text-[26px] font-semibold leading-tight tracking-tight">Two machines. One address.</h1>
+          <p className="mt-2 text-sm text-[var(--text-2)]">
+            Publish a Minecraft server from behind NAT through any machine that can port-forward.
           </p>
         </div>
 
-        <Stepper step={step} />
+        <Stepper act={act} />
 
         {err && <div className="mb-4"><ErrorBanner message={err} onDismiss={() => setErr('')} /></div>}
 
-        {step === 'role' && (
+        {act === 'role' && (
           <>
             <div className="pf-stagger grid grid-cols-1 gap-3 sm:grid-cols-2">
               <RoleCard
-                icon={<IconServer size={22} />} title="This hosts Minecraft"
-                sub="Agent — dials out to the gateway. No port forwarding needed here."
-                onClick={() => { setErr(''); setStep('agent') }} />
+                icon={<IconChip size={22} />} hue="#22d3ee"
+                title="This hosts Minecraft"
+                sub="Agent — dials out to the gateway. Nothing to forward here."
+                onHover={on => preview(on ? 'agent' : '')}
+                onClick={() => { setErr(''); setAct('agent') }} />
               <RoleCard
-                icon={<IconGlobe size={22} />} title="This faces the internet"
+                icon={<IconBroadcast size={22} />} hue="#8b5cf6"
+                title="This faces the internet"
                 sub="Gateway — players connect here; it relays traffic to the agent."
-                onClick={() => { setErr(''); setStep('gateway') }} />
+                onHover={on => preview(on ? 'gateway' : '')}
+                onClick={() => { setErr(''); setAct('gateway') }} />
             </div>
-            <button onClick={() => { setErr(''); setStep('import') }}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--border)] px-4 py-2.5 text-sm text-[var(--text-2)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--panel)] hover:text-[var(--text)]">
+            <button onClick={() => { setErr(''); setAct('import') }}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-[var(--r-lg)] border border-dashed border-[var(--border)] px-4 py-2.5 text-sm text-[var(--text-2)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--panel)] hover:text-[var(--text)]">
               <IconRefresh size={15} /> Restore from another machine — import a .pfsetup backup
             </button>
           </>
         )}
 
-        {step === 'import' && (
+        {act === 'import' && (
           <Panel>
             <p className="mb-4 text-sm text-[var(--text-2)]">
-              Already set up on another machine or OS install? Import the setup file exported there
-              (Settings → Backup) — pairing, tunnels, and statistics carry over, and the gateway keeps
-              recognizing this identity.
+              Already set up elsewhere? Import the setup file exported there (Settings → Backup) —
+              pairing, tunnels, and statistics carry over, and the gateway keeps recognizing this identity.
             </p>
             <ImportSetupFlow isWizard />
             <div className="mt-5">
-              <Button variant="ghost" onClick={() => setStep('role')}>Back</Button>
+              <Button variant="ghost" onClick={() => setAct('role')}>Back</Button>
             </div>
           </Panel>
         )}
 
-        {step === 'gateway' && (
+        {act === 'gateway' && (
           <Panel>
-            <Field label="Public address" hint="The hostname or IP players and the agent will use. A plain IP works; a stable DNS name (DDNS works) survives IP changes — Minecraft clients cache DNS, so stability matters. You can change this later.">
+            <Field label="Public address" hint="The hostname or IP players and the agent will use. A plain IP works; a stable DNS name (DDNS is fine) survives IP changes — Minecraft clients cache DNS, so stability matters. You can change this later.">
               <TextInput value={publicHost} onChange={setPublicHost} placeholder="play.example.com" autoFocus onEnter={doGateway} />
             </Field>
 
@@ -128,51 +122,19 @@ export function Wizard() {
                 {port: controlPort, label: 'Control link', why: 'the agent (Minecraft machine) connects here'},
                 {port: 25565, label: 'Minecraft', why: 'players connect here — or the public port you pick on the agent'},
               ]}
-              footnote="Windows Firewall also needs to allow these inbound — the app offers a one-click rule after setup (Settings → Windows integration)."
+              footnote="Windows Firewall also needs to allow these inbound — the app offers a one-click rule after setup (Settings → System)."
             />
 
             <div className="mt-5 flex justify-between">
-              <Button variant="ghost" onClick={() => setStep('role')}>Back</Button>
+              <Button variant="ghost" onClick={() => setAct('role')}>Back</Button>
               <Button onClick={doGateway} disabled={busy}>{busy ? 'Starting…' : 'Start gateway'}</Button>
             </div>
           </Panel>
         )}
 
-        {step === 'gateway-done' && (
+        {act === 'agent' && (
           <Panel>
-            <div className="mb-3 flex items-center gap-2 text-[var(--good)]">
-              <IconCheck size={18} /> <span className="font-medium">Gateway is running</span>
-            </div>
-            <p className="mb-2 text-sm text-[var(--text-2)]">
-              Copy this pairing code and paste it into proxyforward on your Minecraft machine:
-            </p>
-            {code
-              ? <Codebox text={code} action={<CopyButton text={code} />} />
-              : <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-2)] px-3 py-2.5 text-sm text-[var(--text-3)]">Generating code…</div>}
-            <ol className="mt-4 space-y-1.5 text-sm text-[var(--text-2)]">
-              <li>1. Open proxyforward on the Minecraft machine.</li>
-              <li>2. Choose <b>“This hosts Minecraft”</b>.</li>
-              <li>3. Paste the code and connect.</li>
-            </ol>
-
-            <PortChecklist
-              title="Don't forget the router"
-              rules={[
-                {port: controlPort, label: 'Control link', why: 'agent → gateway'},
-                {port: 25565, label: 'Minecraft', why: 'players → gateway'},
-              ]}
-              footnote="Forward both as TCP to this machine, and allow them through Windows Firewall (one-click in Settings). The agent's “Test public reachability” button verifies the whole path."
-            />
-
-            <p className="mt-4 text-xs text-[var(--text-3)]">
-              The dashboard will show the agent as soon as it connects. Keep this window open.
-            </p>
-          </Panel>
-        )}
-
-        {step === 'agent' && (
-          <Panel>
-            <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-[color-mix(in_srgb,var(--good)_30%,var(--border))] bg-[color-mix(in_srgb,var(--good)_8%,transparent)] px-3 py-2.5 text-sm text-[var(--text-2)]">
+            <div className="mb-4 flex items-start gap-2.5 rounded-[var(--r-md)] border border-[color-mix(in_srgb,var(--good)_30%,var(--border))] bg-[color-mix(in_srgb,var(--good)_8%,transparent)] px-3 py-2.5 text-sm text-[var(--text-2)]">
               <span className="mt-0.5 shrink-0 text-[var(--good)]"><IconShield size={16} /></span>
               <span>
                 <b className="text-[var(--text)]">Nothing to forward on this machine.</b> The agent only makes an
@@ -185,13 +147,13 @@ export function Wizard() {
             </Field>
             {pairing.trim() && (
               parsed
-                ? <div className="mt-2 flex items-center gap-2 text-xs text-[var(--good)]">
+                ? <div className="pf-fade mt-2 flex items-center gap-2 text-xs text-[var(--good)]">
                     <IconCheck size={14} /> Gateway {parsed.host}:{parsed.port} · certificate pinned
                   </div>
-                : <div className="mt-2 text-xs text-[var(--warn)]">That doesn’t look like a complete pairing code yet.</div>
+                : <div className="mt-2 text-xs text-[var(--warn)]">That doesn't look like a complete pairing code yet.</div>
             )}
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <Field label="Local Minecraft address" hint="Usually the default.">
+              <Field label="Local server address" hint="Usually the default.">
                 <TextInput value={localAddr} onChange={setLocalAddr} mono />
               </Field>
               <Field label="Public port" hint="Port players will use.">
@@ -199,37 +161,165 @@ export function Wizard() {
               </Field>
             </div>
             <div className="mt-5 flex justify-between">
-              <Button variant="ghost" onClick={() => setStep('role')}>Back</Button>
+              <Button variant="ghost" onClick={() => setAct('role')}>Back</Button>
               <Button onClick={doAgent} disabled={busy || !parsed}>{busy ? 'Connecting…' : 'Connect'}</Button>
             </div>
           </Panel>
+        )}
+
+        {act === 'live' && kind === 'gateway' && (
+          <GatewayLive status={status} controlPort={controlPort} onDone={onDone} />
+        )}
+        {act === 'live' && kind === 'agent' && (
+          <AgentLive status={status} onDone={onDone} onBack={() => { setErr(''); setAct('agent') }} />
         )}
       </div>
     </div>
   )
 }
 
-function Stepper({step}: {step: Step}) {
-  const idx = step === 'role' ? 0 : 1
+/** GatewayLive: the gateway is up — hand over the pairing code and listen for
+ * the real handshake on the live ticks. */
+function GatewayLive({status, controlPort, onDone}: {
+  status: UIStatus | null; controlPort: number; onDone: () => void
+}) {
+  const [code, setCode] = useState('')
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    const poll = (n: number) => {
+      PairingCode().then(c => { if (!cancelled) setCode(c) })
+        .catch(e => { if (!cancelled) { if (n < 20) setTimeout(() => poll(n + 1), 250); else setErr(String(e)) } })
+    }
+    poll(0)
+    return () => { cancelled = true }
+  }, [])
+
+  const paired = !!status?.agentConnected
+  return (
+    <Panel>
+      <div className="mb-3 flex items-center gap-2 text-[var(--good)]">
+        <IconCheck size={18} /> <span className="font-medium">Gateway is live</span>
+      </div>
+      <p className="mb-2 text-sm text-[var(--text-2)]">
+        Copy this pairing code and paste it into proxyforward on your Minecraft machine:
+      </p>
+      {code
+        ? <Codebox text={code} action={<CopyButton text={code} />} />
+        : err
+          ? <ErrorBanner message={err} />
+          : <div className="pf-well px-3 py-2.5 text-sm text-[var(--text-3)]">Generating code…</div>}
+      <ol className="mt-4 space-y-1.5 text-sm text-[var(--text-2)]">
+        <li>1. Open proxyforward on the Minecraft machine.</li>
+        <li>2. Choose <b>"This hosts Minecraft"</b>.</li>
+        <li>3. Paste the code and connect.</li>
+      </ol>
+
+      <PortChecklist
+        title="Don't forget the router"
+        rules={[
+          {port: controlPort, label: 'Control link', why: 'agent → gateway'},
+          {port: 25565, label: 'Minecraft', why: 'players → gateway'},
+        ]}
+        footnote="Forward both as TCP to this machine, and allow them through Windows Firewall (one-click in Settings). The agent's “Test player path” verifies the whole route."
+      />
+
+      {/* Live handshake state, straight from the ticks. */}
+      <div className={`mt-4 flex items-center gap-2.5 rounded-[var(--r-md)] border px-3 py-2.5 text-sm transition-colors duration-500 ${
+        paired
+          ? 'border-[color-mix(in_srgb,var(--good)_35%,var(--border))] bg-[color-mix(in_srgb,var(--good)_9%,transparent)] text-[var(--good)]'
+          : 'border-[var(--border)] bg-[var(--panel-2)] text-[var(--text-2)]'
+      }`}>
+        {paired
+          ? <><IconSpark size={16} /> <span className="font-medium">Handshake complete — {status?.peerHostname || 'your agent'} is online.</span></>
+          : <><Spinner size={14} /> Listening for your agent…</>}
+      </div>
+
+      <div className="mt-5 flex justify-end">
+        <Button onClick={onDone}>{paired ? 'Open the console' : 'Open the console — keep pairing later'}</Button>
+      </div>
+    </Panel>
+  )
+}
+
+/** AgentLive: dialing the gateway for real. Success auto-advances into the
+ * console; a fatal engine error (bad token, conflict) offers a way back. */
+function AgentLive({status, onDone, onBack}: {
+  status: UIStatus | null; onDone: () => void; onBack: () => void
+}) {
+  const up = !!status?.linkUp
+  const fatal = status?.engineFatal || ''
+
+  useEffect(() => {
+    if (!up) return
+    const t = setTimeout(onDone, 1600)
+    return () => clearTimeout(t)
+  }, [up])
+
+  return (
+    <Panel>
+      <div className="flex flex-col items-center py-6 text-center">
+        <div
+          className={`grid h-14 w-14 place-items-center rounded-[var(--r-xl)] border transition-all duration-500 ${up ? 'pf-breathe' : ''}`}
+          style={{
+            color: fatal ? 'var(--bad)' : up ? 'var(--good)' : 'var(--accent)',
+            borderColor: `color-mix(in srgb, ${fatal ? 'var(--bad)' : up ? 'var(--good)' : 'var(--accent)'} 40%, var(--border))`,
+            background: `color-mix(in srgb, ${fatal ? 'var(--bad)' : up ? 'var(--good)' : 'var(--accent)'} 9%, transparent)`,
+          }}
+        >
+          {fatal ? <IconRefresh size={26} /> : up ? <IconSpark size={26} /> : <Spinner size={24} />}
+        </div>
+        <div className="mt-4 text-lg font-semibold">
+          {fatal ? 'The gateway said no' : up ? 'Handshake complete.' : 'Dialing the gateway…'}
+        </div>
+        <div className="mt-1 max-w-sm text-sm text-[var(--text-2)]">
+          {fatal
+            ? fatal
+            : up
+              ? `Connected to ${status?.peerHostname || 'the gateway'} in ${status?.rttMillis ?? '—'} ms. Opening your console…`
+              : 'Establishing the tunnel link. Reconnects retry automatically with backoff.'}
+        </div>
+      </div>
+      <div className="flex justify-between">
+        <Button variant="ghost" onClick={onBack}>{fatal ? 'Fix the pairing code' : 'Back'}</Button>
+        {!fatal && <Button variant={up ? 'primary' : 'ghost'} onClick={onDone}>Open the console</Button>}
+      </div>
+    </Panel>
+  )
+}
+
+function Stepper({act}: {act: Act}) {
+  const idx = act === 'role' ? 0 : act === 'live' ? 2 : 1
+  const labels = ['Choose role', act === 'import' ? 'Restore' : 'Configure', 'Go live']
   return (
     <div className="mb-5 flex items-center justify-center gap-2">
-      {['Choose role', step === 'gateway-done' ? 'Share code' : step === 'import' ? 'Restore' : 'Connect'].map((label, i) => (
+      {labels.map((label, i) => (
         <div key={i} className="flex items-center gap-2">
-          <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
-            i <= idx ? 'bg-[var(--accent)] text-white' : 'bg-[var(--panel-2)] text-[var(--text-3)]'}`}>{i + 1}</span>
-          <span className={`text-xs ${i <= idx ? 'text-[var(--text)]' : 'text-[var(--text-3)]'}`}>{label}</span>
-          {i === 0 && <span className="mx-1 h-px w-8 bg-[var(--border)]" />}
+          <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-300 ${
+            i <= idx ? 'bg-[var(--accent)] text-[var(--accent-contrast)]' : 'bg-[var(--panel-2)] text-[var(--text-3)]'}`}>
+            {i < idx ? <IconCheck size={12} /> : i + 1}
+          </span>
+          <span className={`text-xs transition-colors duration-300 ${i <= idx ? 'text-[var(--text)]' : 'text-[var(--text-3)]'}`}>{label}</span>
+          {i < labels.length - 1 && <span className="mx-1 h-px w-8 bg-[var(--border)]" />}
         </div>
       ))}
     </div>
   )
 }
 
-function RoleCard({icon, title, sub, onClick}: {icon: React.ReactNode; title: string; sub: string; onClick: () => void}) {
+function RoleCard({icon, title, sub, hue, onClick, onHover}: {
+  icon: React.ReactNode; title: string; sub: string; hue: string
+  onClick: () => void; onHover: (on: boolean) => void
+}) {
   return (
-    <button onClick={onClick}
-      className="group rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5 text-left transition-all duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-1 hover:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))] hover:shadow-[0_16px_40px_-16px_color-mix(in_srgb,var(--accent)_40%,transparent)] active:translate-y-0 active:scale-[0.99]">
-      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--panel-2)] text-[var(--text-2)] transition-all duration-300 group-hover:scale-110 group-hover:bg-[linear-gradient(135deg,var(--accent),var(--accent-2))] group-hover:text-white">
+    <button
+      onClick={() => { onHover(false); onClick() }}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+      style={{['--hue' as string]: hue}}
+      className="group pf-card p-5 text-left transition-all duration-300 [transition-timing-function:var(--ease-out)] hover:-translate-y-1 hover:shadow-[inset_0_1px_0_var(--bevel-top),inset_0_-1px_0_var(--bevel-bot),0_16px_40px_-16px_color-mix(in_srgb,var(--hue)_40%,transparent)] active:translate-y-0 active:scale-[0.99]"
+    >
+      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-[var(--r-md)] bg-[var(--panel-2)] text-[var(--text-2)] transition-all duration-300 group-hover:scale-110 group-hover:bg-[var(--hue)] group-hover:text-white">
         {icon}
       </div>
       <div className="text-base font-semibold">{title}</div>
@@ -247,7 +337,7 @@ function PortChecklist({title, intro, rules, footnote}: {
   footnote?: string
 }) {
   return (
-    <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] p-3.5">
+    <div className="mt-4 rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] p-3.5">
       <div className="flex items-center gap-2 text-sm font-medium text-[var(--text)]">
         <span className="text-[var(--accent)]"><IconGlobe size={15} /></span>
         {title}
@@ -256,7 +346,7 @@ function PortChecklist({title, intro, rules, footnote}: {
       <div className="mt-2.5 space-y-1.5">
         {rules.map(r => (
           <div key={r.port} className="flex items-start gap-2.5 text-sm">
-            <code className="shrink-0 rounded-md border border-[var(--border)] bg-[var(--panel)] px-2 py-0.5 font-mono text-[12px] font-semibold text-[var(--text)]">
+            <code className="shrink-0 select-text rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--panel)] px-2 py-0.5 font-mono text-[12px] font-semibold text-[var(--text)]">
               TCP {r.port}
             </code>
             <span className="min-w-0 leading-snug">
@@ -272,7 +362,7 @@ function PortChecklist({title, intro, rules, footnote}: {
 }
 
 function Panel({children}: {children: React.ReactNode}) {
-  return <div className="pf-rise rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-[var(--shadow-soft)]">{children}</div>
+  return <div className="pf-rise pf-card p-5">{children}</div>
 }
 
 /** Lightweight client-side parse for instant feedback; the Go side does the

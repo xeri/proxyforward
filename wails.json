@@ -7,7 +7,13 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
-    "name": "",
+    "name": "xeri",
     "email": ""
+  },
+  "info": {
+    "companyName": "xeri",
+    "productName": "proxyforward",
+    "copyright": "© xeri",
+    "comments": "Created by xeri — https://github.com/xeri"
   }
 }

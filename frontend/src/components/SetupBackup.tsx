@@ -98,7 +98,7 @@ export function ImportSetupFlow({disabled, isWizard, onDone}: {
           <Button variant="ghost" size="sm" onClick={choose}>Import setup…</Button>
         </div>
       ) : (
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel-2)] p-3.5">
+        <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] p-3.5">
           <div className="flex items-center gap-2">
             <Badge tone="accent">{info.role}</Badge>
             {info.encrypted && <Badge tone="neutral">encrypted</Badge>}

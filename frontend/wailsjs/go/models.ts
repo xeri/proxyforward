@@ -22,6 +22,36 @@ export namespace app {
 	        this.bytesOut = source["bytesOut"];
 	    }
 	}
+	export class LatencyResult {
+	    samples: number;
+	    rttAvgMs: number;
+	    rttMinMs: number;
+	    rttMaxMs: number;
+	    jitterMs: number;
+	    oneWayEstimateMs: number;
+	    oneWayUpMs: number;
+	    oneWayDownMs: number;
+	    haveOneWay: boolean;
+	    clockSyncCaveat: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new LatencyResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.samples = source["samples"];
+	        this.rttAvgMs = source["rttAvgMs"];
+	        this.rttMinMs = source["rttMinMs"];
+	        this.rttMaxMs = source["rttMaxMs"];
+	        this.jitterMs = source["jitterMs"];
+	        this.oneWayEstimateMs = source["oneWayEstimateMs"];
+	        this.oneWayUpMs = source["oneWayUpMs"];
+	        this.oneWayDownMs = source["oneWayDownMs"];
+	        this.haveOneWay = source["haveOneWay"];
+	        this.clockSyncCaveat = source["clockSyncCaveat"];
+	    }
+	}
 	export class SetupFileInfo {
 	    path: string;
 	    role: string;
@@ -66,11 +96,20 @@ export namespace app {
 	    mode: string;
 	    role: string;
 	    version: string;
+	    hostname: string;
 	    pid: number;
 	    configPath: string;
 	    linkUp: boolean;
 	    rttMillis: number;
 	    agentConnected: boolean;
+	    jitterMillis: number;
+	    packetLossPct: number;
+	    healthScore: string;
+	    peerHostname: string;
+	    publicIp: string;
+	    peerPublicIp: string;
+	    localLanIps: string[];
+	    peerLanIps: string[];
 	    tunnels: TunnelUI[];
 	    connections: ConnUI[];
 	    totalBytesIn: number;
@@ -96,11 +135,20 @@ export namespace app {
 	        this.mode = source["mode"];
 	        this.role = source["role"];
 	        this.version = source["version"];
+	        this.hostname = source["hostname"];
 	        this.pid = source["pid"];
 	        this.configPath = source["configPath"];
 	        this.linkUp = source["linkUp"];
 	        this.rttMillis = source["rttMillis"];
 	        this.agentConnected = source["agentConnected"];
+	        this.jitterMillis = source["jitterMillis"];
+	        this.packetLossPct = source["packetLossPct"];
+	        this.healthScore = source["healthScore"];
+	        this.peerHostname = source["peerHostname"];
+	        this.publicIp = source["publicIp"];
+	        this.peerPublicIp = source["peerPublicIp"];
+	        this.localLanIps = source["localLanIps"];
+	        this.peerLanIps = source["peerLanIps"];
 	        this.tunnels = this.convertValues(source["tunnels"], TunnelUI);
 	        this.connections = this.convertValues(source["connections"], ConnUI);
 	        this.totalBytesIn = source["totalBytesIn"];
@@ -404,6 +452,10 @@ export namespace stats {
 	    ch: number;
 	    cl: number;
 	    cc: number;
+	    ro: number;
+	    rh: number;
+	    rl: number;
+	    rc: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Bucket(source);
@@ -426,6 +478,10 @@ export namespace stats {
 	        this.ch = source["ch"];
 	        this.cl = source["cl"];
 	        this.cc = source["cc"];
+	        this.ro = source["ro"];
+	        this.rh = source["rh"];
+	        this.rl = source["rl"];
+	        this.rc = source["rc"];
 	    }
 	}
 	export class HistoryResult {

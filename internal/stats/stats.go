@@ -44,6 +44,15 @@ type Bucket struct {
 	ConnH float64 `json:"ch"`
 	ConnL float64 `json:"cl"`
 	ConnC float64 `json:"cc"`
+
+	// Rtt* is the OHLC of the control-link round-trip time in milliseconds (a
+	// gauge, not a rate) observed within the slot. -1 on all four means
+	// unknown: the bucket predates RTT sampling, or the role has no RTT (the
+	// gateway does not measure it). RttC < 0 is the canonical unknown check.
+	RttO float64 `json:"ro"`
+	RttH float64 `json:"rh"`
+	RttL float64 `json:"rl"`
+	RttC float64 `json:"rc"`
 }
 
 // HistoryResult is one rendered window: buckets oldest-first, the last one
@@ -135,6 +144,7 @@ func (r *ring) mergeCur(b Bucket) {
 		dst.InO, dst.InH, dst.InL, dst.InC = b.InO, b.InH, b.InL, b.InC
 		dst.OutO, dst.OutH, dst.OutL, dst.OutC = b.OutO, b.OutH, b.OutL, b.OutC
 		dst.ConnO, dst.ConnH, dst.ConnL, dst.ConnC = b.ConnO, b.ConnH, b.ConnL, b.ConnC
+		dst.RttO, dst.RttH, dst.RttL, dst.RttC = b.RttO, b.RttH, b.RttL, b.RttC
 		r.curEmpty = false
 		return
 	}
@@ -145,6 +155,7 @@ func (r *ring) mergeCur(b Bucket) {
 	dst.OutH = max(dst.OutH, b.OutH)
 	dst.OutL = min(dst.OutL, b.OutL)
 	mergeConn(dst, b)
+	mergeRtt(dst, b)
 }
 
 // mergeConn folds b's connection gauge into dst, skipping unknown (-1)
@@ -160,6 +171,21 @@ func mergeConn(dst *Bucket, b Bucket) {
 	dst.ConnC = b.ConnC
 	dst.ConnH = max(dst.ConnH, b.ConnH)
 	dst.ConnL = min(dst.ConnL, b.ConnL)
+}
+
+// mergeRtt folds b's round-trip gauge into dst, skipping unknown (-1) sides so
+// pre-upgrade or RTT-less (gateway) buckets never poison a merge.
+func mergeRtt(dst *Bucket, b Bucket) {
+	if b.RttC < 0 {
+		return // source unknown: keep dst as-is (known or unknown)
+	}
+	if dst.RttC < 0 {
+		dst.RttO, dst.RttH, dst.RttL, dst.RttC = b.RttO, b.RttH, b.RttL, b.RttC
+		return
+	}
+	dst.RttC = b.RttC
+	dst.RttH = max(dst.RttH, b.RttH)
+	dst.RttL = min(dst.RttL, b.RttL)
 }
 
 // valid reports whether absolute index i holds real data (not a stale lap or
@@ -219,7 +245,7 @@ func Open(path string, logger *slog.Logger) *Store {
 // Sample ingests one reading of the monotonic byte totals. Call it on a
 // steady cadence (~10 Hz); the instantaneous rate is the delta over the
 // actual elapsed time, so jitter and system sleeps do not fabricate spikes.
-func (s *Store) Sample(now time.Time, appIn, appOut, linkIn, linkOut int64, conns int) {
+func (s *Store) Sample(now time.Time, appIn, appOut, linkIn, linkOut int64, conns int, rttMs float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := now.UnixMilli()
@@ -246,11 +272,18 @@ func (s *Store) Sample(now time.Time, appIn, appOut, linkIn, linkOut int64, conn
 	inRate := float64(dIn) * 1000 / float64(dt)
 	outRate := float64(dOut) * 1000 / float64(dt)
 	c := float64(conns)
+	// RTT is a gauge; a non-positive reading (no link, or a role that does not
+	// measure it) records as unknown so it never plots a bogus zero.
+	rttO, rttH, rttL, rttC := -1.0, -1.0, -1.0, -1.0
+	if rttMs > 0 {
+		rttO, rttH, rttL, rttC = rttMs, rttMs, rttMs, rttMs
+	}
 	s.add(0, Bucket{
 		T: t, In: dIn, Out: dOut,
 		InO: inRate, InH: inRate, InL: inRate, InC: inRate,
 		OutO: outRate, OutH: outRate, OutL: outRate, OutC: outRate,
 		ConnO: c, ConnH: c, ConnL: c, ConnC: c,
+		RttO: rttO, RttH: rttH, RttL: rttL, RttC: rttC,
 	})
 }
 
@@ -358,6 +391,7 @@ func (s *Store) historyAt(nowMs, windowMs int64, maxBuckets int) HistoryResult {
 		dst.OutH = max(dst.OutH, b.OutH)
 		dst.OutL = min(dst.OutL, b.OutL)
 		mergeConn(dst, b)
+		mergeRtt(dst, b)
 	}
 	return HistoryResult{WindowMs: windowMs, BucketMs: k * r.resMs, Buckets: out}
 }

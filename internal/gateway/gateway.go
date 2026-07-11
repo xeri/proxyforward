@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -24,6 +25,8 @@ import (
 	"proxyforward/internal/conntrack"
 	"proxyforward/internal/control"
 	"proxyforward/internal/link"
+	"proxyforward/internal/linkquality"
+	"proxyforward/internal/netid"
 	"proxyforward/internal/relay"
 	"proxyforward/internal/stats"
 	"proxyforward/internal/transport"
@@ -40,6 +43,13 @@ const (
 	controlIdleTimeout = 15 * time.Second
 	// controlWriteTimeout bounds any single control-frame write.
 	controlWriteTimeout = 10 * time.Second
+
+	// The gateway pings the agent on this cadence so it measures the same
+	// RTT/jitter/loss the agent does. lossWindow/lossTimeout mirror the agent:
+	// a pong not seen within two intervals counts as lost.
+	pingInterval = 5 * time.Second
+	lossWindow   = linkquality.DefaultWindow
+	lossTimeout  = 2 * pingInterval
 )
 
 type Gateway struct {
@@ -181,6 +191,102 @@ func (g *Gateway) AgentRemoteIP() string {
 	return ""
 }
 
+// AgentHostname reports the connected agent machine's hostname, or "" when
+// disconnected or the agent is a legacy build that sent no hostname.
+func (g *Gateway) AgentHostname() string {
+	if sess := g.session(); sess != nil {
+		return sess.hostname
+	}
+	return ""
+}
+
+// AgentLANIPs reports the connected agent machine's LAN IPv4s, or nil.
+func (g *Gateway) AgentLANIPs() []string {
+	if sess := g.session(); sess != nil {
+		return sess.localIPs
+	}
+	return nil
+}
+
+// RTTMillis reports the gateway's own measured round-trip to the agent, or 0
+// when no agent is connected. Symmetric with the agent's RTT.
+func (g *Gateway) RTTMillis() int64 {
+	if sess := g.session(); sess != nil {
+		return sess.rttMillis.Load()
+	}
+	return 0
+}
+
+// JitterMillis reports the gateway→agent jitter EWMA in ms, or -1 when unknown.
+func (g *Gateway) JitterMillis() float64 {
+	if sess := g.session(); sess != nil && sess.quality != nil {
+		return sess.quality.JitterMillis()
+	}
+	return -1
+}
+
+// PacketLossPct reports the gateway→agent ping loss (0–100), or -1 when unknown.
+func (g *Gateway) PacketLossPct() float64 {
+	if sess := g.session(); sess != nil && sess.quality != nil {
+		return sess.quality.LossPct()
+	}
+	return -1
+}
+
+// ProbeLatency runs an on-demand latency burst toward the connected agent,
+// mirroring the agent's own latency test. Errors when no agent is connected or
+// a probe is already running.
+func (g *Gateway) ProbeLatency(ctx context.Context, count int, interval time.Duration) (linkquality.ProbeResult, error) {
+	if count <= 0 {
+		count = 10
+	}
+	if interval <= 0 {
+		interval = 150 * time.Millisecond
+	}
+	sess := g.session()
+	if sess == nil {
+		return linkquality.ProbeResult{}, errors.New("no agent connected — connect an agent before testing latency")
+	}
+	return sess.probeLatency(ctx, count, interval)
+}
+
+func (s *agentSession) probeLatency(ctx context.Context, count int, interval time.Duration) (linkquality.ProbeResult, error) {
+	pc := linkquality.NewProbeCollector(count)
+	if !s.probe.CompareAndSwap(nil, pc) {
+		return linkquality.ProbeResult{}, errors.New("a latency test is already running")
+	}
+	defer s.probe.Store(nil)
+
+	for i := 0; i < count; i++ {
+		seq := s.pingSeq.Add(1)
+		pc.Mark(seq)
+		now := time.Now()
+		s.quality.OnSent(seq, now)
+		if err := s.writeControl(control.TypePing, control.Ping{Seq: seq, SentUnixNano: now.UnixNano()}); err != nil {
+			return linkquality.ProbeResult{}, err
+		}
+		if i < count-1 {
+			select {
+			case <-ctx.Done():
+				return linkquality.ProbeResult{}, ctx.Err()
+			case <-time.After(interval):
+			}
+		}
+	}
+
+	select {
+	case <-pc.Full():
+	case <-ctx.Done():
+		return linkquality.ProbeResult{}, ctx.Err()
+	case <-time.After(3 * time.Second):
+	}
+	res := pc.Summarize()
+	if res.Samples == 0 {
+		return res, errors.New("no pong received — the link may have dropped")
+	}
+	return res, nil
+}
+
 // LinkSessionBytes reports raw link bytes of the current agent session.
 func (g *Gateway) LinkSessionBytes() (in, out int64) {
 	if sess := g.session(); sess != nil {
@@ -315,7 +421,10 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		logger:      logger.With("agent", hello.AgentID),
 		connectedAt: time.Now(),
 		remoteIP:    ip,
+		hostname:    hello.Hostname,
+		localIPs:    hello.LocalIPs,
 		caps:        control.NewCapSet(negotiated),
+		quality:     linkquality.New(lossWindow),
 	}
 	gen, err := g.actor.admit(sess)
 	if err != nil {
@@ -330,11 +439,15 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 	sess.gen = gen
 	defer g.actor.disconnected(sess)
 
+	gwHost, _ := os.Hostname()
 	if err := control.WriteMsg(conn, control.TypeHelloOK, control.HelloOK{
 		ProtocolVersion: control.ProtocolVersion,
 		Generation:      gen,
 		AppVersion:      version.String(),
 		Capabilities:    negotiated,
+		Hostname:        gwHost,
+		LocalIPs:        netid.LocalIPv4s(),
+		ObservedIP:      ip,
 	}); err != nil {
 		logger.Debug("hello_ok write failed", "err", err)
 		conn.Close()
@@ -388,11 +501,16 @@ func acceptStreamTimeout(sess transport.Session, d time.Duration) (transport.Str
 	}
 }
 
-// serveControl processes the agent's control stream until it dies. Reads and
-// responses happen on one goroutine — the protocol is strictly
-// request/response plus pings, so there is nothing to interleave.
+// serveControl processes the agent's control stream until it dies. The read
+// loop's responses and a concurrent ping goroutine both write, serialized by
+// sess.writeControl.
 func (g *Gateway) serveControl(ctx context.Context, sess *agentSession, ctrl transport.Stream) {
 	defer ctrl.Close()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sess.setCtrl(ctrl)
+	defer sess.setCtrl(nil)
+	go g.pingLoop(ctx, sess)
 	for {
 		if ctx.Err() != nil {
 			return
@@ -412,11 +530,30 @@ func (g *Gateway) serveControl(ctx context.Context, sess *agentSession, ctrl tra
 	}
 }
 
+// pingLoop sends periodic pings to the agent so the gateway can measure its own
+// RTT/jitter/loss. It exits when the control stream context is cancelled.
+func (g *Gateway) pingLoop(ctx context.Context, sess *agentSession) {
+	t := time.NewTicker(pingInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sess.quality.Sweep(time.Now(), lossTimeout)
+			seq := sess.pingSeq.Add(1)
+			now := time.Now()
+			sess.quality.OnSent(seq, now)
+			if err := sess.writeControl(control.TypePing, control.Ping{Seq: seq, SentUnixNano: now.UnixNano()}); err != nil {
+				return // stream is going away; the read loop will notice too
+			}
+		}
+	}
+}
+
 func (g *Gateway) handleControlMsg(sess *agentSession, ctrl transport.Stream, env *control.Envelope) error {
 	write := func(msgType string, payload any) error {
-		ctrl.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
-		defer ctrl.SetWriteDeadline(time.Time{})
-		return control.WriteMsg(ctrl, msgType, payload)
+		return sess.writeControl(msgType, payload)
 	}
 	switch env.Type {
 	case control.TypePing:
@@ -424,7 +561,22 @@ func (g *Gateway) handleControlMsg(sess *agentSession, ctrl transport.Stream, en
 		if err != nil {
 			return err
 		}
-		return write(control.TypePong, control.Pong{Seq: ping.Seq, SentUnixNano: ping.SentUnixNano})
+		return write(control.TypePong, control.Pong{Seq: ping.Seq, SentUnixNano: ping.SentUnixNano, RecvUnixNano: time.Now().UnixNano()})
+
+	case control.TypePong:
+		// Reply to our own ping — measure RTT and feed jitter/loss + any probe.
+		pong, err := control.Decode[control.Pong](env)
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		rtt := now.Sub(time.Unix(0, pong.SentUnixNano))
+		sess.rttMillis.Store(rtt.Milliseconds())
+		sess.quality.OnPong(pong.Seq, rtt)
+		if pc := sess.probe.Load(); pc != nil {
+			pc.Record(*pong, now)
+		}
+		return nil
 
 	case control.TypeRegister:
 		reg, err := control.Decode[control.Register](env)

@@ -6,6 +6,12 @@
 // at the call site in main.tsx).
 //
 // Choose a scenario with ?mock=agent|gateway|wizard (default: agent).
+// Extra axes compose with any scenario:
+//   &link=down       — the tunnel link is down (reconnecting / waiting)
+//   &mode=attached   — a service owns the engine; gated actions reject
+//   &fatal=1         — terminal engine error (bad token) surfaces
+//   &fresh=1         — first-run data: no history, no peers yet
+//   &fx=high         — high-fx glass: refraction filter on the palette
 
 type AnyFn = (...a: any[]) => any
 
@@ -13,14 +19,22 @@ export function installDevMock() {
   const w = window as any
   if (w.go && w.runtime) return // real host present
 
-  const scenario = new URLSearchParams(location.search).get('mock') || 'agent'
+  const params = new URLSearchParams(location.search)
+  const scenario = params.get('mock') || 'agent'
   const isGateway = scenario === 'gateway'
   const isWizard = scenario === 'wizard'
+  const axisLinkDown = params.get('link') === 'down'
+  const axisAttached = params.get('mode') === 'attached'
+  const axisFatal = params.get('fatal') === '1'
+  const axisFresh = params.get('fresh') === '1'
+  if (params.get('fx') === 'high') document.documentElement.dataset.fx = 'high'
 
   // ---- event bus (runtime.EventsOn/EventsEmit) ----
   const listeners: Record<string, AnyFn[]> = {}
   const emit = (name: string, ...data: any[]) => (listeners[name] || []).forEach(cb => cb(...data))
 
+  // Window-control + clipboard stubs are explicit because the Proxy fallback
+  // returns a plain () => {} — not a Promise — and callers .then() on some.
   w.runtime = new Proxy({
     EventsOn: (name: string, cb: AnyFn) => {
       (listeners[name] ||= []).push(cb)
@@ -29,6 +43,12 @@ export function installDevMock() {
     EventsOnMultiple: (name: string, cb: AnyFn) => w.runtime.EventsOn(name, cb),
     EventsEmit: (name: string, ...d: any[]) => emit(name, ...d),
     EventsOff: () => {},
+    WindowIsMaximised: () => Promise.resolve(false),
+    WindowMinimise: () => {},
+    WindowToggleMaximise: () => {},
+    WindowSetBackgroundColour: () => {},
+    Quit: () => { console.info('[devmock] Quit()') },
+    ClipboardSetText: (text: string) => navigator.clipboard.writeText(text).then(() => true, () => false),
   }, {get: (t, p) => (p in t ? (t as any)[p] : () => {})})
 
   // ---- deterministic traffic model ----
@@ -36,9 +56,9 @@ export function installDevMock() {
   // from the same pure functions of absolute time, so polls at different
   // cadences are self-consistent. The fake install is ~32 days old; the fake
   // process has been up 5h; the link 3.2h.
-  const INSTALLED_AT = Date.now() - 32 * 86_400_000
-  const PROCESS_START = Date.now() - 5 * 3_600_000
-  const LINK_UP_SINCE = Date.now() - Math.round(3.2 * 3_600_000)
+  const INSTALLED_AT = axisFresh ? Date.now() - 90_000 : Date.now() - 32 * 86_400_000
+  const PROCESS_START = axisFresh ? Date.now() - 90_000 : Date.now() - 5 * 3_600_000
+  const LINK_UP_SINCE = axisFresh ? Date.now() - 60_000 : Date.now() - Math.round(3.2 * 3_600_000)
 
   const hash01 = (n: number): number => {
     let x = Math.imul(n ^ 0x9e3779b9, 0x85ebca6b)
@@ -73,9 +93,13 @@ export function installDevMock() {
   // Player/connection count: tracks the traffic level with its own slow noise.
   // Recording "starts" 12 days ago so 30d/All show the unknown (-1) gap that
   // real pre-upgrade history produces.
-  const CONN_SINCE = Date.now() - 12 * 86_400_000
+  const CONN_SINCE = axisFresh ? INSTALLED_AT : Date.now() - 12 * 86_400_000
   const connCount = (t: number): number =>
     Math.max(0, Math.min(12, Math.floor(downRate(t) / (45 * 1024) + 2.5 * vnoise(t, 240_000, 7))))
+  // Round-trip time (ms): a calm ~22ms baseline that drifts with slow noise and
+  // rises a little under heavy load. Recorded from CONN_SINCE like the gauge.
+  const rttMs = (t: number): number =>
+    18 + 10 * vnoise(t, 180_000, 8) + 8 * vnoise(t, 26_000, 9) + downRate(t) / (250 * 1024) * 6
 
   // History = OHLC of 4 sub-samples per bucket, bytes = mean rate × duration.
   const bandwidthHistory = (windowMs: number, maxBuckets: number) => {
@@ -101,6 +125,10 @@ export function installDevMock() {
       const cs = t + bucketMs <= CONN_SINCE
         ? null // pre-recording bucket: gauge unknown
         : [0, 1, 2, 3].map(i => connCount(t + (i + 0.5) * bucketMs / 4))
+      // Both roles measure RTT now; only pre-recording buckets are unknown.
+      const ps = t + bucketMs <= CONN_SINCE
+        ? null
+        : [0, 1, 2, 3].map(i => rttMs(t + (i + 0.5) * bucketMs / 4))
       buckets.push({
         t,
         out: Math.round(mean(rs) * durSec), in: Math.round(mean(us) * durSec),
@@ -109,6 +137,9 @@ export function installDevMock() {
         ...(cs
           ? {co: cs[0], ch: Math.max(...cs), cl: Math.min(...cs), cc: cs[3]}
           : {co: -1, ch: -1, cl: -1, cc: -1}),
+        ...(ps
+          ? {ro: ps[0], rh: Math.max(...ps), rl: Math.min(...ps), rc: ps[3]}
+          : {ro: -1, rh: -1, rl: -1, rc: -1}),
       })
     }
     return {windowMs, bucketMs, buckets}
@@ -137,10 +168,11 @@ export function installDevMock() {
 
   // ---- mutable world state ----
   const tunnelID = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
+  const up = !isWizard && !axisLinkDown && !axisFatal
   const state = {
     role: isGateway ? 'gateway' : 'agent',
-    linkUp: !isWizard,
-    agentConnected: !isWizard,
+    linkUp: up,
+    agentConnected: up,
     rtt: 24,
     bytesIn: 0,
     bytesOut: 0,
@@ -161,15 +193,37 @@ export function installDevMock() {
     UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: true, Autostart: false},
   }
 
-  const status = () => ({
-    mode: isWizard ? 'wizard' : 'engine',
+  // Link-quality mock: healthy jitter/loss on the agent; the gateway leaves
+  // them unknown (-1) like the real backend, since RTT is measured agent-side.
+  const jitterMs = () => 2 + 3 * vnoise(Date.now(), 20_000, 11) + 2 * vnoise(Date.now(), 5_000, 12)
+  const lossPct = () => (vnoise(Date.now(), 60_000, 13) > 0.9 ? 0.4 + vnoise(Date.now(), 8_000, 14) : 0)
+  const healthOf = (jitter: number, loss: number): string => {
+    if (!state.linkUp) return 'bad'
+    if (loss > 5 || jitter > 100) return 'bad'
+    if (loss > 1 || jitter > 30 || Date.now() - LINK_UP_SINCE < 60_000) return 'warn'
+    return 'good'
+  }
+
+  const status = () => {
+    const jitter = isWizard || !state.linkUp ? -1 : jitterMs()
+    const loss = isWizard || !state.linkUp ? -1 : lossPct()
+    return {
+    mode: isWizard ? 'wizard' : axisAttached ? 'attached' : 'engine',
     role: isWizard ? '' : state.role,
-    version: '0.1.0-dev', pid: 4242, configPath: 'C\\\\Users\\\\you\\\\AppData\\\\Roaming\\\\proxyforward\\\\config.toml',
-    linkUp: state.linkUp, rttMillis: state.rtt, agentConnected: state.agentConnected,
-    tunnels: [{id: tunnelID, name: 'Minecraft', publicPort: 25565, localUp: true, localKnown: true}],
-    connections: state.conns,
+    version: '0.1.0-dev', hostname: 'DESKTOP-DEV', pid: 4242, configPath: 'C\\\\Users\\\\you\\\\AppData\\\\Roaming\\\\proxyforward\\\\config.toml',
+    linkUp: state.linkUp, rttMillis: state.linkUp ? state.rtt : 0, agentConnected: state.agentConnected,
+    jitterMillis: jitter,
+    packetLossPct: loss,
+    healthScore: isWizard ? 'unknown' : healthOf(jitter, loss),
+    peerHostname: isWizard ? '' : isGateway ? 'DESKTOP-DEV' : 'GATEWAY-VPS-01',
+    publicIp: isWizard ? '' : isGateway ? '203.0.113.9' : '84.23.101.7',
+    peerPublicIp: isWizard ? '' : isGateway ? '84.23.101.7' : 'play.example.com',
+    localLanIps: isWizard ? [] : isGateway ? ['10.0.0.5'] : ['192.168.1.24'],
+    peerLanIps: isWizard ? [] : isGateway ? ['192.168.1.24'] : ['10.0.0.5'],
+    tunnels: [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true}],
+    connections: state.linkUp ? state.conns : [],
     totalBytesIn: state.bytesIn, totalBytesOut: state.bytesOut,
-    linkUpSinceMs: isWizard ? 0 : LINK_UP_SINCE,
+    linkUpSinceMs: isWizard || !state.linkUp ? 0 : LINK_UP_SINCE,
     processStartMs: isWizard ? 0 : PROCESS_START,
     peerAddr: isWizard ? '' : isGateway ? '84.23.101.7' : 'play.example.com:8474',
     linkBytesIn: Math.round(state.bytesIn * 1.06) + 2_400_000,
@@ -179,8 +233,9 @@ export function installDevMock() {
     cumulativeUptimeMs: 96 * 3_600_000 + (Date.now() - PROCESS_START),
     linkSessions: 14,
     historyUnsupported: false,
-    engineFatal: '',
-  })
+    engineFatal: axisFatal ? 'authentication failed: the gateway rejected this agent\'s token (it may have been rotated) — re-pair with a fresh code' : '',
+    }
+  }
 
   // simulate live traffic + a jittery RTT
   let logSeq = 0
@@ -194,43 +249,75 @@ export function installDevMock() {
 
   if (!isWizard) setInterval(() => {
     // Integrate the same rate functions the history serves, so the header
-    // readout, tiles, and chart all agree.
-    const now = Date.now()
-    state.bytesOut += Math.round(downRate(now) * 0.5)
-    state.bytesIn += Math.round(upRate(now) * 0.5)
-    state.conns[0].bytesOut += Math.round(downRate(now) * 0.5 * 0.8)
-    state.conns[0].bytesIn += Math.round(upRate(now) * 0.5 * 0.8)
-    state.conns[1].bytesOut += Math.round(downRate(now) * 0.5 * 0.2)
-    state.conns[1].bytesIn += Math.round(upRate(now) * 0.5 * 0.2)
-    state.rtt = 20 + Math.floor(Math.random() * 12)
-    if (Math.random() < 0.15) pushLog('DEBUG', 'stream opened', 'client=203.0.113.44 tunnel=Minecraft')
+    // readout, tiles, and chart all agree. A downed link moves no traffic.
+    if (state.linkUp) {
+      const now = Date.now()
+      state.bytesOut += Math.round(downRate(now) * 0.5)
+      state.bytesIn += Math.round(upRate(now) * 0.5)
+      state.conns[0].bytesOut += Math.round(downRate(now) * 0.5 * 0.8)
+      state.conns[0].bytesIn += Math.round(upRate(now) * 0.5 * 0.8)
+      state.conns[1].bytesOut += Math.round(downRate(now) * 0.5 * 0.2)
+      state.conns[1].bytesIn += Math.round(upRate(now) * 0.5 * 0.2)
+      state.rtt = 20 + Math.floor(Math.random() * 12)
+      if (Math.random() < 0.15) pushLog('DEBUG', 'stream opened', 'client=203.0.113.44 tunnel=Minecraft')
+    }
     emit('tick', status())
   }, 500)
 
   const ok = <T,>(v: T) => Promise.resolve(v)
+  // Attached mode: a service owns the engine — gated bindings reject exactly
+  // like the real backend so the UI's disabled/degraded states can be tested.
+  const gated = <T,>(v: () => T | Promise<T>): Promise<T> =>
+    axisAttached
+      ? Promise.reject(new Error('the engine runs in another process (service or headless run)'))
+      : Promise.resolve(v())
   const App: Record<string, AnyFn> = {
     Status: () => ok(status()),
     BandwidthHistory: (windowMs: number, maxBuckets: number) => ok(bandwidthHistory(windowMs, maxBuckets)),
-    PeerStats: () => ok(isWizard ? [] : peerStats()),
+    PeerStats: () => ok(isWizard || axisFresh ? [] : peerStats()),
     GetConfig: () => ok(config),
-    PairingCode: () => ok('pf1://play.example.com:8474/3f8a1c9e2b7d4056a1b2c3d4e5f60718#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'),
+    PairingCode: () => gated(() => 'pf1://play.example.com:8474/3f8a1c9e2b7d4056a1b2c3d4e5f60718#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'),
     Version: () => ok('0.1.0-dev'),
-    LogsSince: (seq: number) => ok(logs.filter(l => l.seq > seq)),
+    LogsSince: (seq: number) => ok(axisAttached ? [] : logs.filter(l => l.seq > seq)),
     TestReachability: () => new Promise(r => setTimeout(() => r('Reachable: play.example.com:25565 answered in 38ms — players can connect.'), 700)),
-    SetupGateway: () => ok(undefined),
-    SetupAgent: () => ok(undefined),
+    SetupGateway: () => gated(() => undefined),
+    SetupAgent: () => gated(() => undefined),
     SaveTunnels: (t: any) => { config.Agent.Tunnels = t; return ok(undefined) },
     SaveSettings: () => ok(undefined),
     SetTheme: (t: string) => { config.UI.Theme = t; return ok(undefined) },
-    RestartEngine: () => ok(undefined),
-    RegenerateToken: () => ok(undefined),
+    RestartEngine: () => gated(() => undefined),
+    RegenerateToken: () => gated(() => undefined),
     OpenConfigDir: () => ok(undefined),
     ExportDiagnostics: () => ok('C\\\\Users\\\\you\\\\Downloads\\\\proxyforward-diagnostics.zip'),
+    ExportSetup: () => gated(() => 'C\\\\Users\\\\you\\\\Downloads\\\\desktop-dev.pfsetup'),
+    ChooseAndInspectSetupFile: () => gated(() => ({
+      path: 'C\\\\Users\\\\you\\\\Downloads\\\\gateway-vps-01.pfsetup',
+      role: 'gateway', appVersion: '0.1.0-dev',
+      exportedAtMs: Date.now() - 86_400_000, encrypted: true,
+    })),
+    ImportSetup: () => gated(() => undefined),
     FirewallStatus: () => ok(true),
     FirewallRepair: () => ok(undefined),
     ServiceStatus: () => ok('Not installed'),
     InstallService: () => ok(undefined),
     UninstallService: () => ok(undefined),
+    MeasureLatency: () => gated(() => new Promise(r => setTimeout(() => {
+      const avg = 21 + Math.random() * 6
+      r({
+        samples: 10, rttAvgMs: avg, rttMinMs: avg - 3.2, rttMaxMs: avg + 7.1,
+        jitterMs: 2.4 + Math.random() * 2, oneWayEstimateMs: avg / 2,
+        oneWayUpMs: avg / 2 - 1.8, oneWayDownMs: avg / 2 + 1.8,
+        haveOneWay: true, clockSyncCaveat: true,
+      })
+    }, 1300))),
+    CreatorInfo: () => ok({name: 'xeri', url: 'https://github.com/xeri'}),
+    OpenCreatorURL: () => { window.open('https://github.com/xeri', '_blank'); return ok(undefined) },
+    CreatorAvatar: () => ok('data:image/svg+xml;utf8,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">' +
+      '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+      '<stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>' +
+      '<rect width="96" height="96" rx="48" fill="url(#g)"/>' +
+      '<text x="48" y="64" font-size="52" font-family="sans-serif" font-weight="700" text-anchor="middle" fill="#fff">x</text></svg>')),
   }
   w.go = {app: {App}}
   // eslint-disable-next-line no-console

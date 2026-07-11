@@ -136,6 +136,11 @@ type Hello struct {
 	// Capabilities the agent offers (see the capability rules above).
 	// omitempty keeps frames to legacy gateways byte-identical to v1.
 	Capabilities []string `json:"capabilities,omitempty"`
+	// Hostname / LocalIPs identify the agent's machine for the GUI's identity
+	// badges. Purely informational; both omitempty so frames to/from legacy
+	// peers stay byte-identical to v1.
+	Hostname string   `json:"hostname,omitempty"`
+	LocalIPs []string `json:"localIps,omitempty"`
 }
 
 type HelloOK struct {
@@ -144,6 +149,12 @@ type HelloOK struct {
 	AppVersion      string `json:"appVersion"`
 	// Capabilities is the negotiated set: offered ∩ gateway-supported.
 	Capabilities []string `json:"capabilities,omitempty"`
+	// Hostname / LocalIPs identify the gateway's machine for the agent's GUI.
+	Hostname string   `json:"hostname,omitempty"`
+	LocalIPs []string `json:"localIps,omitempty"`
+	// ObservedIP is the agent's public IP as the gateway sees it (the source
+	// address of this connection) — the agent has no other way to learn it.
+	ObservedIP string `json:"observedIp,omitempty"`
 }
 
 type HelloErr struct {
@@ -218,6 +229,11 @@ type Ping struct {
 type Pong struct {
 	Seq          uint64 `json:"seq"`
 	SentUnixNano int64  `json:"sentUnixNano"` // echoed from the ping
+	// RecvUnixNano is the gateway's clock when it received the ping. It lets
+	// the agent estimate per-direction one-way latency (up = recv−sent,
+	// down = now−recv), which is only meaningful when both clocks are
+	// NTP-synced. omitempty keeps legacy pongs (which never set it) identical.
+	RecvUnixNano int64 `json:"recvUnixNano,omitempty"`
 }
 
 // Health reports the agent's view of a tunnel's local backend; the gateway
