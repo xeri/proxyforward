@@ -131,10 +131,10 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
             state={portState}
             headline={isAgent
               ? (firstTunnel && firstTunnel.publicPort > 0 ? `Port ${firstTunnel.publicPort}` : 'Not bound')
-              : (tunnels.length ? `${tunnels.length} tunnel${tunnels.length === 1 ? '' : 's'}` : 'None')}
+              : (tunnels.length ? `${tunnels.length} tunnel${tunnels.length === 1 ? '' : 's'}` : 'No ports')}
             detail={isAgent
               ? (firstTunnel && firstTunnel.publicPort > 0 ? 'Players connect here' : 'Waiting for the gateway')
-              : 'Ports opened'}
+              : (tunnels.length ? 'Open to players' : 'Waiting for tunnels')}
             extra={(
               <span className="font-mono text-[11px] tabular-nums text-[var(--text-3)]">
                 {conns.length} live session{conns.length === 1 ? '' : 's'}
