@@ -1,9 +1,10 @@
 import {useEffect, useState} from 'react'
 import {GetConfig, SaveTunnels, TestReachability} from '../../wailsjs/go/app/App'
 import {config} from '../../wailsjs/go/models'
+import {Column, DataTable} from '../components/DataTable'
 import {
-  Badge, Button, Card, EmptyState, ErrorBanner, Field, IconButton, Modal,
-  PageHeader, Select, TextInput, Toggle,
+  Badge, Button, Card, Disclosure, EmptyState, ErrorBanner, Field, IconButton,
+  Modal, MonoChip, PageHeader, Select, TextInput, Toggle,
 } from '../components/ui'
 import {IconBolt, IconEdit, IconPlus, IconServer, IconTrash, IconTunnels} from '../components/icons'
 import {UIStatus} from '../state'
@@ -60,28 +61,28 @@ export function Tunnels({status}: {status: UIStatus}) {
 
   if (!isAgent) {
     const gwTunnels = status.tunnels ?? []
+    const cols: Column<(typeof gwTunnels)[number]>[] = [
+      {key: 'name', header: 'Tunnel', pin: true, render: t => <span className="font-medium">{t.name}</span>},
+      {key: 'port', header: 'Public port', render: t => <MonoChip>{t.publicPort > 0 ? t.publicPort : '—'}</MonoChip>},
+      {key: 'state', header: 'Server', align: 'right', render: t => (
+        <Badge tone={t.localKnown ? (t.localUp ? 'good' : 'bad') : 'neutral'}>
+          {t.localKnown ? (t.localUp ? 'Server up' : 'Server down') : 'Unknown'}
+        </Badge>
+      )},
+    ]
     return (
-      <div className="pf-stagger space-y-5">
+      <div className="pf-stagger space-y-4">
         <PageHeader title="Tunnels" subtitle="Registered by the connected agent." />
-        <Card title="Registered tunnels" pad={false}>
-          <div className="px-5 pb-5 pt-1">
-            {gwTunnels.length === 0
-              ? <EmptyState icon={<IconTunnels size={28} />} title="No tunnels registered"
-                  hint="Tunnels appear here once an agent connects and registers its ports." />
-              : <div className="pf-stagger space-y-2">
-                  {gwTunnels.map(t => (
-                    <div key={t.id} className="pf-lift flex items-center justify-between rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] px-4 py-3">
-                      <div>
-                        <div className="font-medium">{t.name}</div>
-                        <div className="text-xs text-[var(--text-3)]">Public port {t.publicPort || '—'}</div>
-                      </div>
-                      <Badge tone={t.localKnown ? (t.localUp ? 'good' : 'bad') : 'neutral'}>
-                        {t.localKnown ? (t.localUp ? 'Server up' : 'Server down') : 'Unknown'}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>}
-          </div>
+        <Card title="Registered tunnels" pad={false}
+          action={gwTunnels.length > 0 ? <div className="pr-4"><Badge tone="neutral">{gwTunnels.length}</Badge></div> : undefined}>
+          <DataTable
+            columns={cols} rows={gwTunnels} rowKey={t => t.id}
+            empty={{
+              icon: <IconTunnels size={28} />,
+              title: 'No tunnels registered',
+              hint: 'Tunnels appear here once an agent connects and registers its ports.',
+            }}
+          />
         </Card>
       </div>
     )
@@ -102,25 +103,31 @@ export function Tunnels({status}: {status: UIStatus}) {
           action={<Button onClick={() => setEditing(blankTunnel())}><IconPlus size={16} /> Add tunnel</Button>} /></Card>
       )}
 
-      <div className="pf-stagger grid grid-cols-1 gap-3 lg:grid-cols-2">
+      <div className="pf-stagger grid grid-cols-1 gap-[var(--grid-gap)] @min-[56rem]:grid-cols-2 @min-[84rem]:grid-cols-3">
         {tunnels.map(t => {
           const l = live.get(t.ID)
           const bound = !!(l && l.publicPort > 0)
+          const advanced: [string, string][] = [
+            ...(t.Options?.MinecraftAware ? [['Minecraft-aware', 'On'] as [string, string]] : []),
+            ...(t.Options?.ProxyProtocolV2 ? [['PROXY protocol v2', 'On'] as [string, string]] : []),
+            ...(t.Options?.OfflineMOTD ? [['Offline MOTD', t.Options.OfflineMOTD] as [string, string]] : []),
+            ...((t.Options?.BandwidthLimitMbps ?? 0) > 0 ? [['Bandwidth cap', `${t.Options.BandwidthLimitMbps} Mbps`] as [string, string]] : []),
+          ]
           return (
-            <div key={t.ID} className="pf-card pf-lift p-4">
+            <div key={t.ID} className="pf-card pf-lift flex flex-col p-4">
               <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-[var(--r-md)] bg-[var(--accent)] text-[var(--accent-contrast)] shadow-[0_2px_10px_-2px_color-mix(in_srgb,var(--accent)_45%,transparent)]">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--r-md)] bg-[var(--accent)] text-[var(--accent-contrast)] shadow-[0_2px_10px_-2px_color-mix(in_srgb,var(--accent)_45%,transparent)]">
                     <IconServer size={18} />
                   </div>
-                  <div>
-                    <div className="font-semibold">{t.Name}</div>
-                    <div className="select-text font-mono text-xs text-[var(--text-3)]">{t.LocalAddr} → :{t.PublicPort}</div>
+                  <div className="min-w-0">
+                    <div className="truncate font-semibold">{t.Name}</div>
+                    <div className="select-text truncate font-mono text-xs text-[var(--text-3)]">{t.LocalAddr} → :{t.PublicPort}</div>
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1">
                   <IconButton title="Edit" onClick={() => setEditing(config.Tunnel.createFrom({...t, Options: {...t.Options}}))}><IconEdit size={16} /></IconButton>
-                  <IconButton title="Delete" variant="danger" onClick={() => onDelete(t.ID)}><IconTrash size={16} /></IconButton>
+                  <DeleteButton onDelete={() => onDelete(t.ID)} />
                 </div>
               </div>
 
@@ -128,13 +135,24 @@ export function Tunnels({status}: {status: UIStatus}) {
                 {!t.Enabled && <Badge tone="neutral">Disabled</Badge>}
                 {t.Enabled && <Badge tone={bound ? 'good' : 'warn'}>{bound ? 'Bound' : 'Pending'}</Badge>}
                 {l?.localKnown && <Badge tone={l.localUp ? 'good' : 'bad'}>{l.localUp ? 'Server up' : 'Server down'}</Badge>}
-                {t.Options?.MinecraftAware && <Badge tone="accent">MC-aware</Badge>}
-                {t.Options?.ProxyProtocolV2 && <Badge tone="accent">PROXY v2</Badge>}
-                {t.Options?.OfflineMOTD && <Badge tone="neutral">Offline MOTD</Badge>}
-                {(t.Options?.BandwidthLimitMbps ?? 0) > 0 && <Badge tone="neutral">{t.Options.BandwidthLimitMbps} Mbps cap</Badge>}
               </div>
 
-              <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--border)] pt-2">
+              {advanced.length > 0 && (
+                <div className="mt-3">
+                  <Disclosure label={<span className="text-[13px]">Advanced</span>} hint={`${advanced.length} option${advanced.length === 1 ? '' : 's'} set`}>
+                    <dl className="space-y-1.5">
+                      {advanced.map(([k, v]) => (
+                        <div key={k} className="flex items-baseline justify-between gap-3 text-xs">
+                          <dt className="text-[var(--text-3)]">{k}</dt>
+                          <dd className="truncate text-right font-medium text-[var(--text-2)]" title={v}>{v}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </Disclosure>
+                </div>
+              )}
+
+              <div className="mt-3 flex flex-1 items-end justify-between gap-3 border-t border-[var(--border)] pt-2">
                 <Toggle checked={t.Enabled} onChange={v => onToggle(t.ID, v)} label="Enabled" />
                 <TestPath tunnelID={t.ID} bound={bound} port={l?.publicPort} />
               </div>
@@ -182,6 +200,27 @@ function TestPath({tunnelID, bound, port}: {tunnelID: string; bound: boolean; po
   )
 }
 
+/** DeleteButton: two-step delete — the first click arms it, the second
+ * confirms; it disarms itself after a moment. Deleting applies live. */
+function DeleteButton({onDelete}: {onDelete: () => void}) {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const t = setTimeout(() => setArmed(false), 2500)
+    return () => clearTimeout(t)
+  }, [armed])
+  if (armed) {
+    return (
+      <Button variant="danger" size="sm" onClick={onDelete} title="Click again to delete this tunnel">
+        <IconTrash size={13} /> Delete?
+      </Button>
+    )
+  }
+  return (
+    <IconButton title="Delete" variant="danger" onClick={() => setArmed(true)}><IconTrash size={16} /></IconButton>
+  )
+}
+
 function TunnelEditor({title, initial, onSave, onCancel}: {
   title: string; initial: Tunnel; onSave: (t: Tunnel) => Promise<void>; onCancel: () => void
 }) {
@@ -210,27 +249,37 @@ function TunnelEditor({title, initial, onSave, onCancel}: {
           </Field>
         </div>
 
-        <div className="divide-y divide-[var(--border)] rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] px-4 py-1">
-          <Toggle checked={opt.MinecraftAware} onChange={v => setOpt({MinecraftAware: v})}
-            label="Minecraft-aware"
-            hint="Poll the server for MOTD, player count and version; sniff usernames for the traffic view." />
-          <Toggle checked={opt.ProxyProtocolV2} onChange={v => setOpt({ProxyProtocolV2: v})}
-            label="PROXY protocol v2"
-            hint={<>Send the real client IP to the local server (Paper/Velocity). <b>Mutually exclusive</b> with BungeeCord/Velocity IP-forwarding — enabling both causes ghost errors.</>} />
-        </div>
+        {/* Advanced options stay folded unless one is already set — the
+            default add-tunnel flow is three fields and Save. */}
+        <Disclosure
+          label="Advanced options"
+          hint="Protocol awareness, real client IPs, offline behavior, bandwidth"
+          defaultOpen={opt.MinecraftAware || opt.ProxyProtocolV2 || !!opt.OfflineMOTD || (opt.BandwidthLimitMbps ?? 0) > 0}
+        >
+          <div className="space-y-4">
+            <div className="divide-y divide-[var(--border)] rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] px-4 py-1">
+              <Toggle checked={opt.MinecraftAware} onChange={v => setOpt({MinecraftAware: v})}
+                label="Minecraft-aware"
+                hint="Poll the server for MOTD, player count and version; sniff usernames for the traffic view." />
+              <Toggle checked={opt.ProxyProtocolV2} onChange={v => setOpt({ProxyProtocolV2: v})}
+                label="PROXY protocol v2"
+                hint={<>Send the real client IP to the local server (Paper/Velocity). <b>Mutually exclusive</b> with BungeeCord/Velocity IP-forwarding — enabling both causes ghost errors.</>} />
+            </div>
 
-        <Field label="Offline MOTD" hint="Shown to players when the agent or server is down. Leave blank for a clean disconnect instead.">
-          <TextInput value={opt.OfflineMOTD} onChange={v => setOpt({OfflineMOTD: v})} placeholder="Server is offline — back soon" />
-        </Field>
+            <Field label="Offline MOTD" hint="Shown to players when the agent or server is down. Leave blank for a clean disconnect instead.">
+              <TextInput value={opt.OfflineMOTD} onChange={v => setOpt({OfflineMOTD: v})} placeholder="Server is offline — back soon" />
+            </Field>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Bandwidth cap (Mbps)" hint="0 = unlimited. Protects the gateway's uplink.">
-            <TextInput value={String(opt.BandwidthLimitMbps)} onChange={v => setOpt({BandwidthLimitMbps: parseInt(v, 10) || 0})} mono />
-          </Field>
-          <Field label="Protocol">
-            <Select value="tcp" onChange={() => {}} options={[{value: 'tcp', label: 'TCP (Java Edition)'}]} />
-          </Field>
-        </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Bandwidth cap (Mbps)" hint="0 = unlimited. Protects the gateway's uplink.">
+                <TextInput value={String(opt.BandwidthLimitMbps)} onChange={v => setOpt({BandwidthLimitMbps: parseInt(v, 10) || 0})} mono />
+              </Field>
+              <Field label="Protocol">
+                <Select value="tcp" onChange={() => {}} options={[{value: 'tcp', label: 'TCP (Java Edition)'}]} />
+              </Field>
+            </div>
+          </div>
+        </Disclosure>
       </div>
     </Modal>
   )
