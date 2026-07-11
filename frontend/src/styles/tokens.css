@@ -78,6 +78,12 @@
   --mode-glow: #8b5cf6;
   --mode-glow-2: #4f46e5;
 
+  /* Role swatches — fixed per-role hues for surfaces that must show a role
+     that is NOT the active one (wizard role cards, identity strip, emblems).
+     The active role's ramp still comes from var(--accent). */
+  --role-agent: #22d3ee;
+  --role-gateway: #8b5cf6;
+
   /* Semantic status. Color is reserved for these + chart series. */
   --good: #34d399;
   --warn: #fbbf24;
@@ -129,11 +135,12 @@
   --titlebar-inset: 10px; /* gutter around the floating titlebar island */
   --chrome-top: calc(var(--titlebar-h) + var(--titlebar-inset) * 2);
   --light-angle: 135deg;
-  --edge-hi: rgba(255, 255, 255, 0.38);
-  --edge-mid: rgba(255, 255, 255, 0.1);
+  --edge-hi: rgba(255, 255, 255, 0.45);
+  --edge-mid: rgba(255, 255, 255, 0.11);
   --edge-lo: rgba(255, 255, 255, 0.02);
-  --bevel-top: rgba(255, 255, 255, 0.12);
-  --bevel-bot: rgba(0, 0, 0, 0.35);
+  --edge-crisp: rgba(255, 255, 255, 0.55); /* hairline top-catch on milled edges */
+  --bevel-top: rgba(255, 255, 255, 0.15);
+  --bevel-bot: rgba(0, 0, 0, 0.4);
   --sheen: rgba(255, 255, 255, 0.06);
   --glare: rgba(255, 255, 255, 0.09);
   --glass-tint: color-mix(in oklab, var(--panel) 62%, transparent);
@@ -148,13 +155,41 @@
   --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
   --noise-glass: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.015'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 
-  /* Soft glass slabs: generous, curved-acrylic geometry. rounded-full still
-     survives only on status dots and toggle knobs. */
-  --r-xs: 6px;
-  --r-sm: 8px;
-  --r-md: 14px; /* inputs, buttons, nav items */
-  --r-lg: 20px; /* cards, the titlebar island */
-  --r-xl: 26px; /* modals, command palette */
+  /* Precision-milled glass: tightly constrained corners — just enough round
+     to kill the jaggies, never bubble-soft. rounded-full still survives only
+     on status dots and toggle knobs. */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px; /* inputs, buttons, nav items */
+  --r-lg: 14px; /* cards, the titlebar island */
+  --r-xl: 18px; /* modals, command palette */
+
+  /* Type scale. Root stays 13.5px (base.css); these are the only sizes new
+     UI should use, so hierarchy stays consistent across screens. */
+  --fs-hero: 24px;    /* page titles */
+  --fs-title: 18px;   /* card headlines, wizard acts */
+  --fs-section: 15px; /* in-card section headers */
+  --fs-body: 13.5px;  /* default */
+  --fs-sub: 12.5px;   /* secondary rows, hints */
+  --fs-caption: 11px; /* labels, table headers */
+  --fs-micro: 10px;   /* kbd chips, overlines */
+  --lh-tight: 1.15;
+  --lh-body: 1.45;
+
+  /* 4px spatial rhythm + shared layout geometry. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --content-max: 1400px;
+  --page-pad: 28px;
+  --grid-gap: 16px;
+  --sidebar-w: 224px;  /* Shell grid column — Sidebar px math must agree */
+  --nav-item-h: 36px;  /* Sidebar ITEM_H — the sliding indicator's px math */
 
   /* Motion. */
   --dur-fast: 120ms;
@@ -211,6 +246,9 @@
   --mode-glow: #7048e8;
   --mode-glow-2: #4f46e5;
 
+  --role-agent: #0e7490;
+  --role-gateway: #7048e8;
+
   --good: #0c9f6e;
   --warn: #b47607;
   --bad: #dc4d4d;
@@ -240,11 +278,12 @@
   /* Light model, inverted: frosted ice is lit from within, so the rim facing
      the light stays white-hot but the shadow side goes DARKER than the fill.
      Shadows are tinted navy (never gray) at roughly half the dark alphas. */
-  --edge-hi: rgba(255, 255, 255, 0.9);
+  --edge-hi: rgba(255, 255, 255, 0.95);
   --edge-mid: rgba(255, 255, 255, 0.35);
   --edge-lo: rgba(25, 28, 38, 0.14);
-  --bevel-top: rgba(255, 255, 255, 0.85);
-  --bevel-bot: rgba(60, 70, 110, 0.18);
+  --edge-crisp: rgba(255, 255, 255, 1);
+  --bevel-top: rgba(255, 255, 255, 0.9);
+  --bevel-bot: rgba(60, 70, 110, 0.22);
   --sheen: rgba(255, 255, 255, 0.55);
   --glare: rgba(255, 255, 255, 0.05);
   --shadow-key: 0 1px 2px rgba(30, 34, 58, 0.2);
