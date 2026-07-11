@@ -5,9 +5,10 @@ import {BandwidthPanel} from '../components/BandwidthChart'
 import {NumberTicker} from '../components/NumberTicker'
 import {
   Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, ErrorBanner,
-  PageHeader, StatusDot,
+  PageHeader, StatTile, StatusDot,
 } from '../components/ui'
-import {IconActivity, IconGlobe, IconLink, IconServer} from '../components/icons'
+import {Emblem} from '../components/Emblem'
+import {IconActivity, IconClock, IconGauge, IconGlobe, IconLink, IconServer, IconUsers} from '../components/icons'
 import {NavId} from '../nav'
 import {fmtBytes, fmtUptime, UIStatus} from '../state'
 
@@ -57,36 +58,44 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
   const rightHop = isAgent ? linkBytes : appBytes
 
   return (
-    <div className="pf-stagger space-y-5">
-      <PageHeader
-        title="Overview"
-        subtitle={isAgent ? 'The path from your server to your players.' : 'The public front door for your agent.'}
-      />
+    <div className="pf-stagger grid grid-cols-12 gap-[var(--grid-gap)]">
+      <div className="col-span-12">
+        <PageHeader
+          title="Overview"
+          subtitle={isAgent ? 'The path from your server to your players.' : 'The public front door for your agent.'}
+        />
+      </div>
 
       {status.engineFatal && (
-        <Banner
-          tone="bad"
-          action={status.mode !== 'attached' ? (
-            <Button variant="ghost" size="sm" onClick={() => RestartEngine().catch(() => {})}>Restart</Button>
-          ) : undefined}
-        >
-          Engine stopped: {status.engineFatal}
-        </Banner>
+        <div className="col-span-12">
+          <Banner
+            tone="bad"
+            action={status.mode !== 'attached' ? (
+              <Button variant="ghost" size="sm" onClick={() => RestartEngine().catch(() => {})}>Restart</Button>
+            ) : undefined}
+          >
+            Engine stopped: {status.engineFatal}
+          </Banner>
+        </div>
       )}
       {status.mode === 'attached' && (
-        <Banner tone="info">Running as a Windows service — this window is a viewer.</Banner>
+        <div className="col-span-12">
+          <Banner tone="info">Running as a Windows service — this window is a viewer.</Banner>
+        </div>
       )}
 
-      {/* Pipeline hero: the traffic path, with flow streaming when live. A
-          warn/bad link leaks tone-colored light from behind the glass. */}
+      {/* Pipeline hero: the traffic path as three machined stations, flow
+          streaming between them when live. A warn/bad link leaks tone-colored
+          light from behind the glass. */}
+      <div className="col-span-12">
       <Bleed
         color={linkState === 'bad' ? 'var(--bad)' : linkState === 'warn' ? 'var(--warn)' : null}
         strength="20%"
       >
       <Card pad={false}>
-        <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-[1fr_3.5rem_1fr_3.5rem_1fr] md:gap-0">
+        <div className="grid grid-cols-1 gap-3 p-5 @3xl:grid-cols-[1fr_3rem_1fr_3rem_1fr] @3xl:gap-0">
           <PipeNode
-            icon={<IconServer size={22} />}
+            icon={<IconServer size={20} />}
             title={isAgent ? 'Local server' : 'Agent link'}
             state={isAgent ? localState : linkState}
             headline={isAgent
@@ -98,7 +107,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
           />
           <Conduit on={flowing && (isAgent ? localState !== 'bad' : true)} label={leftHop > 0 ? fmtBytes(leftHop) : undefined} />
           <PipeNode
-            icon={<IconLink size={22} />}
+            icon={<IconLink size={20} />}
             title="Tunnel link"
             state={linkState}
             pulse
@@ -117,7 +126,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
           />
           <Conduit on={flowing && portState === 'good'} label={rightHop > 0 ? fmtBytes(rightHop) : undefined} />
           <PipeNode
-            icon={<IconGlobe size={22} />}
+            icon={<IconGlobe size={20} />}
             title="Public port"
             state={portState}
             headline={isAgent
@@ -135,35 +144,57 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
         </div>
       </Card>
       </Bleed>
+      </div>
 
-      {/* Link health: verdict + the two headline signals, latency probe inline. */}
-      <HealthPanel status={status} />
-
-      {/* Headline stats. */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Stat label="Link uptime" value={linkUptime} sub={uptimeSub || undefined} />
-        <Stat label="Round trip" value={(isAgent ? status.linkUp : status.agentConnected) ? `${status.rttMillis} ms` : '—'} />
-        <StatTicker label="Live sessions" value={conns.length} accent={conns.length > 0} />
-        <StatTicker
-          label="Data moved" value={appBytes} format={fmtBytes}
+      {/* Link health beside the headline stats: verdict + signals left, the
+          2×2 numbers right; both collapse to full width in a narrow window. */}
+      <div className="col-span-12 @5xl:col-span-7">
+        <HealthPanel status={status} />
+      </div>
+      <div className="col-span-12 grid grid-cols-2 content-start gap-[var(--grid-gap)] @5xl:col-span-5">
+        <StatTile size="lg" icon={<IconClock size={15} />} label="Link uptime" value={linkUptime} sub={uptimeSub || undefined} />
+        <StatTile size="lg" icon={<IconGauge size={15} />} label="Round trip" value={(isAgent ? status.linkUp : status.agentConnected) ? `${status.rttMillis} ms` : '—'} />
+        <StatTile
+          size="lg" icon={<IconUsers size={15} />} label="Live sessions" accent={conns.length > 0}
+          value={<NumberTicker value={conns.length} format={n => String(Math.round(n))} />}
+        />
+        <StatTile
+          size="lg" icon={<IconActivity size={15} />} label="Data moved"
+          value={<NumberTicker value={appBytes} format={n => fmtBytes(Math.round(n))} />}
           sub={status.allTimeBytesIn + status.allTimeBytesOut > 0
             ? `all-time ${fmtBytes(status.allTimeBytesIn + status.allTimeBytesOut)}`
             : undefined}
         />
       </div>
 
-      {/* Identity: who's on each end. */}
-      <IdentityStrip status={status} />
+      {/* Identity: who's on each end, wearing its role emblem. */}
+      <div className="col-span-12 @3xl:col-span-6">
+        <IdentityCard
+          role={isAgent ? 'agent' : 'gateway'} self
+          sideLabel={`This machine · ${isAgent ? 'Agent' : 'Gateway'}`}
+          host={status.hostname} publicIp={status.publicIp} lanIps={status.localLanIps} online
+        />
+      </div>
+      <div className="col-span-12 @3xl:col-span-6">
+        <IdentityCard
+          role={isAgent ? 'gateway' : 'agent'}
+          sideLabel={`Peer · ${isAgent ? 'Gateway' : 'Agent'}`}
+          host={status.peerHostname} publicIp={status.peerPublicIp} lanIps={status.peerLanIps}
+          online={isAgent ? status.linkUp : status.agentConnected}
+        />
+      </div>
 
-      {/* Role tool, back-lit by a quiet accent bleed. */}
-      <Bleed color="var(--accent)" strength="8%">
-        {isAgent
-          ? <PlayerAddressCard status={status} onNavigate={onNavigate} />
-          : <GatewayPairingCard />}
-      </Bleed>
-
-      {/* Bandwidth teaser → Traffic. */}
-      <BandwidthPanel compact historyUnsupported={status.historyUnsupported} onExpand={() => onNavigate('traffic')} />
+      {/* Role tool beside the bandwidth teaser. */}
+      <div className="col-span-12 @5xl:col-span-7">
+        <Bleed color="var(--accent)" strength="8%">
+          {isAgent
+            ? <PlayerAddressCard status={status} onNavigate={onNavigate} />
+            : <GatewayPairingCard />}
+        </Bleed>
+      </div>
+      <div className="col-span-12 @5xl:col-span-5">
+        <BandwidthPanel compact historyUnsupported={status.historyUnsupported} onExpand={() => onNavigate('traffic')} />
+      </div>
     </div>
   )
 }
@@ -293,28 +324,22 @@ function LatencyProbe({linked, peer}: {linked: boolean; peer: 'gateway' | 'agent
   )
 }
 
-/** IdentityStrip: hostnames of both machines, public IP prominent, LAN quiet. */
-function IdentityStrip({status}: {status: UIStatus}) {
-  const isAgent = status.role === 'agent'
-  const linked = isAgent ? status.linkUp : status.agentConnected
-  return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <IdentityCard sideLabel={`This machine · ${isAgent ? 'Agent' : 'Gateway'}`} host={status.hostname} publicIp={status.publicIp} lanIps={status.localLanIps} online />
-      <IdentityCard sideLabel={`Peer · ${isAgent ? 'Gateway' : 'Agent'}`} host={status.peerHostname} publicIp={status.peerPublicIp} lanIps={status.peerLanIps} online={linked} />
-    </div>
-  )
-}
-
-function IdentityCard({sideLabel, host, publicIp, lanIps, online}: {
+/** IdentityCard: one end of the tunnel — role emblem, hostname, public IP
+ * prominent, LAN quiet. `self` rides the live accent; the peer wears its
+ * fixed role swatch, so both ends read in ecosystem colors at a glance. */
+function IdentityCard({role, self = false, sideLabel, host, publicIp, lanIps, online}: {
+  role: 'agent' | 'gateway'
+  self?: boolean
   sideLabel: string; host?: string; publicIp?: string; lanIps?: string[]; online: boolean
 }) {
   const lan = (lanIps ?? []).filter(Boolean)
   return (
-    <Card pad={false}>
-      <div className="flex items-start justify-between gap-3 p-4">
-        <div className="min-w-0">
+    <Card pad={false} className="h-full">
+      <div className="flex items-start gap-3.5 p-4">
+        <Emblem role={role} size={38} fixed={!self} glow={online} />
+        <div className="min-w-0 flex-1">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">{sideLabel}</div>
-          <div className="mt-1.5 flex items-center gap-2">
+          <div className="mt-1 flex items-center gap-2">
             <Badge tone="neutral"><IconServer size={12} /> {host || '—'}</Badge>
           </div>
           <div className="mt-2 flex items-center gap-1.5">
@@ -334,14 +359,16 @@ function IdentityCard({sideLabel, host, publicIp, lanIps, online}: {
   )
 }
 
+/** PipeNode: one station of the pipeline — a milled inset slab with a
+ * state-lit icon chip and the station's verdict. */
 function PipeNode({icon, title, state, headline, detail, extra, pulse}: {
   icon: ReactNode; title: string; state: Seg; headline: string; detail: string; extra?: ReactNode; pulse?: boolean
 }) {
   const c = segColor[state]
   return (
-    <div className="flex min-w-0 flex-col items-center px-2 text-center">
+    <div className="flex min-w-0 items-start gap-3 rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--input-bg)] p-3.5 shadow-[inset_0_1px_0_var(--hairline)]">
       <div
-        className="grid h-12 w-12 place-items-center rounded-[var(--r-lg)] border transition-all duration-500"
+        className="grid h-11 w-11 shrink-0 place-items-center rounded-[var(--r-md)] border transition-all duration-500"
         style={{
           color: c,
           borderColor: `color-mix(in srgb, ${c} 40%, var(--border))`,
@@ -351,12 +378,12 @@ function PipeNode({icon, title, state, headline, detail, extra, pulse}: {
       >
         {icon}
       </div>
-      <div className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">{title}</div>
-      <div className="mt-1 text-lg font-semibold leading-tight">{headline}</div>
-      <div className="mt-1.5">
-        <StatusDot state={state} label={detail} pulse={pulse} />
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">{title}</div>
+        <div className="mt-0.5 truncate text-base font-semibold leading-tight">{headline}</div>
+        <div className="mt-1"><StatusDot state={state} label={detail} pulse={pulse} /></div>
+        {extra && <div className="mt-1 flex max-w-full">{extra}</div>}
       </div>
-      {extra && <div className="mt-1 flex max-w-full justify-center">{extra}</div>}
     </div>
   )
 }
@@ -375,45 +402,21 @@ function Bleed({color, strength = '14%', children}: {color: string | null; stren
   )
 }
 
-/** Conduit between two pipeline nodes: dashes stream across when live; the
- * label below carries that hop's lifetime byte count. */
+/** Conduit between two pipeline stations: dashes stream across when live;
+ * the byte count for that hop rides just beneath the line. */
 function Conduit({on, label}: {on: boolean; label?: string}) {
   return (
-    <div className="hidden flex-col items-center justify-start md:flex" aria-hidden>
+    <div className="hidden flex-col items-center justify-center gap-1.5 @3xl:flex" aria-hidden>
       <div
-        className="pf-conduit mt-[23px]"
+        className="pf-conduit"
         data-on={on}
         style={{['--flow-color' as string]: 'var(--accent)'}}
       />
       {label && (
-        <span className="mt-1.5 whitespace-nowrap font-mono text-[10px] tabular-nums text-[var(--text-3)]">
+        <span className="whitespace-nowrap font-mono text-[10px] tabular-nums text-[var(--text-3)]">
           {label}
         </span>
       )}
-    </div>
-  )
-}
-
-function Stat({label, value, sub, accent}: {label: string; value: string; sub?: string; accent?: boolean}) {
-  return (
-    <div className="pf-card pf-lift pf-hot p-3.5">
-      <div className="text-xs text-[var(--text-3)]">{label}</div>
-      <div className="mt-1 text-lg font-semibold tabular-nums" style={accent ? {color: 'var(--accent)'} : undefined}>{value}</div>
-      {sub && <div className="mt-0.5 truncate text-[11px] tabular-nums text-[var(--text-3)]">{sub}</div>}
-    </div>
-  )
-}
-
-function StatTicker({label, value, format = String, sub, accent}: {
-  label: string; value: number; format?: (n: number) => string; sub?: string; accent?: boolean
-}) {
-  return (
-    <div className="pf-card pf-lift pf-hot p-3.5">
-      <div className="text-xs text-[var(--text-3)]">{label}</div>
-      <div className="mt-1 text-lg font-semibold" style={accent ? {color: 'var(--accent)'} : undefined}>
-        <NumberTicker value={value} format={n => format(Math.round(n))} />
-      </div>
-      {sub && <div className="mt-0.5 truncate text-[11px] tabular-nums text-[var(--text-3)]">{sub}</div>}
     </div>
   )
 }
