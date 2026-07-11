@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react'
 import {BandwidthPanel} from '../components/BandwidthChart'
-import {Badge, Card, CopyIcon, EmptyState, PageHeader} from '../components/ui'
+import {Column, DataTable} from '../components/DataTable'
+import {Badge, Card, CopyIcon, MonoChip, PageHeader} from '../components/ui'
 import {IconConnections, IconLink, IconUsers} from '../components/icons'
 import {usePeers} from '../history'
 import {fmtBytes, fmtRate, UIStatus} from '../state'
@@ -54,117 +55,96 @@ export function Traffic({status}: {status: UIStatus}) {
   const clients = mergeClients(peers, conns)
   const selfIP = stripPort(status.peerAddr ?? '')
 
+  const sessionCols: Column<(typeof conns)[number]>[] = [
+    {
+      key: 'ip', header: 'Client IP', pin: true, mono: true,
+      render: c => {
+        const {ip} = splitAddr(c.clientAddr)
+        return (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="select-text">{ip}</span>
+            <LanTag ip={ip} selfIP={selfIP} />
+            <CopyIcon text={ip} title="Copy IP" />
+          </span>
+        )
+      },
+    },
+    {key: 'port', header: 'Port', render: c => <MonoChip>{splitAddr(c.clientAddr).port || '—'}</MonoChip>},
+    {key: 'tunnel', header: 'Tunnel', render: c => <span className="text-[var(--text-2)]">{c.tunnelName || '—'}</span>},
+    {key: 'dur', header: 'Duration', render: c => <span className="tabular-nums text-[var(--text-2)]">{fmtElapsed(Date.now() - c.startedAt)}</span>},
+    {key: 'rx', header: 'Received', align: 'right', render: c => fmtBytes(c.bytesOut)},
+    {key: 'tx', header: 'Sent', align: 'right', render: c => fmtBytes(c.bytesIn)},
+  ]
+
+  const clientCols: Column<ClientRow>[] = [
+    {
+      key: 'ip', header: 'Client', pin: true, mono: true,
+      render: cl => (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="select-text">{cl.ip}</span>
+          <LanTag ip={cl.ip} selfIP={selfIP} />
+          <CopyIcon text={cl.ip} title="Copy IP" />
+          {cl.live && <Badge tone="good">live</Badge>}
+        </span>
+      ),
+    },
+    {key: 'rate', header: 'Rate', align: 'right', mono: true, render: cl => (
+      <span className="text-[var(--text-2)]">{cl.live ? fmtRate(rates.get(cl.ip) ?? 0) : '—'}</span>
+    )},
+    {key: 'session', header: 'Session', align: 'right', render: cl => (
+      <span className="text-[var(--text-2)]">{cl.live && cl.sessionStart ? fmtElapsed(Date.now() - cl.sessionStart) : '—'}</span>
+    )},
+    {key: 'dl', header: 'Total ↓', align: 'right', render: cl => fmtBytes(cl.totalOut)},
+    {key: 'ul', header: 'Total ↑', align: 'right', render: cl => fmtBytes(cl.totalIn)},
+    {key: 'conns', header: 'Conns', align: 'right', render: cl => <span className="text-[var(--text-2)]">{cl.conns}</span>},
+    {key: 'first', header: 'First seen', align: 'right', render: cl => (
+      <span className="text-xs text-[var(--text-3)]">{fmtRelative(cl.firstSeen)}</span>
+    )},
+    {key: 'last', header: 'Last seen', align: 'right', render: cl => (
+      <span className="text-xs text-[var(--text-3)]">{cl.live ? 'now' : fmtRelative(cl.lastSeen)}</span>
+    )},
+  ]
+
   return (
-    <div className="pf-stagger space-y-5">
+    <div className="pf-stagger space-y-4">
       <PageHeader title="Traffic" subtitle="Every byte, session, and client through the tunnel." />
 
-      <ControlLinkCard status={status} />
+      <LinkStrip status={status} />
 
-      <BandwidthPanel historyUnsupported={status.historyUnsupported} />
+      <BandwidthPanel hero historyUnsupported={status.historyUnsupported} />
 
-      <Card title="Live sessions" pad={false}
-        action={<div className="pr-4"><Badge tone={conns.length ? 'good' : 'neutral'}>{conns.length} live</Badge></div>}>
-        {conns.length === 0 ? (
-          <div className="px-4 pb-4">
-            <EmptyState icon={<IconConnections size={28} />} title="No one's connected right now"
-              hint="Sessions appear here the moment a player joins through the tunnel." />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-y border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-3)]">
-                  <th className="px-4 py-2 font-medium">Client IP</th>
-                  <th className="px-4 py-2 font-medium">Port</th>
-                  <th className="px-4 py-2 font-medium">Tunnel</th>
-                  <th className="px-4 py-2 font-medium">Duration</th>
-                  <th className="px-4 py-2 text-right font-medium">Received</th>
-                  <th className="px-4 py-2 text-right font-medium">Sent</th>
-                </tr>
-              </thead>
-              <tbody>
-                {conns.map(c => {
-                  const {ip, port} = splitAddr(c.clientAddr)
-                  return (
-                    <tr key={c.id} className="pf-fade border-b border-[var(--border)] transition-colors duration-200 last:border-0 hover:bg-[var(--panel-2)]/50">
-                      <td className="bg-[var(--panel-2)]/40 px-4 py-2.5">
-                        <span className="inline-flex items-center gap-1.5 font-mono text-[13px]">
-                          <span className="select-text">{ip}</span>
-                          <LanTag ip={ip} selfIP={selfIP} />
-                          <CopyIcon text={ip} title="Copy IP" />
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5"><PortBadge port={port} /></td>
-                      <td className="px-4 py-2.5 text-[var(--text-2)]">{c.tunnelName || '—'}</td>
-                      <td className="px-4 py-2.5 tabular-nums text-[var(--text-2)]">{fmtElapsed(Date.now() - c.startedAt)}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums">{fmtBytes(c.bytesOut)}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums">{fmtBytes(c.bytesIn)}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+      <div className="grid grid-cols-1 gap-4 @min-[88rem]:grid-cols-2">
+        <Card title="Live sessions" pad={false}
+          action={<div className="pr-4"><Badge tone={conns.length ? 'good' : 'neutral'}>{conns.length} live</Badge></div>}>
+          <DataTable
+            columns={sessionCols} rows={conns} rowKey={c => c.id}
+            empty={{
+              icon: <IconConnections size={28} />,
+              title: "No one's connected right now",
+              hint: 'Sessions appear here the moment a player joins through the tunnel.',
+            }}
+          />
+        </Card>
 
-      <Card title="Every client" subtitle="Lifetime stats for every IP that has ever connected" pad={false}
-        action={<div className="pr-4"><Badge tone="neutral">{clients.length}</Badge></div>}>
-        {clients.length === 0 ? (
-          <div className="px-4 pb-4">
-            <EmptyState icon={<IconUsers size={28} />} title="No clients yet"
-              hint="Lifetime per-IP stats build up here as players connect." />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-y border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-3)]">
-                  <th className="px-4 py-2 font-medium">Client</th>
-                  <th className="px-4 py-2 text-right font-medium">Rate</th>
-                  <th className="px-4 py-2 text-right font-medium">Session</th>
-                  <th className="px-4 py-2 text-right font-medium">Total ↓</th>
-                  <th className="px-4 py-2 text-right font-medium">Total ↑</th>
-                  <th className="px-4 py-2 text-right font-medium">Conns</th>
-                  <th className="px-4 py-2 text-right font-medium">First seen</th>
-                  <th className="px-4 py-2 text-right font-medium">Last seen</th>
-                </tr>
-              </thead>
-              <tbody>
-                {clients.map(cl => (
-                  <tr key={cl.ip} className="border-b border-[var(--border)] transition-colors duration-200 last:border-0 hover:bg-[var(--panel-2)]/50">
-                    <td className="bg-[var(--panel-2)]/40 px-4 py-2.5">
-                      <span className="inline-flex items-center gap-1.5 font-mono text-[13px]">
-                        <span className="select-text">{cl.ip}</span>
-                        <LanTag ip={cl.ip} selfIP={selfIP} />
-                        <CopyIcon text={cl.ip} title="Copy IP" />
-                        {cl.live && <Badge tone="good">live</Badge>}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[var(--text-2)]">
-                      {cl.live ? fmtRate(rates.get(cl.ip) ?? 0) : '—'}
-                    </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-[var(--text-2)]">
-                      {cl.live && cl.sessionStart ? fmtElapsed(Date.now() - cl.sessionStart) : '—'}
-                    </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{fmtBytes(cl.totalOut)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{fmtBytes(cl.totalIn)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-[var(--text-2)]">{cl.conns}</td>
-                    <td className="px-4 py-2.5 text-right text-xs tabular-nums text-[var(--text-3)]">{fmtRelative(cl.firstSeen)}</td>
-                    <td className="px-4 py-2.5 text-right text-xs tabular-nums text-[var(--text-3)]">{cl.live ? 'now' : fmtRelative(cl.lastSeen)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+        <Card title="Every client" subtitle="Lifetime stats for every IP that has ever connected" pad={false}
+          action={<div className="pr-4"><Badge tone="neutral">{clients.length}</Badge></div>}>
+          <DataTable
+            columns={clientCols} rows={clients} rowKey={cl => cl.ip}
+            empty={{
+              icon: <IconUsers size={28} />,
+              title: 'No clients yet',
+              hint: 'Lifetime per-IP stats build up here as players connect.',
+            }}
+          />
+        </Card>
+      </div>
     </div>
   )
 }
 
-/** ControlLinkCard: the tunnel link itself — peer, uptime, RTT, raw bytes. */
-function ControlLinkCard({status}: {status: UIStatus}) {
+/** LinkStrip: the tunnel link compressed to one slim band — verdict on the
+ * left, the link's numbers on the right. */
+function LinkStrip({status}: {status: UIStatus}) {
   const isAgent = status.role === 'agent'
   const up = isAgent ? status.linkUp : status.agentConnected
   const c = up ? 'var(--good)' : isAgent ? 'var(--bad)' : 'var(--warn)'
@@ -175,10 +155,10 @@ function ControlLinkCard({status}: {status: UIStatus}) {
 
   return (
     <Card pad={false}>
-      <div className="flex flex-col gap-5 p-5 md:flex-row md:items-center md:justify-between">
-        <div className="flex min-w-0 items-center gap-4">
+      <div className="flex flex-col gap-4 p-4 @4xl:flex-row @4xl:items-center @4xl:justify-between">
+        <div className="flex min-w-0 items-center gap-3.5">
           <div
-            className="grid h-12 w-12 shrink-0 place-items-center rounded-[var(--r-lg)] border transition-all duration-500"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--r-md)] border transition-all duration-500"
             style={{
               color: c,
               borderColor: `color-mix(in srgb, ${c} 40%, var(--border))`,
@@ -186,24 +166,24 @@ function ControlLinkCard({status}: {status: UIStatus}) {
               boxShadow: up ? `0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)` : 'none',
             }}
           >
-            <IconLink size={22} />
+            <IconLink size={19} />
           </div>
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">{title}</div>
-            <div className="mt-0.5 flex items-center gap-2 text-lg font-semibold leading-tight">
+            <div className="mt-0.5 flex items-center gap-2 text-base font-semibold leading-tight">
               <span className={`inline-flex h-2 w-2 rounded-full ${up ? 'pf-halo' : ''}`} style={{background: c, ['--halo' as string]: c}} />
-              {headline}
+              <span className="truncate">{headline}</span>
+              {status.peerAddr && (
+                <span className="ml-1 hidden min-w-0 items-center gap-1.5 text-[12.5px] font-normal text-[var(--text-3)] @2xl:inline-flex">
+                  <span className="min-w-0 select-text truncate font-mono" title={status.peerAddr}>{status.peerAddr}</span>
+                  <CopyIcon text={status.peerAddr} title="Copy peer address" />
+                </span>
+              )}
             </div>
-            {status.peerAddr && (
-              <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[13px] text-[var(--text-2)]">
-                <span className="min-w-0 select-text truncate font-mono" title={status.peerAddr}>{status.peerAddr}</span>
-                <CopyIcon text={status.peerAddr} title="Copy peer address" />
-              </div>
-            )}
           </div>
         </div>
 
-        <div className="grid min-w-0 grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+        <div className="grid min-w-0 shrink-0 grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4">
           <MiniStat label="Link uptime" value={status.linkUpSinceMs ? fmtElapsed(Date.now() - status.linkUpSinceMs) : '—'} />
           {isAgent
             ? <MiniStat label="Round trip" value={up ? `${status.rttMillis} ms` : '—'} />
@@ -309,16 +289,6 @@ function isPrivateIP(ip: string): boolean {
   if (m && +m[1] >= 16 && +m[1] <= 31) return true
   if (ip.startsWith('fe80:') || ip.startsWith('fc') || ip.startsWith('fd')) return true // IPv6 link/unique-local
   return false
-}
-
-/** PortBadge renders a port as a compact chip, separated from the IP. */
-function PortBadge({port}: {port: string}) {
-  if (!port) return null
-  return (
-    <span className="rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--panel-2)] px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-[var(--text-2)]">
-      {port}
-    </span>
-  )
 }
 
 /** LanTag flags an address that lives on the local network (private range, or
