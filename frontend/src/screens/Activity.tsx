@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react'
 import {ExportDiagnostics, LogsSince} from '../../wailsjs/go/app/App'
 import {logging} from '../../wailsjs/go/models'
-import {Badge, Button, Card, Checkbox, EmptyState, PageHeader, Select, TextInput, copyText} from '../components/ui'
+import {Badge, Button, Checkbox, EmptyState, PageHeader, Select, TextInput, copyText} from '../components/ui'
 import {IconExternal, IconLogs, IconTerminal} from '../components/icons'
 
 type Entry = logging.Entry
@@ -62,31 +62,34 @@ export function Activity({attached}: {attached: boolean}) {
   }
 
   return (
-    <div className="pf-stagger space-y-3">
+    // The console owns the viewport: header + a card that fills the rest,
+    // with only the log body scrolling. 3rem = the canvas's py-6 total.
+    <div className="pf-stagger flex h-[calc(100dvh-var(--chrome-top)-3rem)] min-h-0 flex-col">
       <PageHeader
         title="Activity"
         subtitle="A live tail of the engine's log."
         action={<Button variant="ghost" size="sm" onClick={doExport}><IconExternal size={14} /> Export diagnostics</Button>}
       />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="w-36"><Select value={level} onChange={setLevel} options={[
-          {value: 'all', label: 'All levels'},
-          ...LEVELS.map(l => ({value: l, label: l[0].toUpperCase() + l.slice(1) + '+'})),
-        ]} /></div>
-        <div className="min-w-40 flex-1"><TextInput value={query} onChange={setQuery} placeholder="Filter messages…" /></div>
-        <Checkbox checked={follow} onChange={setFollow} label="Follow" />
-        <Button variant="ghost" size="sm" onClick={copyAll}>Copy</Button>
-      </div>
+      {exportMsg && <div className="pf-fade mb-3 select-text text-xs text-[var(--text-3)]">{exportMsg}</div>}
 
-      {exportMsg && <div className="pf-fade select-text text-xs text-[var(--text-3)]">{exportMsg}</div>}
-
-      <Card pad={false} className="overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2 text-xs text-[var(--text-3)]">
-          <span>Showing {filtered.length} of {entries.length} lines</span>
+      <div className="pf-card flex min-h-0 flex-1 flex-col overflow-hidden">
+        <span aria-hidden className="pf-caustic" />
+        {/* Console toolbar: every filter and control on one band. */}
+        <div className="pf-toolbar relative flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3 py-2">
+          <div className="w-36"><Select value={level} onChange={setLevel} options={[
+            {value: 'all', label: 'All levels'},
+            ...LEVELS.map(l => ({value: l, label: l[0].toUpperCase() + l.slice(1) + '+'})),
+          ]} /></div>
+          <div className="min-w-40 flex-1"><TextInput value={query} onChange={setQuery} placeholder="Filter messages…" /></div>
+          <Checkbox checked={follow} onChange={setFollow} label="Follow" />
+          <Button variant="ghost" size="sm" onClick={copyAll}>Copy</Button>
+          <span className="ml-1 hidden text-xs tabular-nums text-[var(--text-3)] sm:inline">
+            {filtered.length} of {entries.length}
+          </span>
           <Badge tone="neutral">ring · {CAP} max</Badge>
         </div>
-        <div ref={bodyRef} className="pf-well-flush h-[calc(100vh-21rem)] select-text overflow-y-auto px-3 py-2 font-mono text-[12px] leading-relaxed">
+        <div ref={bodyRef} className="pf-well-flush relative min-h-0 flex-1 select-text overflow-y-auto px-3 py-2 font-mono text-[12px] leading-relaxed">
           {filtered.length === 0
             ? (attached && entries.length === 0
               ? <EmptyState icon={<IconTerminal size={26} />} title="The service keeps its own logs"
@@ -95,7 +98,7 @@ export function Activity({attached}: {attached: boolean}) {
                   hint="Activity streams here as the engine runs." />)
             : filtered.map(e => <LogLine key={e.seq} e={e} />)}
         </div>
-      </Card>
+      </div>
     </div>
   )
 }

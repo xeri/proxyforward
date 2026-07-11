@@ -151,7 +151,7 @@ export default function App() {
           {nav === 'overview' && <Overview status={s} onNavigate={go} />}
           {nav === 'traffic' && <Traffic status={s} />}
           {nav === 'tunnels' && <Tunnels status={s} />}
-          {nav === 'activity' && <div className="mx-auto max-w-5xl"><Activity attached={s.mode === 'attached'} /></div>}
+          {nav === 'activity' && <Activity attached={s.mode === 'attached'} />}
           {nav === 'settings' && <div className="mx-auto max-w-5xl"><Settings status={s} /></div>}
         </div>
       </div>
