@@ -1,40 +1,36 @@
 /* ---------------------------------------------------------------------------
-   Glass surfaces. Budget: TRUE backdrop-filter on at most four surfaces —
-   the chrome sheet (titlebar + sidebar), Modal, CommandPalette, the save bar.
-   Cards are "solid glass": zero blur, but they carry the full light model
-   (specular rim, bevel pair, layered shadows) so the material reads app-wide.
+   Glass surfaces. TRUE backdrop-filter everywhere, tiered by blur radius so
+   depth reads physically: cards are the thinnest glass (--blur-card), the
+   sidebar chrome is heavier (--blur-chrome), the floating titlebar island
+   heavier still (--blur-island), and floats — modals, the save bar, the
+   command palette — are the thickest (--blur-float / --blur-pop).
+   `data-fx="low"` on <html> restores the old solid-card budget for weak GPUs.
 
    One light source for everything: top-left, along --light-angle. Rims are
    bright where they face it, dark where they don't; the glare layers are
-   frozen reflections that move only on events (motion.css).
+   frozen reflections that move only on events (motion.css). Each major card
+   also carries the app's signature: a faint curved-acrylic highlight arc
+   sweeping its upper third (the Aero softbox), plus a 120° reflection streak.
 --------------------------------------------------------------------------- */
 
-/* The continuous chrome sheet: title bar + sidebar share one material.
-   Sheen pools at the window's top-left corner (the L-corner); the header
-   shifts its sheen center left so the pool reads as one, not two. */
+/* The sidebar chrome: a full-height pane of heavy smoked glass. Sheen pools
+   at the window's top-left corner. */
 .pf-sheet {
-  --sheen-x: 0%;
   position: relative;
   background:
     var(--noise-glass),
-    radial-gradient(120% 90% at var(--sheen-x) 0%, var(--sheen), transparent 60%),
+    radial-gradient(120% 90% at 0% 0%, var(--sheen), transparent 60%),
     linear-gradient(var(--light-angle), color-mix(in oklab, var(--glass) 100%, white 3%), var(--glass) 45%);
-  backdrop-filter: blur(24px) saturate(160%) brightness(1.12);
-  -webkit-backdrop-filter: blur(24px) saturate(160%) brightness(1.12);
-  box-shadow: inset 0 1px 0 var(--bevel-top);
+  backdrop-filter: blur(var(--blur-chrome)) saturate(170%) brightness(1.08);
+  -webkit-backdrop-filter: blur(var(--blur-chrome)) saturate(170%) brightness(1.08);
+  box-shadow: inset 0 1px 0 var(--bevel-top), 8px 0 32px -16px rgba(0, 0, 0, 0.5);
 }
-header.pf-sheet { --sheen-x: -25%; }
 
-/* The sheet's inner edges carry the light model: bright near the L-corner,
-   decaying away from it. (border-image, not a masked ring — the titlebar and
-   sidebar must read as one seamless L.) */
+/* The pane's inner edge carries the light model: bright near the top corner,
+   decaying downward. */
 aside.pf-sheet {
   border-right: 1px solid transparent;
   border-image: linear-gradient(180deg, var(--edge-hi), var(--edge-mid) 30%, var(--edge-lo)) 1;
-}
-header.pf-sheet {
-  border-bottom: 1px solid transparent;
-  border-image: linear-gradient(90deg, var(--edge-hi), var(--edge-mid) 35%, var(--edge-lo)) 1;
 }
 
 /* Frozen glare on the sheet; motion.css sweeps it on theme swaps. */
@@ -49,6 +45,27 @@ header.pf-sheet {
   mix-blend-mode: screen;
 }
 
+/* The titlebar island: a detached slab of the thickest chrome glass floating
+   inside the top gutter, with the deep soft shadow that sells the float.
+   Shell.tsx owns its size and placement. */
+.pf-island {
+  position: relative;
+  border-radius: var(--r-lg);
+  background:
+    var(--noise-glass),
+    radial-gradient(140% 100% at 50% -55%, var(--arc) 0 60%, transparent 61%),
+    linear-gradient(120deg, var(--streak), transparent 18%),
+    linear-gradient(var(--light-angle), color-mix(in oklab, var(--glass) 100%, white 4%), var(--glass) 45%);
+  backdrop-filter: blur(var(--blur-island)) saturate(180%) brightness(1.08);
+  -webkit-backdrop-filter: blur(var(--blur-island)) saturate(180%) brightness(1.08);
+  box-shadow:
+    inset 0 1px 0 var(--bevel-top),
+    inset 0 -1px 0 var(--bevel-bot),
+    var(--shadow-contact),
+    0 2px 8px rgba(0, 0, 0, 0.35),
+    0 20px 48px -16px rgba(0, 0, 0, 0.65);
+}
+
 /* Floating glass: modals, command palette, save bar. Consumers set their own
    position (relative / fixed) — both anchor the rim + glare pseudos; setting
    it here would override the save bar's `fixed`. */
@@ -57,8 +74,8 @@ header.pf-sheet {
     var(--noise-glass),
     radial-gradient(120% 60% at 50% 0%, var(--sheen), transparent 60%),
     linear-gradient(var(--light-angle), color-mix(in oklab, var(--glass-tint) 100%, white 3%), var(--glass-tint) 45%);
-  backdrop-filter: blur(24px) saturate(160%) brightness(1.12);
-  -webkit-backdrop-filter: blur(24px) saturate(160%) brightness(1.12);
+  backdrop-filter: blur(var(--blur-float)) saturate(170%) brightness(1.1);
+  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(170%) brightness(1.1);
   box-shadow:
     inset 0 1px 0 var(--bevel-top),
     inset 0 -1px 0 var(--bevel-bot),
@@ -69,8 +86,9 @@ header.pf-sheet {
 
 /* Specular rim: a 1px gradient ring (mask-composite cuts out the middle) —
    brightest facing the light, picking up a whisper of the role accent at the
-   far corner. Replaces the flat border. */
-.pf-glass::before {
+   far corner. Replaces the flat border. Shared by floats and the island. */
+.pf-glass::before,
+.pf-island::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -92,7 +110,8 @@ header.pf-sheet {
 }
 
 /* Frozen glare; motion.css sweeps it once when the surface opens. */
-.pf-glass::after {
+.pf-glass::after,
+.pf-island::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -108,6 +127,8 @@ header.pf-sheet {
    warm leaving the other — suggests dispersion in the thickest glass. The
    full shadow stack is restated because box-shadow doesn't compose. */
 .pf-glass.pf-fringe {
+  backdrop-filter: blur(var(--blur-pop)) saturate(170%) brightness(1.1);
+  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(170%) brightness(1.1);
   box-shadow:
     inset 1px 0 0 rgba(140, 190, 255, 0.05),
     inset -1px 0 0 rgba(255, 130, 160, 0.05),
@@ -122,34 +143,26 @@ header.pf-sheet {
    the #pf-refract displacement filter (index.html). The only expensive trick
    in the file — flagged, isolated, deletable. */
 :root[data-fx="high"] .pf-glass.pf-fringe {
-  backdrop-filter: blur(24px) saturate(160%) url(#pf-refract);
-  -webkit-backdrop-filter: blur(24px) saturate(160%) url(#pf-refract);
+  backdrop-filter: blur(var(--blur-pop)) saturate(170%) url(#pf-refract);
+  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(170%) url(#pf-refract);
 }
 
-/* Light glass is ice: gentler transmission (the backdrop is already bright)
-   and glare soft-lights instead of screening (screen whites out). */
-:root[data-theme="light"] .pf-sheet,
-:root[data-theme="light"] .pf-glass {
-  backdrop-filter: blur(24px) saturate(120%) brightness(1.04);
-  -webkit-backdrop-filter: blur(24px) saturate(120%) brightness(1.04);
-}
-:root[data-theme="light"] .pf-sheet::after,
-:root[data-theme="light"] .pf-glass::after {
-  mix-blend-mode: soft-light;
-}
-
-/* Solid glass card: the workhorse surface. Zero blur — the light model alone
-   (specular rim, bevel pair, layered shadows, a 2.5% lit fill) makes it read
-   as material. --card-* hooks let variants heat the surface up. */
+/* True glass card: the workhorse surface. A translucent tint over real
+   backdrop blur, so the atmosphere diffuses through every card; the light
+   model (specular rim, bevel pair, layered shadows), the signature arc, and
+   the reflection streak make it read as curved acrylic. --card-* hooks let
+   variants heat the surface up. */
 .pf-card {
-  --card-rim-opacity: 0.6;
+  --card-rim-opacity: 0.75;
   --card-bevel-top: var(--bevel-top);
   position: relative;
-  background: linear-gradient(
-    var(--light-angle),
-    color-mix(in oklab, var(--panel) 100%, white 2.5%),
-    var(--panel) 50%
-  );
+  background:
+    var(--noise-glass),
+    radial-gradient(140% 95% at 50% -52%, var(--arc) 0 60%, transparent 61%),
+    linear-gradient(120deg, var(--streak), transparent 18%),
+    linear-gradient(var(--light-angle), color-mix(in oklab, var(--glass-card) 100%, white 3%), var(--glass-card) 50%);
+  backdrop-filter: blur(var(--blur-card)) saturate(160%) brightness(1.05);
+  -webkit-backdrop-filter: blur(var(--blur-card)) saturate(160%) brightness(1.05);
   border-radius: var(--r-lg);
   box-shadow:
     inset 0 1px 0 var(--card-bevel-top),
@@ -234,17 +247,152 @@ header.pf-sheet {
 }
 
 /* Inset well inside a card (code boxes, terminals, checklists): pressed INTO
-   the glass — the bevel pair inverts (dark seat on top, lit lip below). */
+   the glass — a translucent shade so the card's own blur keeps showing
+   through, with the bevel pair inverted (dark seat on top, lit lip below). */
 .pf-well {
-  background: color-mix(in srgb, var(--bg) 72%, var(--panel));
+  background: rgba(0, 0, 0, 0.24);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  box-shadow: inset 0 1px 3px var(--bevel-bot), inset 0 -1px 0 var(--bevel-top);
+  box-shadow: inset 0 2px 4px -1px var(--bevel-bot), inset 0 -1px 0 var(--bevel-top);
 }
 
 /* Flush well: same pressed-in read for regions that run edge-to-edge inside
    a card (the log tail). */
 .pf-well-flush {
-  background: color-mix(in srgb, var(--bg) 80%, var(--panel));
+  background: rgba(0, 0, 0, 0.3);
   box-shadow: inset 0 2px 4px -1px var(--bevel-bot), inset 0 -1px 0 var(--bevel-top);
 }
+:root[data-theme="light"] .pf-well { background: rgba(60, 70, 110, 0.08); }
+:root[data-theme="light"] .pf-well-flush { background: rgba(60, 70, 110, 0.1); }
+
+/* Gradient separators: light fades in from nothing, peaks, and lets go —
+   replaces hard border dividers inside glass. */
+.pf-sep {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--sep) 50%, transparent);
+}
+.pf-sep-v {
+  width: 1px;
+  background: linear-gradient(180deg, transparent, var(--sep) 50%, transparent);
+}
+
+/* Light bleed: a huge, soft ambient glow escaping from behind a surface.
+   Consumer sets position:relative and tunes --bleed / --bleed-strength.
+   Softness is baked into the stops (no filter). */
+.pf-bleed::before {
+  content: "";
+  position: absolute;
+  inset: -24px;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: calc(var(--r-lg) + 24px);
+  background: radial-gradient(
+    55% 70% at 50% 45%,
+    color-mix(in srgb, var(--bleed, var(--accent)) var(--bleed-strength, 14%), transparent),
+    transparent 75%
+  );
+}
+
+/* Nav active indicator: light lives INSIDE the glass — an internal accent
+   glow instead of a solid pill. */
+.pf-nav-glow {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow:
+    inset 0 0 14px 1px color-mix(in srgb, var(--accent) 16%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Nav hover: a soft back-lit bloom blooming up through the sheet. */
+.pf-nav-bloom:hover {
+  background: radial-gradient(
+    85% 130% at 50% 50%,
+    color-mix(in srgb, var(--accent) 9%, transparent),
+    transparent
+  );
+}
+
+/* Caustic drift: near-subliminal reflection bands crossing the card over
+   ~90s. A clipped overlay whose oversized child translates (GPU-only; the
+   keyframes live in motion.css). Nobody notices it consciously — the surface
+   just feels alive. */
+.pf-caustic {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.pf-caustic::before {
+  content: "";
+  position: absolute;
+  inset: -60% -40%;
+  background: repeating-linear-gradient(
+    105deg,
+    transparent 0 34%,
+    var(--caustic) 41%,
+    transparent 48%,
+    var(--caustic) 58%,
+    transparent 65%
+  );
+  mix-blend-mode: screen;
+  animation: pf-caustic 90s ease-in-out infinite alternate;
+}
+:root[data-theme="light"] .pf-caustic::before { mix-blend-mode: soft-light; }
+/* The reduced-motion kill switch only zeroes durations — a frozen caustic
+   would still read as a stray streak, so remove the layer outright. */
+@media (prefers-reduced-motion: reduce) {
+  .pf-caustic { display: none; }
+}
+
+/* Chart line bloom: tiny per-series glow (consumed by BandwidthChart via
+   currentColor). Kept small — instrumentation, not gamer RGB. */
+.pf-chart-glow {
+  filter: drop-shadow(0 0 4px color-mix(in srgb, currentColor 55%, transparent));
+}
+
+/* Light glass is ice: gentler transmission (the backdrop is already bright)
+   and glare soft-lights instead of screening (screen whites out). */
+:root[data-theme="light"] .pf-sheet {
+  backdrop-filter: blur(var(--blur-chrome)) saturate(120%) brightness(1.03);
+  -webkit-backdrop-filter: blur(var(--blur-chrome)) saturate(120%) brightness(1.03);
+}
+:root[data-theme="light"] .pf-island {
+  backdrop-filter: blur(var(--blur-island)) saturate(120%) brightness(1.03);
+  -webkit-backdrop-filter: blur(var(--blur-island)) saturate(120%) brightness(1.03);
+}
+:root[data-theme="light"] .pf-glass {
+  backdrop-filter: blur(var(--blur-float)) saturate(120%) brightness(1.04);
+  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(120%) brightness(1.04);
+}
+:root[data-theme="light"] .pf-glass.pf-fringe {
+  backdrop-filter: blur(var(--blur-pop)) saturate(120%) brightness(1.04);
+  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(120%) brightness(1.04);
+}
+:root[data-theme="light"] .pf-card {
+  backdrop-filter: blur(var(--blur-card)) saturate(120%) brightness(1.02);
+  -webkit-backdrop-filter: blur(var(--blur-card)) saturate(120%) brightness(1.02);
+}
+:root[data-theme="light"] .pf-sheet::after,
+:root[data-theme="light"] .pf-island::after,
+:root[data-theme="light"] .pf-glass::after {
+  mix-blend-mode: soft-light;
+}
+
+/* ---------------------------------------------------------------------------
+   Low-fx (Settings → Appearance → "Reduce glass effects", or &fx=low in dev):
+   cards fall back to the old solid-glass look — zero blur, light model only —
+   and the moving/filtered garnishes switch off. Chrome keeps its blur (the
+   old four-surface budget).
+--------------------------------------------------------------------------- */
+:root[data-fx="low"] .pf-card {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: linear-gradient(
+    var(--light-angle),
+    color-mix(in oklab, var(--panel) 100%, white 2.5%),
+    var(--panel) 50%
+  );
+}
+:root[data-fx="low"] .pf-caustic { display: none; }
+:root[data-fx="low"] .pf-chart-glow { filter: none; }

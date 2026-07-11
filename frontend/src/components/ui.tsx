@@ -19,22 +19,36 @@ export function PageHeader({title, subtitle, action}: {
   )
 }
 
-/** Card: the workhorse "solid glass" surface. */
-export function Card({title, subtitle, action, children, className = '', pad = true}: {
+/** Card: the workhorse true-glass surface. `dot` marks section cards with an
+ * accent glow dot and a slightly larger title. Every card carries the
+ * near-subliminal caustic drift layer (motion.css / glass.css). */
+export function Card({title, subtitle, action, children, className = '', pad = true, dot = false}: {
   title?: string; subtitle?: string; action?: ReactNode; children: ReactNode; className?: string; pad?: boolean
+  dot?: boolean
 }) {
   return (
     <div className={`pf-card ${className}`}>
+      <span aria-hidden className="pf-caustic" />
       {(title || action) && (
-        <div className={`flex items-center justify-between gap-3 ${pad ? 'px-5 pt-4' : 'p-5 pb-4'}`}>
+        <div className={`relative flex items-center justify-between gap-3 ${pad ? 'px-5 pt-4' : 'p-5 pb-4'}`}>
           <div className="min-w-0">
-            {title && <h2 className="text-[15px] font-semibold tracking-tight text-[var(--text)]">{title}</h2>}
+            {title && (
+              <h2 className={`flex items-center gap-2 font-semibold tracking-tight text-[var(--text)] ${dot ? 'text-[16px]' : 'text-[15px]'}`}>
+                {dot && (
+                  <span
+                    aria-hidden
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)] shadow-[0_0_10px_color-mix(in_srgb,var(--accent)_70%,transparent)]"
+                  />
+                )}
+                {title}
+              </h2>
+            )}
             {subtitle && <p className="mt-0.5 text-xs text-[var(--text-3)]">{subtitle}</p>}
           </div>
           {action}
         </div>
       )}
-      <div className={pad ? 'p-5 pt-4' : ''}>{children}</div>
+      <div className={`relative ${pad ? 'p-5 pt-4' : ''}`}>{children}</div>
     </div>
   )
 }
@@ -50,8 +64,8 @@ export function Button({children, onClick, variant = 'primary', size = 'md', dis
 }) {
   const styles = {
     primary: 'bg-[var(--accent)] text-[var(--accent-contrast)] shadow-[0_2px_12px_-2px_color-mix(in_srgb,var(--accent)_45%,transparent)] hover:bg-[var(--accent-hover)] hover:shadow-[0_4px_20px_-2px_color-mix(in_srgb,var(--accent)_60%,transparent)] disabled:opacity-50 disabled:shadow-none',
-    ghost: 'border border-[var(--border)] bg-transparent text-[var(--text)] hover:bg-[var(--panel-2)] hover:border-[var(--border-strong)] disabled:opacity-50',
-    subtle: 'bg-[var(--panel-2)] text-[var(--text)] hover:bg-[var(--border)] disabled:opacity-50',
+    ghost: 'border border-[color-mix(in_srgb,var(--text)_14%,transparent)] bg-transparent text-[var(--text)] hover:bg-[var(--btn-bg)] hover:border-[color-mix(in_srgb,var(--text)_24%,transparent)] disabled:opacity-50',
+    subtle: 'bg-[var(--btn-bg)] text-[var(--text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-[var(--btn-bg-hover)] disabled:opacity-50',
     danger: 'border border-[color-mix(in_srgb,var(--bad)_55%,var(--border))] bg-transparent text-[var(--bad)] hover:bg-[var(--bad)] hover:border-[var(--bad)] hover:text-white disabled:opacity-50',
   }[variant]
   const sz = size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-2 text-sm'
@@ -101,7 +115,7 @@ export function TextInput({value, onChange, placeholder, type = 'text', mono, on
         type={effectiveType} value={value} placeholder={placeholder} autoFocus={autoFocus}
         onChange={e => onChange(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && onEnter) onEnter() }}
-        className={`w-full rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] py-2 pl-3 text-sm text-[var(--text)] shadow-[inset_0_1px_2px_var(--bevel-bot),inset_0_-1px_0_var(--bevel-top)] outline-none transition-all duration-200 placeholder:text-[var(--text-3)] hover:border-[var(--border-strong)] focus:border-[var(--accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent)_25%,transparent)] ${isPassword ? 'pr-10' : 'pr-3'} ${mono ? 'font-mono text-[12.5px]' : ''}`}
+        className={`w-full rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] py-2 pl-3 text-sm text-[var(--text)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),inset_0_-1px_0_var(--bevel-top)] outline-none transition-all duration-200 placeholder:text-[var(--text-3)] hover:border-[var(--border-strong)] hover:bg-[var(--input-bg-hover)] focus:border-[var(--accent)] focus:bg-[var(--input-bg-hover)] focus:shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)] ${isPassword ? 'pr-10' : 'pr-3'} ${mono ? 'font-mono text-[12.5px]' : ''}`}
       />
       {isPassword && (
         <button
@@ -132,7 +146,7 @@ export function Checkbox({checked, onChange, label}: {
         className={`grid h-4 w-4 place-items-center rounded-[var(--r-xs)] transition-all duration-150 ${
           checked
             ? 'border border-transparent bg-[var(--accent)] text-[var(--accent-contrast)]'
-            : 'border border-[var(--border-strong)] bg-[var(--panel-2)] text-transparent'
+            : 'border border-[var(--border-strong)] bg-[var(--input-bg)] text-transparent'
         }`}
       >
         <IconCheck size={12} />
@@ -163,8 +177,10 @@ export function Select({value, onChange, options}: {
     <div ref={ref} className="relative">
       <button
         type="button" onClick={() => setOpen(o => !o)} aria-haspopup="listbox" aria-expanded={open}
-        className={`flex w-full items-center justify-between gap-2 rounded-[var(--r-md)] border bg-[var(--panel-2)] px-3 py-2 text-left text-sm text-[var(--text)] shadow-[inset_0_1px_2px_var(--bevel-bot),inset_0_-1px_0_var(--bevel-top)] outline-none transition-all duration-200 hover:border-[var(--border-strong)] ${
-          open ? 'border-[var(--accent)] ring-2 ring-[color-mix(in_srgb,var(--accent)_25%,transparent)]' : 'border-[var(--border)]'
+        className={`flex w-full items-center justify-between gap-2 rounded-[var(--r-md)] border px-3 py-2 text-left text-sm text-[var(--text)] outline-none transition-all duration-200 hover:border-[var(--border-strong)] hover:bg-[var(--input-bg-hover)] ${
+          open
+            ? 'border-[var(--accent)] bg-[var(--input-bg-hover)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)]'
+            : 'border-[var(--border)] bg-[var(--input-bg)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),inset_0_-1px_0_var(--bevel-top)]'
         }`}
       >
         <span className="min-w-0 truncate">{current ? current.label : value}</span>
@@ -173,7 +189,7 @@ export function Select({value, onChange, options}: {
       {open && (
         <div
           role="listbox"
-          className="pf-fade absolute z-30 mt-1 max-h-60 w-full overflow-auto rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--panel-3)] p-1 shadow-[var(--shadow-pop)]"
+          className="pf-fade pf-glass absolute z-30 mt-1 max-h-60 w-full overflow-auto rounded-[var(--r-md)] p-1"
         >
           {options.map(o => {
             const on = o.value === value
@@ -211,7 +227,7 @@ export function Toggle({checked, onChange, label, hint, disabled}: {
         className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors duration-300 ${
           checked
             ? 'border-transparent bg-[var(--accent)] shadow-[0_1px_8px_-1px_color-mix(in_srgb,var(--accent)_60%,transparent)]'
-            : 'border-[var(--border-strong)] bg-[var(--panel-2)] hover:bg-[var(--border)]'
+            : 'border-[var(--border-strong)] bg-[var(--btn-bg)] shadow-[inset_0_1px_2px_var(--bevel-bot)] hover:bg-[var(--btn-bg-hover)]'
         }`}
       >
         <span className={`absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full shadow-[0_1px_2px_rgba(0,0,0,0.35)] transition-all duration-300 [transition-timing-function:var(--ease-spring)] ${
@@ -242,7 +258,7 @@ export function StatusDot({state, label, pulse}: {state: State; label: string; p
 
 export function Badge({children, tone = 'neutral'}: {children: ReactNode; tone?: 'neutral' | 'good' | 'warn' | 'bad' | 'accent'}) {
   const tones = {
-    neutral: 'bg-[var(--panel-2)] text-[var(--text-2)] border-[var(--border)]',
+    neutral: 'bg-[var(--btn-bg)] text-[var(--text-2)] border-[var(--border)]',
     good: 'bg-[color-mix(in_srgb,var(--good)_14%,transparent)] text-[var(--good)] border-[color-mix(in_srgb,var(--good)_30%,transparent)]',
     warn: 'bg-[color-mix(in_srgb,var(--warn)_14%,transparent)] text-[var(--warn)] border-[color-mix(in_srgb,var(--warn)_30%,transparent)]',
     bad: 'bg-[color-mix(in_srgb,var(--bad)_14%,transparent)] text-[var(--bad)] border-[color-mix(in_srgb,var(--bad)_30%,transparent)]',
@@ -281,13 +297,13 @@ export function SegmentedControl<T extends string>({value, onChange, options, cl
   const n = options.length
   return (
     <div
-      className={`relative grid rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] p-0.5 ${className}`}
+      className={`relative grid rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] p-0.5 shadow-[inset_0_1px_3px_var(--bevel-bot)] ${className}`}
       style={{gridTemplateColumns: `repeat(${n}, 1fr)`}}
       role="radiogroup"
     >
       <div
         aria-hidden
-        className="absolute bottom-0.5 top-0.5 rounded-[calc(var(--r-md)-2px)] border border-[var(--border-strong)] bg-[var(--panel-3)] shadow-[var(--shadow-soft)] transition-transform duration-300 [transition-timing-function:var(--ease-out)]"
+        className="absolute bottom-0.5 top-0.5 rounded-[calc(var(--r-md)-2px)] border border-[var(--border-strong)] bg-[var(--panel-3)] shadow-[inset_0_1px_0_rgba(255,255,255,0.1),var(--shadow-soft)] transition-transform duration-300 [transition-timing-function:var(--ease-out)]"
         style={{left: 2, width: `calc((100% - 4px) / ${n})`, transform: `translateX(${idx * 100}%)`}}
       />
       {options.map(o => {
@@ -312,10 +328,10 @@ export function Disclosure({label, hint, children, defaultOpen = false}: {
 }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className="overflow-hidden rounded-[var(--r-md)] border border-[var(--border)] bg-[color-mix(in_srgb,var(--panel-2)_55%,transparent)]">
+    <div className="overflow-hidden rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)]">
       <button
         type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-[var(--panel-2)]"
+        className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-[var(--input-bg-hover)]"
       >
         <span className="min-w-0">
           <span className="block text-sm font-medium text-[var(--text)]">{label}</span>
@@ -345,12 +361,16 @@ export function Banner({tone = 'info', children, action, onDismiss}: {
     warn: {color: 'var(--warn)', icon: <IconAlert size={16} />},
     bad: {color: 'var(--bad)', icon: <IconAlert size={16} />},
   }[tone]
+  // Alerts leak ambient light: a soft tone-colored bleed radiates from behind
+  // the glass (pf-bleed) so a warning reads before it is read.
+  const bleeds = tone === 'warn' || tone === 'bad'
   return (
     <div
-      className="pf-fade flex items-center gap-3 rounded-[var(--r-md)] border px-3.5 py-2.5 text-sm"
+      className={`pf-fade relative flex items-center gap-3 rounded-[var(--r-md)] border px-3.5 py-2.5 text-sm ${bleeds ? 'pf-bleed' : ''}`}
       style={{
         borderColor: `color-mix(in srgb, ${tones.color} 35%, var(--border))`,
         background: `color-mix(in srgb, ${tones.color} 8%, transparent)`,
+        ...(bleeds ? {['--bleed' as string]: tones.color, ['--bleed-strength' as string]: '22%'} : undefined),
       }}
     >
       <span className="shrink-0" style={{color: tones.color}}>{tones.icon}</span>
@@ -435,7 +455,7 @@ export function EmptyState({icon, title, hint, action}: {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
       {icon && (
-        <div className="pf-float grid h-12 w-12 place-items-center rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--panel-2)] text-[var(--text-3)] shadow-[inset_0_1px_0_var(--hairline)]">
+        <div className="pf-float grid h-12 w-12 place-items-center rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] text-[var(--text-3)] shadow-[inset_0_1px_0_var(--hairline)]">
           {icon}
         </div>
       )}
@@ -474,12 +494,18 @@ export function Modal({title, onClose, children, footer, wide}: {
         onMouseDown={e => e.stopPropagation()}
         className={`pf-pop pf-glass relative w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-[85vh] overflow-hidden rounded-[var(--r-xl)]`}
       >
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-3.5">
+        <div className="flex items-center justify-between px-5 py-3.5">
           <h2 className="text-base font-semibold tracking-tight">{title}</h2>
           <IconButton title="Close" onClick={begin}><IconClose size={16} /></IconButton>
         </div>
+        <div className="pf-sep" aria-hidden />
         <div className="max-h-[calc(85vh-8rem)] overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="flex justify-end gap-2 border-t border-[var(--border)] px-5 py-3.5">{footer}</div>}
+        {footer && (
+          <>
+            <div className="pf-sep" aria-hidden />
+            <div className="flex justify-end gap-2 px-5 py-3.5">{footer}</div>
+          </>
+        )}
       </div>
     </div>
   )

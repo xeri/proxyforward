@@ -18,32 +18,40 @@ html, body, #root {
    pure transforms (no background repaints, no ramp smearing). */
 html { background: linear-gradient(155deg, var(--bg) 0%, var(--bg-base) 100%); }
 
-/* Ambient depth: three chroma blobs the glass surfaces can visibly diffuse —
-   one parked under the L-sheet corner, one drifting through center screen
-   where Modal and CommandPalette open, one low-right in the secondary hue.
-   The layer is oversized so transform drift never exposes an edge; blob
-   softness is baked into the gradient stops (no filter). Role swaps re-tint
-   via --mode-glow, cross-faded by the background transition. */
+/* Ambient depth: five oversized chroma glows the glass surfaces visibly
+   diffuse — atmosphere, not circles. Primary hue parks under the sidebar and
+   washes through center screen (where Modal and CommandPalette open); the
+   contrast hue answers from the low-right; a deep secondary sits low-center;
+   and a status blob at top-center fades in via --ambient when the app
+   degrades (invisible while --ambient's alpha is 0). The layer is oversized
+   so transform drift never exposes an edge; softness is baked into the
+   gradient stops (no filter). Role swaps re-tint via the registered glow
+   tokens, cross-faded by the background transition. */
 body { position: relative; overflow: hidden; }
 body::before {
   content: "";
   position: fixed;
-  inset: -30%;
+  inset: -25%;
   pointer-events: none;
   background:
-    radial-gradient(30% 26% at 22% 26%, color-mix(in srgb, var(--mode-glow) 42%, transparent), transparent 70%),
-    radial-gradient(26% 22% at 50% 40%, color-mix(in srgb, var(--mode-glow) 22%, transparent), transparent 72%),
-    radial-gradient(32% 27% at 74% 76%, color-mix(in srgb, var(--mode-glow-2) 15%, transparent), transparent 72%);
-  transition: --mode-glow 0.5s ease, --mode-glow-2 0.5s ease, filter 0.6s ease;
+    radial-gradient(55% 46% at 18% 22%, color-mix(in srgb, var(--mode-glow) 52%, transparent), transparent 70%),
+    radial-gradient(46% 40% at 55% 46%, color-mix(in srgb, var(--mode-glow) 26%, transparent), transparent 72%),
+    radial-gradient(52% 46% at 78% 82%, color-mix(in srgb, var(--contrast-glow) 30%, transparent), transparent 72%),
+    radial-gradient(40% 34% at 40% 90%, color-mix(in srgb, var(--mode-glow-2) 18%, transparent), transparent 72%),
+    radial-gradient(60% 42% at 62% 0%, var(--ambient), transparent 72%);
+  transition: --mode-glow 0.5s ease, --mode-glow-2 0.5s ease,
+    --contrast-glow 0.5s ease, --ambient 1.2s ease, filter 0.6s ease;
   animation: pf-aurora 75s ease-in-out infinite alternate;
 }
 /* Light theme: pastel blobs — high lightness reads through blur as color,
-   not gray mush. */
+   not gray mush. The status blob keeps its own baked alpha. */
 :root[data-theme="light"] body::before {
   background:
-    radial-gradient(30% 26% at 22% 26%, color-mix(in srgb, var(--mode-glow) 26%, rgba(255, 255, 255, 0.5)), transparent 70%),
-    radial-gradient(26% 22% at 50% 40%, color-mix(in srgb, var(--mode-glow) 14%, rgba(255, 255, 255, 0.4)), transparent 72%),
-    radial-gradient(32% 27% at 74% 76%, color-mix(in srgb, var(--mode-glow-2) 10%, rgba(255, 255, 255, 0.35)), transparent 72%);
+    radial-gradient(55% 46% at 18% 22%, color-mix(in srgb, var(--mode-glow) 30%, rgba(255, 255, 255, 0.5)), transparent 70%),
+    radial-gradient(46% 40% at 55% 46%, color-mix(in srgb, var(--mode-glow) 16%, rgba(255, 255, 255, 0.4)), transparent 72%),
+    radial-gradient(52% 46% at 78% 82%, color-mix(in srgb, var(--contrast-glow) 18%, rgba(255, 255, 255, 0.35)), transparent 72%),
+    radial-gradient(40% 34% at 40% 90%, color-mix(in srgb, var(--mode-glow-2) 12%, rgba(255, 255, 255, 0.3)), transparent 72%),
+    radial-gradient(60% 42% at 62% 0%, var(--ambient), transparent 72%);
 }
 body::after {
   content: "";

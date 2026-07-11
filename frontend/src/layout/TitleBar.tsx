@@ -7,8 +7,8 @@ import {WindowControls} from './WindowControls'
 
 /**
  * Frameless-window title bar. The bar is one continuous drag region; every
- * interactive child opts out with pf-no-drag. In the shell it extends the
- * sidebar's glass sheet; in the wizard it carries the brand on its own.
+ * interactive child opts out with pf-no-drag. It fills the floating glass
+ * island (Shell); in the wizard it carries the brand on its own.
  */
 export function TitleBar({status, brand = false, onPalette}: {
   status?: UIStatus | null
@@ -48,7 +48,8 @@ export function TitleBar({status, brand = false, onPalette}: {
         </IconButton>
       </div>
 
-      <div className="pf-no-drag ml-1 border-l border-[var(--border)]">
+      <div className="pf-no-drag ml-1 flex items-stretch">
+        <div className="pf-sep-v my-2" aria-hidden />
         <WindowControls />
       </div>
     </div>

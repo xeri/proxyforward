@@ -12,6 +12,7 @@
 //   &fatal=1         — terminal engine error (bad token) surfaces
 //   &fresh=1         — first-run data: no history, no peers yet
 //   &fx=high         — high-fx glass: refraction filter on the palette
+//   &fx=low          — low-fx glass: solid cards, no caustics/chart glow
 
 type AnyFn = (...a: any[]) => any
 
@@ -27,7 +28,8 @@ export function installDevMock() {
   const axisAttached = params.get('mode') === 'attached'
   const axisFatal = params.get('fatal') === '1'
   const axisFresh = params.get('fresh') === '1'
-  if (params.get('fx') === 'high') document.documentElement.dataset.fx = 'high'
+  const fx = params.get('fx')
+  if (fx) document.documentElement.dataset.fx = fx // &fx=high | &fx=low
 
   // ---- event bus (runtime.EventsOn/EventsEmit) ----
   const listeners: Record<string, AnyFn[]> = {}

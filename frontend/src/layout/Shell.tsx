@@ -5,13 +5,14 @@ import {prefersReduced} from '../theme'
 const UNDERLAP = 10
 
 /**
- * The app frame for a frameless window. The sidebar spans full height and the
- * title bar sits beside it, sharing one continuous glass sheet (an L-shape
- * around the content). Without a sidebar (wizard) the bar spans the width.
+ * The app frame for a frameless window. The sidebar is a full-height pane of
+ * heavy glass; the title bar floats beside it as a detached island inset from
+ * the window edges. Without a sidebar (wizard) the island spans the width.
  *
  * The scroll container spans the full window height and pads down by
- * --titlebar-h, so scrolled content passes under the translucent chrome and
- * comes out diffused — the sheet visibly frosts whatever slides beneath it.
+ * --chrome-top, so scrolled content passes beneath the island — through the
+ * visible gutters around it — and comes out diffused: the floating glass
+ * visibly frosts whatever slides underneath.
  */
 export function Shell({sidebar, titlebar, children}: {
   sidebar?: ReactNode
@@ -72,7 +73,7 @@ export function Shell({sidebar, titlebar, children}: {
       ref={rootRef}
       className="grid h-full"
       style={{
-        gridTemplateRows: 'var(--titlebar-h) 1fr',
+        gridTemplateRows: 'var(--chrome-top) 1fr',
         gridTemplateColumns: sidebar ? '224px 1fr' : '1fr',
       }}
     >
@@ -81,19 +82,30 @@ export function Shell({sidebar, titlebar, children}: {
           {sidebar}
         </aside>
       )}
+      {/* The strip itself ignores the pointer so content scrolling through
+          the gutters stays interactive; only the island is live. */}
       <header
-        className="pf-sheet relative z-20 border-b border-[var(--border)]"
-        style={{gridRow: 1, gridColumn: sidebar ? 2 : 1}}
+        className="pointer-events-none relative z-20 flex"
+        style={{
+          gridRow: 1,
+          gridColumn: sidebar ? 2 : 1,
+          padding: 'var(--titlebar-inset) 12px 0',
+        }}
       >
-        {titlebar}
+        <div
+          className="pf-island pointer-events-auto min-w-0 flex-1 overflow-hidden"
+          style={{height: 'var(--titlebar-h)'}}
+        >
+          {titlebar}
+        </div>
       </header>
       <main
         className="relative min-h-0 min-w-0 overflow-y-auto"
         style={{
           gridRow: '1 / span 2',
           gridColumn: sidebar ? 2 : 1,
-          paddingTop: 'var(--titlebar-h)',
-          scrollPaddingTop: 'calc(var(--titlebar-h) + 12px)',
+          paddingTop: 'var(--chrome-top)',
+          scrollPaddingTop: 'calc(var(--chrome-top) + 12px)',
           ...(sidebar ? {marginLeft: -UNDERLAP, paddingLeft: UNDERLAP} : undefined),
         }}
       >
