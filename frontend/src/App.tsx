@@ -148,7 +148,7 @@ export default function App() {
         style={{viewTransitionName: 'pf-content'} as CSSProperties}
       >
         <div key={nav} className={supportsVT ? '' : 'pf-page'}>
-          {nav === 'overview' && <div className="mx-auto max-w-5xl"><Overview status={s} onNavigate={go} /></div>}
+          {nav === 'overview' && <Overview status={s} onNavigate={go} />}
           {nav === 'traffic' && <div className="mx-auto max-w-5xl"><Traffic status={s} /></div>}
           {nav === 'tunnels' && <div className="mx-auto max-w-5xl"><Tunnels status={s} /></div>}
           {nav === 'activity' && <div className="mx-auto max-w-5xl"><Activity attached={s.mode === 'attached'} /></div>}
