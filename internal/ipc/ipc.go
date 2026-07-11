@@ -1,0 +1,111 @@
+// Package ipc is the GUI↔daemon control channel: a named-pipe JSON-RPC
+// carried in the same length-prefixed framing as the wire protocol
+// (internal/control). The daemon (service or headless run) serves it; a GUI
+// that finds the pipe attaches as a thin client instead of starting its own
+// engine, so exactly one process ever owns ports and config.
+package ipc
+
+import (
+	"errors"
+
+	"proxyforward/internal/conntrack"
+	"proxyforward/internal/stats"
+)
+
+// PipeName is the daemon's well-known local endpoint. It is a var only so
+// test packages that run a real engine can point it at a private name —
+// parallel test binaries (and a developer's live daemon) must never fight
+// over the production pipe.
+var PipeName = `\\.\pipe\proxyforward`
+
+// Message types (control.Envelope.Type values on the pipe).
+const (
+	TypeStatusReq   = "ipc_status_req"
+	TypeStatusResp  = "ipc_status_resp"
+	TypePing        = "ipc_ping"
+	TypePong        = "ipc_pong"
+	TypeHistoryReq  = "ipc_history_req"
+	TypeHistoryResp = "ipc_history_resp"
+	TypePeersReq    = "ipc_peers_req"
+	TypePeersResp   = "ipc_peers_resp"
+)
+
+// maxIPCEntries clamps history buckets and peer rows per response so the
+// reply always fits control.MaxFrame (64 KiB). Never raise the frame cap;
+// clamp the payload instead.
+const maxIPCEntries = 300
+
+// HistoryReq asks for the trailing windowMs of bandwidth history (0 = all)
+// aggregated to at most MaxBuckets buckets.
+type HistoryReq struct {
+	WindowMs   int64 `json:"windowMs"`
+	MaxBuckets int   `json:"maxBuckets"`
+}
+
+// PeersResp carries the daemon's per-client lifetime records.
+type PeersResp struct {
+	Peers []stats.PeerStat `json:"peers"`
+}
+
+// ErrUnsupported is returned on platforms without named pipes.
+var ErrUnsupported = errors.New("ipc: only supported on Windows")
+
+// Status is the daemon's self-description, polled by status surfaces.
+type Status struct {
+	Role    string `json:"role"`
+	Version string `json:"version"`
+	// PID lets a GUI distinguish "my own engine" from a foreign daemon.
+	PID int `json:"pid"`
+
+	// Agent-side fields.
+	LinkUp    bool  `json:"linkUp,omitempty"`
+	RTTMillis int64 `json:"rttMillis,omitempty"`
+
+	// Gateway-side fields.
+	AgentConnected bool `json:"agentConnected,omitempty"`
+
+	Tunnels []TunnelStatus `json:"tunnels,omitempty"`
+
+	// Live proxied connections and lifetime byte totals (both roles).
+	Connections   []conntrack.Snapshot `json:"connections,omitempty"`
+	TotalBytesIn  int64                `json:"totalBytesIn"`
+	TotalBytesOut int64                `json:"totalBytesOut"`
+
+	// Control-link/session metadata (both roles). PeerAddr is the other end
+	// of the tunnel link: gateway host:port on the agent, agent IP on the
+	// gateway.
+	LinkUpSinceMs  int64  `json:"linkUpSinceMs"`
+	ProcessStartMs int64  `json:"processStartMs"`
+	PeerAddr       string `json:"peerAddr,omitempty"`
+	LinkBytesIn    int64  `json:"linkBytesIn"`
+	LinkBytesOut   int64  `json:"linkBytesOut"`
+
+	// Lifetime aggregates from the persistent stats store.
+	AllTimeBytesIn     int64 `json:"allTimeBytesIn"`
+	AllTimeBytesOut    int64 `json:"allTimeBytesOut"`
+	CumulativeUptimeMs int64 `json:"cumulativeUptimeMs"`
+	LinkSessions       int64 `json:"linkSessions"`
+
+	// ConfigPath tells an attached GUI where the daemon's config lives.
+	ConfigPath string `json:"configPath,omitempty"`
+}
+
+// TunnelStatus is one tunnel's live state.
+type TunnelStatus struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	PublicPort int    `json:"publicPort,omitempty"` // confirmed bound port
+	LocalUp    bool   `json:"localUp"`
+	LocalKnown bool   `json:"localKnown"`
+}
+
+// StatusSource produces the current Status snapshot for each request.
+type StatusSource func() Status
+
+// Sources bundles everything the pipe can serve. History and Peers may be
+// nil (the server answers with empty results).
+type Sources struct {
+	Status  StatusSource
+	History func(windowMs int64, maxBuckets int) stats.HistoryResult
+	Peers   func() []stats.PeerStat
+}
