@@ -152,7 +152,7 @@ export default function App() {
           {nav === 'traffic' && <Traffic status={s} />}
           {nav === 'tunnels' && <Tunnels status={s} />}
           {nav === 'activity' && <Activity attached={s.mode === 'attached'} />}
-          {nav === 'settings' && <div className="mx-auto max-w-5xl"><Settings status={s} /></div>}
+          {nav === 'settings' && <Settings status={s} />}
         </div>
       </div>
       {palette && <CommandPalette ctx={{status: s, go}} onClose={() => setPalette(false)} />}

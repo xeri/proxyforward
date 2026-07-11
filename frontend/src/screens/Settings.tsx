@@ -6,8 +6,8 @@ import {
 } from '../../wailsjs/go/app/App'
 import {config} from '../../wailsjs/go/models'
 import {
-  Badge, Banner, Button, Card, ErrorBanner, Field, PageHeader, SegmentedControl,
-  Select, Spinner, TextInput, Toggle,
+  Badge, Banner, Button, Card, ErrorBanner, Field, FormRow, PageHeader,
+  SegmentedControl, Select, Spinner, TextInput, Toggle, WarnWash,
 } from '../components/ui'
 import {ExportSetupRow, ImportSetupFlow} from '../components/SetupBackup'
 import {IconExternal, IconMonitor, IconMoon, IconRefresh, IconSun} from '../components/icons'
@@ -32,6 +32,7 @@ export function Settings({status}: {status: UIStatus}) {
 
   const sections: SectionDef[] = [
     {id: 'appearance', label: 'Appearance'},
+    {id: 'behavior', label: 'Behavior'},
     {id: 'connection', label: 'Connection'},
     ...(!isAgent ? [{id: 'security', label: 'Security'}] : []),
     {id: 'telemetry', label: 'Telemetry'},
@@ -63,7 +64,9 @@ export function Settings({status}: {status: UIStatus}) {
   }
 
   return (
-    <div>
+    // Forms read best in a measured column — Settings caps its own width
+    // instead of stretching across the full canvas.
+    <div className="mx-auto max-w-[74rem]">
       <PageHeader title="Settings" subtitle="Appearance, connection, and system integration." />
       {err && <div className="mb-4"><ErrorBanner message={err} onDismiss={() => setErr('')} /></div>}
       {attached && (
@@ -82,7 +85,9 @@ export function Settings({status}: {status: UIStatus}) {
             <ThemeRow />
             <Divider />
             <FxRow />
-            <Divider />
+          </Section>
+
+          <Section id="behavior" title="Behavior" subtitle="How the app lives on this machine.">
             <Toggle checked={cfg.UI.MinimizeToTray} onChange={v => patch(c => { c.UI.MinimizeToTray = v })}
               label="Minimize to tray" hint="Keep running in the background when the window closes." />
             <Toggle checked={cfg.UI.Autostart} onChange={v => patch(c => { c.UI.Autostart = v })}
@@ -127,9 +132,9 @@ export function Settings({status}: {status: UIStatus}) {
 
           {!isAgent && (
             <Section id="security" title="Security" subtitle="Pairing and abuse limits, enforced at the gateway.">
-              <Row label="Pairing token" hint="Rotating it disconnects agents until they re-pair with the new code.">
+              <FormRow label="Pairing token" hint="Rotating it disconnects agents until they re-pair with the new code.">
                 <TokenRotate attached={attached} onDone={reload} />
-              </Row>
+              </FormRow>
               <Divider />
               <div className="pt-1 text-sm font-medium text-[var(--text)]">Abuse limits</div>
               <div className="mt-2 grid grid-cols-3 gap-3">
@@ -210,6 +215,11 @@ function SectionRail({sections}: {sections: SectionDef[]}) {
       for (const s of sections) {
         const el = document.getElementById(`s-${s.id}`)
         if (el && el.getBoundingClientRect().top <= line) current = s.id
+      }
+      // Fully scrolled: the last section wins even if its top never crosses
+      // the reading line (short final sections could otherwise never light).
+      if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) {
+        current = sections[sections.length - 1]?.id ?? current
       }
       setActive(current)
     }
@@ -324,33 +334,33 @@ function SystemSection({status}: {status: UIStatus}) {
   return (
     <Section id="system" title="System" subtitle="Windows integration and this install's identity.">
       <WarnWash on={fw === false}>
-        <Row label="Firewall rule" hint="Allows inbound player and agent connections.">
+        <FormRow label="Firewall rule" hint="Allows inbound player and agent connections.">
           <div className="flex items-center gap-2">
             {fw === null ? <Badge tone="neutral">Unknown</Badge> : <Badge tone={fw ? 'good' : 'warn'}>{fw ? 'Present' : 'Missing'}</Badge>}
             {!fw && <Button variant="ghost" size="sm" onClick={wrap('fw', FirewallRepair)} disabled={busy === 'fw'}>{busy === 'fw' ? '…' : 'Add rule'}</Button>}
           </div>
-        </Row>
+        </FormRow>
       </WarnWash>
       <Divider />
       <WarnWash on={s.tone === 'warn'}>
-        <Row label="Windows service" hint="Run headless in the background; the app attaches as a viewer.">
+        <FormRow label="Windows service" hint="Run headless in the background; the app attaches as a viewer.">
           <div className="flex items-center gap-2">
             <Badge tone={s.tone}>{s.label}</Badge>
             {s.installed
               ? <Button variant="danger" size="sm" onClick={wrap('svc', UninstallService)} disabled={busy === 'svc'}>{busy === 'svc' ? '…' : 'Uninstall'}</Button>
               : <Button variant="ghost" size="sm" onClick={wrap('svc', InstallService)} disabled={busy === 'svc'}>{busy === 'svc' ? '…' : 'Install'}</Button>}
           </div>
-        </Row>
+        </FormRow>
       </WarnWash>
       <Divider />
-      <Row label="Config file">
+      <FormRow label="Config file">
         <div className="flex items-center gap-2">
           <code className="max-w-xs select-text truncate rounded-[var(--r-xs)] bg-[var(--panel-2)] px-2 py-1 font-mono text-xs text-[var(--text-2)]">{status.configPath}</code>
           <Button variant="ghost" size="sm" onClick={() => OpenConfigDir()}><IconExternal size={14} /> Open</Button>
         </div>
-      </Row>
+      </FormRow>
       <Divider />
-      <Row label="Version"><span className="text-sm tabular-nums text-[var(--text-2)]">{status.version} · pid {status.pid} · {status.mode}</span></Row>
+      <FormRow label="Version"><span className="text-sm tabular-nums text-[var(--text-2)]">{status.version} · pid {status.pid} · {status.mode}</span></FormRow>
       {err && <div className="mt-2"><ErrorBanner message={err} onDismiss={() => setErr('')} /></div>}
     </Section>
   )
@@ -415,31 +425,4 @@ function Section({id, title, subtitle, action, children}: {
   )
 }
 
-/** WarnWash: an amber internal glow behind a settings row that needs eyes on
- * it — the light seeps into the glass right where the problem is. */
-function WarnWash({on, children}: {on: boolean; children: ReactNode}) {
-  if (!on) return <>{children}</>
-  return (
-    <div
-      className="relative -mx-2 rounded-[var(--r-md)] px-2"
-      style={{
-        background: 'color-mix(in srgb, var(--warn) 6%, transparent)',
-        boxShadow: 'inset 0 0 24px -8px color-mix(in srgb, var(--warn) 25%, transparent)',
-      }}
-    >
-      {children}
-    </div>
-  )
-}
-function Row({label, hint, children}: {label: string; hint?: string; children: ReactNode}) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-2">
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-[var(--text)]">{label}</div>
-        {hint && <div className="mt-0.5 text-xs text-[var(--text-3)]">{hint}</div>}
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  )
-}
 function Divider() { return <div className="pf-sep my-1" /> }
