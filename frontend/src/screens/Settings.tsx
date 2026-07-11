@@ -13,6 +13,7 @@ import {ExportSetupRow, ImportSetupFlow} from '../components/SetupBackup'
 import {IconExternal, IconMonitor, IconMoon, IconRefresh, IconSun} from '../components/icons'
 import {UIStatus} from '../state'
 import {ThemePref, useTheme} from '../theme'
+import {fxPref, setFxPref} from '../fx'
 
 type Cfg = config.Config
 
@@ -79,6 +80,8 @@ export function Settings({status}: {status: UIStatus}) {
         <div className="pf-stagger min-w-0 space-y-4 pb-24">
           <Section id="appearance" title="Appearance">
             <ThemeRow />
+            <Divider />
+            <FxRow />
             <Divider />
             <Toggle checked={cfg.UI.MinimizeToTray} onChange={v => patch(c => { c.UI.MinimizeToTray = v })}
               label="Minimize to tray" hint="Keep running in the background when the window closes." />
@@ -167,7 +170,7 @@ export function Settings({status}: {status: UIStatus}) {
           <Section id="backup" title="Backup" subtitle="Move this setup to another machine — pairing, tunnels, keys, and statistics travel in one file.">
             {attached && <div className="pb-2 text-xs text-[var(--text-3)]">The background service owns this setup — stop the service to export or import.</div>}
             <div className="py-2"><ExportSetupRow disabled={attached} /></div>
-            <div className="my-4 border-t border-[var(--border)]" />
+            <div className="pf-sep my-4" />
             <div className="py-2"><ImportSetupFlow disabled={attached} onDone={reload} /></div>
           </Section>
 
@@ -220,7 +223,7 @@ function SectionRail({sections}: {sections: SectionDef[]}) {
   }
 
   return (
-    <nav ref={railRef} className="sticky top-[var(--titlebar-h)] hidden flex-col gap-0.5 md:flex" aria-label="Settings sections">
+    <nav ref={railRef} className="sticky top-[var(--chrome-top)] hidden flex-col gap-0.5 md:flex" aria-label="Settings sections">
       {sections.map(s => (
         <button
           key={s.id}
@@ -256,6 +259,20 @@ function ThemeRow() {
         ]}
       />
     </div>
+  )
+}
+
+/** FxRow: the low-fx escape hatch — solid cards, no moving reflections.
+ * Purely client-side (localStorage), applied instantly via data-fx. */
+function FxRow() {
+  const [low, setLow] = useState(fxPref() === 'low')
+  return (
+    <Toggle
+      checked={low}
+      onChange={v => { setLow(v); setFxPref(v ? 'low' : '') }}
+      label="Reduce glass effects"
+      hint="Turns off card blur and moving reflections. Helps on low-end GPUs."
+    />
   )
 }
 
@@ -306,21 +323,25 @@ function SystemSection({status}: {status: UIStatus}) {
 
   return (
     <Section id="system" title="System" subtitle="Windows integration and this install's identity.">
-      <Row label="Firewall rule" hint="Allows inbound player and agent connections.">
-        <div className="flex items-center gap-2">
-          {fw === null ? <Badge tone="neutral">Unknown</Badge> : <Badge tone={fw ? 'good' : 'warn'}>{fw ? 'Present' : 'Missing'}</Badge>}
-          {!fw && <Button variant="ghost" size="sm" onClick={wrap('fw', FirewallRepair)} disabled={busy === 'fw'}>{busy === 'fw' ? '…' : 'Add rule'}</Button>}
-        </div>
-      </Row>
+      <WarnWash on={fw === false}>
+        <Row label="Firewall rule" hint="Allows inbound player and agent connections.">
+          <div className="flex items-center gap-2">
+            {fw === null ? <Badge tone="neutral">Unknown</Badge> : <Badge tone={fw ? 'good' : 'warn'}>{fw ? 'Present' : 'Missing'}</Badge>}
+            {!fw && <Button variant="ghost" size="sm" onClick={wrap('fw', FirewallRepair)} disabled={busy === 'fw'}>{busy === 'fw' ? '…' : 'Add rule'}</Button>}
+          </div>
+        </Row>
+      </WarnWash>
       <Divider />
-      <Row label="Windows service" hint="Run headless in the background; the app attaches as a viewer.">
-        <div className="flex items-center gap-2">
-          <Badge tone={s.tone}>{s.label}</Badge>
-          {s.installed
-            ? <Button variant="danger" size="sm" onClick={wrap('svc', UninstallService)} disabled={busy === 'svc'}>{busy === 'svc' ? '…' : 'Uninstall'}</Button>
-            : <Button variant="ghost" size="sm" onClick={wrap('svc', InstallService)} disabled={busy === 'svc'}>{busy === 'svc' ? '…' : 'Install'}</Button>}
-        </div>
-      </Row>
+      <WarnWash on={s.tone === 'warn'}>
+        <Row label="Windows service" hint="Run headless in the background; the app attaches as a viewer.">
+          <div className="flex items-center gap-2">
+            <Badge tone={s.tone}>{s.label}</Badge>
+            {s.installed
+              ? <Button variant="danger" size="sm" onClick={wrap('svc', UninstallService)} disabled={busy === 'svc'}>{busy === 'svc' ? '…' : 'Uninstall'}</Button>
+              : <Button variant="ghost" size="sm" onClick={wrap('svc', InstallService)} disabled={busy === 'svc'}>{busy === 'svc' ? '…' : 'Install'}</Button>}
+          </div>
+        </Row>
+      </WarnWash>
       <Divider />
       <Row label="Config file">
         <div className="flex items-center gap-2">
@@ -389,7 +410,24 @@ function Section({id, title, subtitle, action, children}: {
 }) {
   return (
     <div id={`s-${id}`} className="scroll-mt-6">
-      <Card title={title} subtitle={subtitle} action={action}>{children}</Card>
+      <Card dot title={title} subtitle={subtitle} action={action}>{children}</Card>
+    </div>
+  )
+}
+
+/** WarnWash: an amber internal glow behind a settings row that needs eyes on
+ * it — the light seeps into the glass right where the problem is. */
+function WarnWash({on, children}: {on: boolean; children: ReactNode}) {
+  if (!on) return <>{children}</>
+  return (
+    <div
+      className="relative -mx-2 rounded-[var(--r-md)] px-2"
+      style={{
+        background: 'color-mix(in srgb, var(--warn) 6%, transparent)',
+        boxShadow: 'inset 0 0 24px -8px color-mix(in srgb, var(--warn) 25%, transparent)',
+      }}
+    >
+      {children}
     </div>
   )
 }
@@ -404,4 +442,4 @@ function Row({label, hint, children}: {label: string; hint?: string; children: R
     </div>
   )
 }
-function Divider() { return <div className="my-1 border-t border-[var(--border)]" /> }
+function Divider() { return <div className="pf-sep my-1" /> }

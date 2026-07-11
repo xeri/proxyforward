@@ -21,8 +21,9 @@ export function Sidebar({status, nav, onNav}: {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Brand row doubles as a drag handle — the L-corner of the title bar. */}
-      <div className="pf-drag flex h-[var(--titlebar-h)] shrink-0 items-center gap-2.5 px-4">
+      {/* Brand row doubles as a drag handle; its height matches the chrome
+          strip so the brand centers on the floating island's midline. */}
+      <div className="pf-drag flex h-[var(--chrome-top)] shrink-0 items-center gap-2.5 px-4">
         <div className="grid h-6 w-6 shrink-0 place-items-center rounded-[var(--r-sm)] bg-[var(--accent)] text-[var(--accent-contrast)] shadow-[0_2px_10px_-2px_color-mix(in_srgb,var(--accent)_55%,transparent)]">
           <IconServer size={14} />
         </div>
@@ -41,15 +42,15 @@ export function Sidebar({status, nav, onNav}: {
       </div>
 
       <nav className="relative flex-1 px-2 pt-4">
-        {/* Sliding active pill (main rail only; Settings styles itself). */}
+        {/* Sliding active indicator: an internal accent glow, not a solid
+            pill (main rail only; Settings styles itself). */}
         <div
           aria-hidden
-          className="pointer-events-none absolute left-2 right-2 top-4 rounded-[var(--r-md)] border border-[color-mix(in_srgb,var(--accent)_25%,var(--border))] transition-[transform,opacity] duration-300 [transition-timing-function:var(--ease-spring)]"
+          className="pf-nav-glow pointer-events-none absolute left-2 right-2 top-4 rounded-[var(--r-md)] transition-[transform,opacity] duration-300 [transition-timing-function:var(--ease-spring)]"
           style={{
             height: ITEM_H,
             opacity: activeIdx < 0 ? 0 : 1,
             transform: `translateY(${Math.max(0, activeIdx) * (ITEM_H + GAP)}px)`,
-            background: 'color-mix(in srgb, var(--accent) 13%, transparent)',
           }}
         />
         <div className="relative flex flex-col" style={{gap: GAP}}>
@@ -63,7 +64,8 @@ export function Sidebar({status, nav, onNav}: {
         <NavButton item={NAV_SETTINGS} on={nav === 'settings'} onNav={onNav} standalone />
       </div>
 
-      <div className="space-y-1.5 border-t border-[var(--border)] px-4 py-3 text-[11px] text-[var(--text-3)]">
+      <div className="pf-sep mx-2" aria-hidden />
+      <div className="space-y-1.5 px-4 py-3 text-[11px] text-[var(--text-3)]">
         {status.hostname && (
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge tone="neutral">{status.hostname}</Badge>
@@ -91,8 +93,8 @@ function NavButton({item, on, onNav, standalone = false}: {
       style={{height: ITEM_H}}
       className={`group flex w-full items-center gap-2.5 rounded-[var(--r-md)] px-3 text-sm transition-colors duration-200 ${
         on
-          ? `font-medium text-[var(--text)] ${standalone ? 'border border-[color-mix(in_srgb,var(--accent)_25%,var(--border))] bg-[color-mix(in_srgb,var(--accent)_13%,transparent)]' : ''}`
-          : 'text-[var(--text-2)] hover:bg-[color-mix(in_srgb,var(--panel-2)_70%,transparent)] hover:text-[var(--text)]'
+          ? `font-medium text-[var(--text)] ${standalone ? 'pf-nav-glow' : ''}`
+          : 'pf-nav-bloom text-[var(--text-2)] hover:text-[var(--text)]'
       }`}
     >
       <span className={`transition-all duration-200 ${on ? 'scale-110 text-[var(--accent)]' : 'group-hover:scale-105'}`}>

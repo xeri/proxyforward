@@ -12,6 +12,13 @@
   100% { transform: translate3d(1.5%, -2.5%, 0) scale(1.02); }
 }
 
+/* Caustic drift: the card overlay's bands creep diagonally over ~90s
+   (glass.css .pf-caustic). Transform-only, oversized layer, GPU-composited. */
+@keyframes pf-caustic {
+  from { transform: translate3d(-10%, -4%, 0); }
+  to { transform: translate3d(8%, 5%, 0); }
+}
+
 @keyframes pf-fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
@@ -159,14 +166,16 @@
   animation: pf-glare-sweep 0.6s var(--ease-out) both;
 }
 
-/* Theme swap: the chrome sheet re-glazes (class pulsed by theme.ts). */
-html.pf-reglaze .pf-sheet::after {
+/* Theme swap: the chrome re-glazes (class pulsed by theme.ts). */
+html.pf-reglaze .pf-sheet::after,
+html.pf-reglaze .pf-island::after {
   animation: pf-glare-sweep 0.7s var(--ease-out) both;
 }
 
-/* Wizard handover: the ambient glow flares behind the sheet while a sweep
+/* Wizard handover: the ambient glow flares behind the chrome while a sweep
    crosses it — the one scripted demonstration of transmission. */
-html.pf-glaze .pf-sheet::after {
+html.pf-glaze .pf-sheet::after,
+html.pf-glaze .pf-island::after {
   animation: pf-glare-sweep 0.9s var(--ease-out) both;
 }
 html.pf-glaze body::before {
@@ -174,10 +183,10 @@ html.pf-glaze body::before {
 }
 
 /* Role-swap wash: accent-fed surfaces re-tint in sequence along the light
-   angle — titlebar, then sidebar, then the content region. Registered
+   angle — titlebar island, then sidebar, then the content region. Registered
    custom-property transitions (tokens.css) interpolate every var() consumer
    down each subtree. */
-header.pf-sheet {
+.pf-island {
   transition: --accent var(--dur-slow) ease, --accent-2 var(--dur-slow) ease,
     --mode-glow var(--dur-slow) ease;
 }
@@ -247,7 +256,13 @@ html.pf-vt-nav::view-transition-new(root) { animation: none; }
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    /* 0s (not 0.01ms): a zero-duration transition never starts, so changes
+       land instantly. A near-zero one still creates a `transition: all`
+       CSSTransition on every element — which can pin animatable properties
+       (backdrop-filter during theme/fx swaps) at a stale frame. Nothing in
+       the app listens for transitionend. */
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
   }
   ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }

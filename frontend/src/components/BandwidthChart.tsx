@@ -493,11 +493,13 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
                 d={`${dnLine}L${cx(plots[plots.length - 1].t).toFixed(1)},${baseY}L${cx(plots[0].t).toFixed(1)},${baseY}Z`}
                 fill="var(--dl)" opacity="0.08"
               />
-              <path d={dnLine} fill="none" stroke="var(--dl)" strokeWidth="1.5" strokeLinejoin="round" />
+              {/* pf-chart-glow blooms each line in its own series color via
+                  currentColor — a tiny drop-shadow, off under low-fx. */}
+              <path d={dnLine} fill="none" stroke="var(--dl)" strokeWidth="1.5" strokeLinejoin="round" className="pf-chart-glow" style={{color: 'var(--dl)'}} />
               {plots.length === 1 && <circle cx={cx(plots[0].t)} cy={yL(plots[0].dn)} r="2.5" fill="var(--dl)" />}
             </>}
             {showUp && <>
-              <path d={upLinePlots} fill="none" stroke="var(--ul)" strokeWidth="1.5" strokeLinejoin="round" />
+              <path d={upLinePlots} fill="none" stroke="var(--ul)" strokeWidth="1.5" strokeLinejoin="round" className="pf-chart-glow" style={{color: 'var(--ul)'}} />
               {plots.length === 1 && <circle cx={cx(plots[0].t)} cy={yR(plots[0].up)} r="2.5" fill="var(--ul)" />}
             </>}
           </>

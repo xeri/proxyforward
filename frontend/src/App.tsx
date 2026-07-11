@@ -1,4 +1,4 @@
-import {CSSProperties, useEffect, useState} from 'react'
+import {CSSProperties, useEffect, useRef, useState} from 'react'
 import {flushSync} from 'react-dom'
 import {Shell} from './layout/Shell'
 import {TitleBar} from './layout/TitleBar'
@@ -12,10 +12,26 @@ import {Tunnels} from './screens/Tunnels'
 import {Wizard} from './screens/Wizard'
 import {CommandPalette} from './components/CommandPalette'
 import {Spinner} from './components/ui'
-import {useTick} from './state'
+import {UIStatus, useTick} from './state'
 import {prefersReduced} from './theme'
 
 const supportsVT = typeof (document as Document & {startViewTransition?: unknown}).startViewTransition === 'function'
+
+/* Contextual ambient glow: the backdrop's status blob (tokens.css --ambient)
+   tints amber when the tunnel is degraded and red when it is down. Derived
+   from the same signals the pills and pipeline use. */
+type Ambient = 'ok' | 'warn' | 'bad'
+function ambientOf(s: UIStatus | null): Ambient {
+  if (!s || s.mode === 'wizard' || !s.role) return 'ok'
+  if (s.engineFatal) return 'bad'
+  // Link state first — the health score only means something over a live
+  // link. A waiting gateway idles amber; an agent that lost its gateway is red.
+  const up = s.role === 'agent' ? s.linkUp : s.agentConnected
+  if (!up) return s.role === 'agent' ? 'bad' : 'warn'
+  if (s.healthScore === 'bad') return 'bad'
+  if (s.healthScore === 'warn') return 'warn'
+  return 'ok'
+}
 
 export default function App() {
   const status = useTick()
@@ -25,6 +41,32 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.role = status?.role || 'unset'
   }, [status?.role])
+
+  // Ambient state → data-ambient. The first reading applies immediately;
+  // after that a new state must hold for 3s of consecutive ticks before the
+  // backdrop shifts, so 2 Hz flapping never strobes the room. The 1.2s
+  // --ambient transition (base.css) does the actual cross-fade.
+  const ambientRef = useRef<{applied: Ambient | null; pending: Ambient | null; timer: number}>(
+    {applied: null, pending: null, timer: 0},
+  )
+  useEffect(() => {
+    const next = ambientOf(status)
+    const ref = ambientRef.current
+    const apply = () => {
+      document.documentElement.dataset.ambient = next
+      ref.applied = next
+      ref.pending = null
+    }
+    if (ref.applied === null) { apply(); return }
+    if (next === ref.applied) {
+      if (ref.pending !== null) { window.clearTimeout(ref.timer); ref.pending = null }
+      return
+    }
+    if (ref.pending === next) return // countdown to this state is already running
+    window.clearTimeout(ref.timer)
+    ref.pending = next
+    ref.timer = window.setTimeout(apply, 3000)
+  }, [status])
 
   // Navigate inside a view transition: content morphs, chrome stays pinned.
   const go = (id: NavId) => {

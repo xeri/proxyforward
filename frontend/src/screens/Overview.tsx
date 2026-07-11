@@ -77,7 +77,12 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
         <Banner tone="info">Running as a Windows service — this window is a viewer.</Banner>
       )}
 
-      {/* Pipeline hero: the traffic path, with flow streaming when live. */}
+      {/* Pipeline hero: the traffic path, with flow streaming when live. A
+          warn/bad link leaks tone-colored light from behind the glass. */}
+      <Bleed
+        color={linkState === 'bad' ? 'var(--bad)' : linkState === 'warn' ? 'var(--warn)' : null}
+        strength="20%"
+      >
       <Card pad={false}>
         <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-[1fr_3.5rem_1fr_3.5rem_1fr] md:gap-0">
           <PipeNode
@@ -129,6 +134,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
           />
         </div>
       </Card>
+      </Bleed>
 
       {/* Link health: verdict + the two headline signals, latency probe inline. */}
       <HealthPanel status={status} />
@@ -149,10 +155,12 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
       {/* Identity: who's on each end. */}
       <IdentityStrip status={status} />
 
-      {/* Role tool. */}
-      {isAgent
-        ? <PlayerAddressCard status={status} onNavigate={onNavigate} />
-        : <GatewayPairingCard />}
+      {/* Role tool, back-lit by a quiet accent bleed. */}
+      <Bleed color="var(--accent)" strength="8%">
+        {isAgent
+          ? <PlayerAddressCard status={status} onNavigate={onNavigate} />
+          : <GatewayPairingCard />}
+      </Bleed>
 
       {/* Bandwidth teaser → Traffic. */}
       <BandwidthPanel compact historyUnsupported={status.historyUnsupported} onExpand={() => onNavigate('traffic')} />
@@ -177,8 +185,8 @@ function HealthPanel({status}: {status: UIStatus}) {
 
   return (
     <Card pad={false}>
-      <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-[auto_1fr] sm:items-center">
-        <div className="flex items-center gap-3 sm:border-r sm:border-[var(--border)] sm:pr-5">
+      <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-[auto_1px_1fr] sm:items-center">
+        <div className="flex items-center gap-3 sm:pr-1">
           <span
             className="grid h-12 w-12 place-items-center rounded-[var(--r-lg)] border transition-all duration-500"
             style={{
@@ -197,6 +205,7 @@ function HealthPanel({status}: {status: UIStatus}) {
             <div className="mt-0.5"><Badge tone={HEALTH_TONE[score]}>{HEALTH_LABEL[score]}</Badge></div>
           </div>
         </div>
+        <div className="pf-sep-v hidden self-stretch sm:block" aria-hidden />
         <div className="grid grid-cols-3 gap-3">
           <HealthMetric label="Jitter" value={fmtMs(status.jitterMillis)} tone={status.jitterMillis < 0 ? 'unknown' : status.jitterMillis > 100 ? 'bad' : status.jitterMillis > 30 ? 'warn' : 'good'} />
           <HealthMetric label="Packet loss" value={fmtPct(status.packetLossPct)} tone={status.packetLossPct < 0 ? 'unknown' : status.packetLossPct > 5 ? 'bad' : status.packetLossPct > 1 ? 'warn' : 'good'} />
@@ -211,7 +220,7 @@ function HealthPanel({status}: {status: UIStatus}) {
 function HealthMetric({label, value, tone}: {label: string; value: string; tone: Seg | 'neutral'}) {
   const c = tone === 'neutral' ? 'var(--text)' : segColor[tone]
   return (
-    <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] p-3">
+    <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] p-3">
       <div className="text-[11px] text-[var(--text-3)]">{label}</div>
       <div className="mt-1 text-xl font-semibold tabular-nums" style={{color: c}}>{value}</div>
     </div>
@@ -233,7 +242,8 @@ function LatencyProbe({linked, peer}: {linked: boolean; peer: 'gateway' | 'agent
     finally { setBusy(false) }
   }
   return (
-    <div className="border-t border-[var(--border)]">
+    <div>
+      <div className="pf-sep" aria-hidden />
       <button
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
@@ -347,6 +357,20 @@ function PipeNode({icon, title, state, headline, detail, extra, pulse}: {
         <StatusDot state={state} label={detail} pulse={pulse} />
       </div>
       {extra && <div className="mt-1 flex max-w-full justify-center">{extra}</div>}
+    </div>
+  )
+}
+
+/** Bleed: ambient light escaping from behind a card (glass.css pf-bleed).
+ * Renders a stable wrapper so entrance staggers don't reshuffle; the glow
+ * only exists while `color` is set. */
+function Bleed({color, strength = '14%', children}: {color: string | null; strength?: string; children: ReactNode}) {
+  return (
+    <div
+      className={color ? 'pf-bleed relative' : undefined}
+      style={color ? {['--bleed' as string]: color, ['--bleed-strength' as string]: strength} : undefined}
+    >
+      {children}
     </div>
   )
 }
