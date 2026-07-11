@@ -49,6 +49,20 @@
 .pf-stagger > *:nth-child(8) { animation-delay: 0.37s; }
 .pf-stagger > *:nth-child(n+9) { animation-delay: 0.42s; }
 
+/* Grid-aware stagger: children cascade in loose row pairs (mixed spans make
+   true rows unknowable statically; pairs read as rows on the dashboard). */
+.pf-stagger-grid > * { animation: pf-rise 0.42s var(--ease-out) both; }
+.pf-stagger-grid > *:nth-child(1) { animation-delay: 0.02s; }
+.pf-stagger-grid > *:nth-child(2) { animation-delay: 0.06s; }
+.pf-stagger-grid > *:nth-child(3) { animation-delay: 0.1s; }
+.pf-stagger-grid > *:nth-child(4) { animation-delay: 0.14s; }
+.pf-stagger-grid > *:nth-child(5) { animation-delay: 0.14s; }
+.pf-stagger-grid > *:nth-child(6) { animation-delay: 0.18s; }
+.pf-stagger-grid > *:nth-child(7) { animation-delay: 0.18s; }
+.pf-stagger-grid > *:nth-child(8) { animation-delay: 0.22s; }
+.pf-stagger-grid > *:nth-child(9) { animation-delay: 0.22s; }
+.pf-stagger-grid > *:nth-child(n + 10) { animation-delay: 0.26s; }
+
 /* Modal + scrim, with mirrored exits driven by [data-closing]. */
 @keyframes pf-pop {
   from { opacity: 0; transform: translateY(12px) scale(0.965); }
@@ -248,6 +262,13 @@ html.pf-vt-nav::view-transition-new(root) { animation: none; }
 }
 ::view-transition-old(pf-content) { animation: pf-vt-out 0.16s ease-in both; }
 ::view-transition-new(pf-content) { animation: pf-vt-in 0.28s var(--ease-out) both; }
+
+/* Shared element: the bandwidth panel morphs between its Overview teaser and
+   Traffic hero forms instead of fading with the rest of the content. */
+::view-transition-group(pf-bw) {
+  animation-duration: 0.32s;
+  animation-timing-function: var(--ease-out);
+}
 ::view-transition-old(root), ::view-transition-new(root) {
   animation-duration: 0.3s;
 }

@@ -61,6 +61,9 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
   ) : undefined
 
   return (
+    // The panel names itself a shared element: navigating Overview ⇄ Traffic
+    // morphs the teaser into the hero (each screen mounts exactly one).
+    <div style={{viewTransitionName: 'pf-bw'} as React.CSSProperties}>
     <Card
       title="Bandwidth"
       subtitle={compact ? 'Last hour' : subtitleFor(range, data)}
@@ -131,6 +134,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
           : 'Collecting data — history builds while the app runs.'}
       />
     </Card>
+    </div>
   )
 }
 
@@ -235,7 +239,7 @@ function LegendChip({color, label, on, disabled, onClick, title}: {
     <button
       type="button" onClick={disabled ? undefined : onClick} disabled={disabled} title={title}
       aria-pressed={on}
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 transition-all duration-150 ${
+      className={`pf-press inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 transition-all duration-150 ${
         disabled
           ? 'cursor-not-allowed border-[var(--border)] text-[var(--text-3)] opacity-40'
           : on

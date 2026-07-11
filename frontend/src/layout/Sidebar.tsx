@@ -93,7 +93,7 @@ function NavButton({item, on, onNav, standalone = false}: {
       onClick={() => onNav(item.id)}
       title={`${item.label} — Ctrl+${item.shortcut}`}
       style={{height: ITEM_H}}
-      className={`group flex w-full items-center gap-2.5 rounded-[var(--r-md)] px-3 text-sm transition-colors duration-200 ${
+      className={`group pf-press flex w-full items-center gap-2.5 rounded-[var(--r-md)] px-3 text-sm transition-colors duration-200 ${
         on
           ? `font-medium text-[var(--text)] ${standalone ? 'pf-nav-glow' : ''}`
           : 'pf-nav-bloom text-[var(--text-2)] hover:text-[var(--text)]'

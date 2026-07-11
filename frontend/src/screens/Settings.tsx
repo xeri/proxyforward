@@ -7,7 +7,7 @@ import {
 import {config} from '../../wailsjs/go/models'
 import {
   Badge, Banner, Button, Card, ErrorBanner, Field, FormRow, PageHeader,
-  SegmentedControl, Select, Spinner, TextInput, Toggle, WarnWash,
+  SegmentedControl, Select, Skeleton, TextInput, Toggle, WarnWash,
 } from '../components/ui'
 import {ExportSetupRow, ImportSetupFlow} from '../components/SetupBackup'
 import {IconExternal, IconMonitor, IconMoon, IconRefresh, IconSun} from '../components/icons'
@@ -44,7 +44,25 @@ export function Settings({status}: {status: UIStatus}) {
   const reload = () => GetConfig().then(c => { setCfg(c); setDirty(false) }).catch(e => setErr(String(e)))
   useEffect(() => { reload() }, [])
 
-  if (!cfg) return <div className="flex justify-center py-16 text-[var(--text-3)]"><Spinner size={22} /></div>
+  // Loading: skeletons that match the final geometry, so the real content
+  // crossfades into place without a layout shift.
+  if (!cfg) {
+    return (
+      <div className="mx-auto max-w-[74rem]">
+        <PageHeader title="Settings" subtitle="Appearance, behavior, connection, and system integration." />
+        <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-[150px_minmax(0,1fr)]">
+          <div className="hidden flex-col gap-1.5 md:flex" aria-hidden>
+            {sections.map(s => <Skeleton key={s.id} className="h-7 w-full" />)}
+          </div>
+          <div className="space-y-4 pb-24" aria-busy="true">
+            <Skeleton className="h-44 w-full rounded-[var(--r-lg)]" />
+            <Skeleton className="h-56 w-full rounded-[var(--r-lg)]" />
+            <Skeleton className="h-44 w-full rounded-[var(--r-lg)]" />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const patch = (fn: (c: Cfg) => void) => {
     const next = config.Config.createFrom(JSON.parse(JSON.stringify(cfg)))
