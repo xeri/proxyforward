@@ -58,7 +58,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
   const rightHop = isAgent ? linkBytes : appBytes
 
   return (
-    <div className="pf-stagger grid grid-cols-12 gap-[var(--grid-gap)]">
+    <div className="pf-stagger-grid grid grid-cols-12 gap-[var(--grid-gap)]">
       <div className="col-span-12">
         <PageHeader
           title="Overview"

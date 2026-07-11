@@ -4,7 +4,7 @@ import {config} from '../../wailsjs/go/models'
 import {Column, DataTable} from '../components/DataTable'
 import {
   Badge, Button, Card, Disclosure, EmptyState, ErrorBanner, Field, IconButton,
-  Modal, MonoChip, PageHeader, Select, TextInput, Toggle,
+  Modal, MonoChip, PageHeader, Select, Skeleton, TextInput, Toggle,
 } from '../components/ui'
 import {IconBolt, IconEdit, IconPlus, IconServer, IconTrash, IconTunnels} from '../components/icons'
 import {UIStatus} from '../state'
@@ -96,6 +96,13 @@ export function Tunnels({status}: {status: UIStatus}) {
         action={<Button onClick={() => setEditing(blankTunnel())}><IconPlus size={16} /> Add tunnel</Button>}
       />
       {err && <ErrorBanner message={err} onDismiss={() => setErr('')} />}
+
+      {!loaded && (
+        <div className="grid grid-cols-1 gap-[var(--grid-gap)] @min-[56rem]:grid-cols-2 @min-[84rem]:grid-cols-3" aria-busy="true">
+          <Skeleton className="h-40 rounded-[var(--r-lg)]" />
+          <Skeleton className="h-40 rounded-[var(--r-lg)]" />
+        </div>
+      )}
 
       {loaded && tunnels.length === 0 && (
         <Card><EmptyState icon={<IconTunnels size={28} />} title="No tunnels yet"
