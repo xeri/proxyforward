@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -62,21 +63,38 @@ type App struct {
 	// request (older version): stop asking instead of eating a timeout per
 	// poll.
 	historyUnsupported bool
+	// analyticsUnsupported latches the same way for the analytics envelope, so
+	// a GUI attached to a pre-analytics daemon degrades to empty states rather
+	// than timing out on every poll. It latches only on transport-level
+	// failures — a served error (ipc.OpError) is transient and never latches.
+	analyticsUnsupported bool
+
+	// anMu serializes attached-mode analytics round-trips on their own pipe
+	// connection (anClient, dialed lazily), so a slow analytics query can
+	// never park the 2 Hz status tick behind a.mu. anClient is touched only
+	// under anMu; the reset points close it via closeAnalyticsConn.
+	anMu     sync.Mutex
+	anClient *ipc.Client
 
 	// avatarMu serializes creator-avatar cache reads/refreshes.
 	avatarMu sync.Mutex
+
+	// avatars is the player-head cache behind /pf/avatar/ (see avatars.go).
+	avatars *avatarCache
 }
 
 func New(configPath string, cfg *config.Config, ring *logging.Ring, logger *slog.Logger) *App {
 	hn, _ := os.Hostname()
+	configDir := filepath.Dir(configPath)
 	return &App{
 		configPath: configPath,
-		configDir:  filepath.Dir(configPath),
+		configDir:  configDir,
 		hostname:   hn,
 		cfg:        cfg,
 		ring:       ring,
 		logger:     logger,
 		mode:       ModeWizard,
+		avatars:    newAvatarCache(filepath.Join(configDir, "avatars"), logger),
 	}
 }
 
@@ -111,10 +129,23 @@ func (a *App) Shutdown(ctx context.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stopEngineLocked()
+	a.closeAnalyticsConnLocked()
 	if a.client != nil {
 		a.client.Close()
 		a.client = nil
 	}
+}
+
+// closeAnalyticsConnLocked drops the dedicated analytics pipe and clears the
+// unsupported latch; a.mu must be held. Closing is safe against an in-flight
+// round-trip — that op fails with a transport error and re-checks state
+// before touching the latch.
+func (a *App) closeAnalyticsConnLocked() {
+	if a.anClient != nil {
+		a.anClient.Close()
+		a.anClient = nil
+	}
+	a.analyticsUnsupported = false
 }
 
 // startEngineLocked launches the in-process engine; a.mu must be held.
@@ -129,6 +160,7 @@ func (a *App) startEngineLocked() {
 	a.eng, a.cancel, a.done, a.mode = eng, cancel, done, ModeEngine
 	a.engineFatal = ""
 	a.historyUnsupported = false
+	a.closeAnalyticsConnLocked()
 	go func() {
 		err := eng.Run(ctx)
 		done <- err
@@ -212,6 +244,17 @@ type UIStatus struct {
 	// the history protocol, so the chart can explain its empty state.
 	HistoryUnsupported bool `json:"historyUnsupported,omitempty"`
 
+	// AnalyticsUnsupported is set when the analytics surface cannot answer:
+	// attached to a pre-analytics daemon (the transport latch), or the local
+	// store failed to open. Analytics/Players render an explanatory empty
+	// state instead of skeletons that never fill.
+	AnalyticsUnsupported bool `json:"analyticsUnsupported,omitempty"`
+
+	// ConnectionsTruncated/ConnectionsTotal mirror the ipc.Status clamp:
+	// Connections holds at most the newest ipc.MaxStatusConns entries.
+	ConnectionsTruncated bool `json:"connectionsTruncated,omitempty"`
+	ConnectionsTotal     int  `json:"connectionsTotal,omitempty"`
+
 	// EngineFatal carries the engine's terminal error (bad token etc.) so
 	// the dashboard can show it instead of a silent dead link.
 	EngineFatal string `json:"engineFatal,omitempty"`
@@ -234,6 +277,11 @@ type ConnUI struct {
 	StartedAt  int64  `json:"startedAt"` // unix millis
 	BytesIn    int64  `json:"bytesIn"`
 	BytesOut   int64  `json:"bytesOut"`
+	// Player identity from Minecraft login sniffing; empty when unknown.
+	PlayerName string `json:"playerName,omitempty"`
+	PlayerUUID string `json:"playerUuid,omitempty"`
+	// RttMs is the gateway-measured round-trip time to this client; -1 unknown.
+	RttMs float64 `json:"rttMs"`
 }
 
 // applyIPCStatus copies a daemon snapshot into the UI shape.
@@ -276,11 +324,14 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 			LocalUp: t.LocalUp, LocalKnown: t.LocalKnown,
 		})
 	}
+	st.ConnectionsTruncated = s.ConnectionsTruncated
+	st.ConnectionsTotal = s.ConnectionsTotal
 	st.Connections = make([]ConnUI, 0, len(s.Connections))
 	for _, c := range s.Connections {
 		st.Connections = append(st.Connections, ConnUI{
 			ID: c.ID, TunnelName: c.TunnelName, ClientAddr: c.ClientAddr,
 			StartedAt: c.StartedAt, BytesIn: c.BytesIn, BytesOut: c.BytesOut,
+			PlayerName: c.PlayerName, PlayerUUID: c.PlayerUUID, RttMs: c.RttMs,
 		})
 	}
 }
@@ -307,6 +358,7 @@ func (a *App) statusLocked() UIStatus {
 	case ModeEngine:
 		if a.eng != nil {
 			st.applyIPCStatus(a.eng.Status())
+			st.AnalyticsUnsupported = !a.eng.AnalyticsReady()
 		}
 		select {
 		case err := <-a.done:
@@ -320,6 +372,7 @@ func (a *App) statusLocked() UIStatus {
 		st.EngineFatal = a.engineFatal
 	case ModeAttached:
 		st.HistoryUnsupported = a.historyUnsupported
+		st.AnalyticsUnsupported = a.analyticsUnsupported
 		if a.client != nil {
 			if remote, err := a.client.Status(); err == nil {
 				st.applyIPCStatus(*remote)
@@ -329,6 +382,7 @@ func (a *App) statusLocked() UIStatus {
 				a.logger.Warn("daemon connection lost", "err", err)
 				a.client.Close()
 				a.client = nil
+				a.closeAnalyticsConnLocked()
 				if a.cfg.Role != config.RoleUnset && a.cfg.Validate() == nil {
 					a.startEngineLocked()
 				} else {
@@ -526,6 +580,14 @@ func (a *App) RegenerateToken() error {
 // OpenConfigDir reveals the config directory in the system file manager.
 func (a *App) OpenConfigDir() error {
 	return openInFileManager(a.configDir)
+}
+
+// OpenExternal opens a URL in the system browser. Only http(s) is honored so a
+// stray link can't launch an arbitrary scheme handler.
+func (a *App) OpenExternal(rawURL string) {
+	if u, err := url.Parse(rawURL); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
+		runtime.BrowserOpenURL(a.ctx, rawURL)
+	}
 }
 
 // ---- Bandwidth history & peer stats ----

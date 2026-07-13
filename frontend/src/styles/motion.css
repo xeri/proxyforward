@@ -1,6 +1,8 @@
 /* ---------------------------------------------------------------------------
    Motion library. Every animation gets a pf- prefix; reduced-motion users get
-   none of it (media query at the bottom kills all durations).
+   none of it (kill switch at the bottom zeroes all durations) unless the
+   in-app Animations preference overrides the OS signal (data-motion on <html>,
+   motion.ts — "on" escapes the kill, "off" forces it regardless of the OS).
 --------------------------------------------------------------------------- */
 /* Blob drift: transform-only (the layer is oversized in base.css). Excursions
    stay small so the corner blob never leaves the L-sheet and the center blob
@@ -30,15 +32,15 @@
   from { opacity: 0; transform: translateY(10px) scale(0.995); }
   to { opacity: 1; transform: none; }
 }
-.pf-page { animation: pf-page-in 0.32s var(--ease-out) both; }
+.pf-page { animation: pf-page-in 0.5s var(--ease-out) both; }
 
 /* Card entrance; .pf-stagger delays each direct child in sequence. */
 @keyframes pf-rise {
   from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: none; }
 }
-.pf-rise { animation: pf-rise 0.42s var(--ease-out) both; }
-.pf-stagger > * { animation: pf-rise 0.42s var(--ease-out) both; }
+.pf-rise { animation: pf-rise 0.58s var(--ease-out) both; }
+.pf-stagger > * { animation: pf-rise 0.58s var(--ease-out) both; }
 .pf-stagger > *:nth-child(1) { animation-delay: 0.02s; }
 .pf-stagger > *:nth-child(2) { animation-delay: 0.07s; }
 .pf-stagger > *:nth-child(3) { animation-delay: 0.12s; }
@@ -51,7 +53,7 @@
 
 /* Grid-aware stagger: children cascade in loose row pairs (mixed spans make
    true rows unknowable statically; pairs read as rows on the dashboard). */
-.pf-stagger-grid > * { animation: pf-rise 0.42s var(--ease-out) both; }
+.pf-stagger-grid > * { animation: pf-rise 0.58s var(--ease-out) both; }
 .pf-stagger-grid > *:nth-child(1) { animation-delay: 0.02s; }
 .pf-stagger-grid > *:nth-child(2) { animation-delay: 0.06s; }
 .pf-stagger-grid > *:nth-child(3) { animation-delay: 0.1s; }
@@ -68,7 +70,7 @@
   from { opacity: 0; transform: translateY(12px) scale(0.965); }
   to { opacity: 1; transform: none; }
 }
-.pf-pop { animation: pf-pop 0.28s cubic-bezier(0.16, 1.1, 0.3, 1) both; }
+.pf-pop { animation: pf-pop 0.34s cubic-bezier(0.16, 1.1, 0.3, 1) both; }
 @keyframes pf-pop-out {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: translateY(8px) scale(0.97); }
@@ -90,19 +92,20 @@
   from { opacity: 0; transform: translateY(-10px) scale(0.985); }
   to { opacity: 1; transform: none; }
 }
-.pf-drop { animation: pf-drop 0.22s var(--ease-out) both; }
+.pf-drop { animation: pf-drop 0.26s var(--ease-out) both; }
 @keyframes pf-drop-out {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: translateY(-8px) scale(0.99); }
 }
 [data-closing] .pf-drop { animation: pf-drop-out 0.14s ease-in both; }
 
-/* Floating bar (unsaved changes) slides in from below. */
+/* Floating bar (unsaved changes) slides in from below. The consumer owns
+   horizontal placement (flex centering) — no translate baked in. */
 @keyframes pf-slide-up {
-  from { opacity: 0; transform: translate(-50%, 16px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to { opacity: 1; transform: none; }
 }
-.pf-slide-up { animation: pf-slide-up 0.3s cubic-bezier(0.16, 1.2, 0.3, 1) both; }
+.pf-slide-up { animation: pf-slide-up 0.34s cubic-bezier(0.16, 1.2, 0.3, 1) both; }
 
 /* Traffic conduit: dashes stream along the pipeline when a hop is live. */
 .pf-conduit {
@@ -180,17 +183,26 @@
   animation: pf-glare-sweep 0.6s var(--ease-out) both;
 }
 
+/* Menu glass arrivals: the save bar sliding up and a Select list unfolding
+   catch the same one-time glare as any other float. */
+.pf-slide-up.pf-menu::after {
+  animation: pf-glare-sweep 0.7s var(--ease-out) both;
+}
+.pf-fade.pf-menu::after {
+  animation: pf-glare-sweep 0.45s var(--ease-out) both;
+}
+
 /* Theme swap: the chrome re-glazes (class pulsed by theme.ts). */
 html.pf-reglaze .pf-sheet::after,
 html.pf-reglaze .pf-island::after {
-  animation: pf-glare-sweep 0.7s var(--ease-out) both;
+  animation: pf-glare-sweep var(--dur-theme) var(--ease-out) both;
 }
 
 /* Wizard handover: the ambient glow flares behind the chrome while a sweep
    crosses it — the one scripted demonstration of transmission. */
 html.pf-glaze .pf-sheet::after,
 html.pf-glaze .pf-island::after {
-  animation: pf-glare-sweep 0.9s var(--ease-out) both;
+  animation: pf-glare-sweep 1.2s var(--ease-out) both;
 }
 html.pf-glaze body::before {
   filter: brightness(1.5) saturate(1.15);
@@ -213,10 +225,10 @@ main {
 }
 
 /* Theme switch fallback: briefly transition every surface for a cross-fade.
-   The class is added on toggle and removed ~400ms later. */
+   The class is added on toggle and removed ~700ms later. */
 .pf-theme-anim, .pf-theme-anim * {
-  transition: background-color 0.35s ease, border-color 0.35s ease,
-    color 0.35s ease, fill 0.35s ease, stroke 0.35s ease, box-shadow 0.35s ease !important;
+  transition: background-color 0.6s ease, border-color 0.6s ease,
+    color 0.6s ease, fill 0.6s ease, stroke 0.6s ease, box-shadow 0.6s ease !important;
 }
 
 /* Interactive lift: cards / tiles that respond to hover. */
@@ -249,32 +261,107 @@ main {
 .pf-expand > * { overflow: hidden; min-height: 0; }
 
 /* View transitions: nav changes animate only the content region; the chrome
-   (sheet, sidebar, title bar) stays pinned. Theme swaps crossfade the root. */
+   (sheet, sidebar, title bar) stays pinned. Theme swaps relight the root
+   (pf-relight below); the wizard handover keeps the plain root crossfade. */
 html.pf-vt-nav::view-transition-old(root),
 html.pf-vt-nav::view-transition-new(root) { animation: none; }
 @keyframes pf-vt-out {
   from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 0; transform: translateY(-10px); }
 }
 @keyframes pf-vt-in {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(16px); }
   to { opacity: 1; transform: none; }
 }
-::view-transition-old(pf-content) { animation: pf-vt-out 0.16s ease-in both; }
-::view-transition-new(pf-content) { animation: pf-vt-in 0.28s var(--ease-out) both; }
+::view-transition-old(pf-content) { animation: pf-vt-out var(--dur-page-out) ease-in both; }
+::view-transition-new(pf-content) { animation: pf-vt-in var(--dur-page-in) var(--ease-out) both; }
 
 /* Shared element: the bandwidth panel morphs between its Overview teaser and
    Traffic hero forms instead of fading with the rest of the content. */
 ::view-transition-group(pf-bw) {
-  animation-duration: 0.32s;
+  animation-duration: 0.55s;
   animation-timing-function: var(--ease-out);
 }
 ::view-transition-old(root), ::view-transition-new(root) {
-  animation-duration: 0.3s;
+  animation-duration: 0.6s;
+}
+
+/* Theme relight (theme.ts pulses pf-relight + pf-theme-snap): the swap is
+   captured as two static panes, the old holding beneath while the new theme
+   sweeps in from the light corner along --light-angle — a soft diagonal
+   front, over-lit at first and settling, as if the glass were re-lit from
+   the other side. Cached snapshots + mask/filter only: compositor work, no
+   per-frame restyle or re-blur. */
+html.pf-relight::view-transition-old(root) { animation: none; }
+html.pf-relight::view-transition-new(root) {
+  -webkit-mask-image: linear-gradient(var(--light-angle), #000 0%, #000 45%, transparent 53.3%);
+  mask-image: linear-gradient(var(--light-angle), #000 0%, #000 45%, transparent 53.3%);
+  -webkit-mask-size: 300% 300%;
+  mask-size: 300% 300%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  animation: pf-relight-sweep var(--dur-theme) var(--ease-out) both;
+}
+@keyframes pf-relight-sweep {
+  from {
+    -webkit-mask-position: 100% 100%;
+    mask-position: 100% 100%;
+    filter: brightness(1.16) saturate(1.1);
+  }
+  to {
+    -webkit-mask-position: 0% 0%;
+    mask-position: 0% 0%;
+    filter: brightness(1) saturate(1);
+  }
+}
+
+/* The specular front: a glare band crossing the pane in step with the
+   reveal (theme.ts mounts the div once; hidden outside pf-relight). It
+   lives in the live DOM, so it renders inside the incoming pane only. */
+.pf-relight-glare {
+  position: fixed;
+  inset: -20%;
+  z-index: 9999;
+  pointer-events: none;
+  display: none;
+  background: linear-gradient(
+    var(--light-angle),
+    transparent 40%,
+    rgba(255, 255, 255, 0.07) 47%,
+    rgba(255, 255, 255, 0.16) 50%,
+    rgba(255, 255, 255, 0.07) 53%,
+    transparent 60%
+  );
+  mix-blend-mode: screen;
+}
+html.pf-relight .pf-relight-glare {
+  display: block;
+  /* Rides the sweep — the glare band and the reveal front must cross together. */
+  animation: pf-relight-glare var(--dur-theme) var(--ease-out) both;
+}
+@keyframes pf-relight-glare {
+  from { transform: translate3d(-55%, -55%, 0); opacity: 0; }
+  30% { opacity: 1; }
+  to { transform: translate3d(55%, 55%, 0); opacity: 0; }
+}
+
+/* Freeze-frame for the swap: the new theme must land instantly so the panes
+   are static while the sweep runs — otherwise the registered token
+   transitions (--accent, --mode-glow) restyle whole subtrees per frame and
+   every backdrop blur re-rasterizes. 0s, not near-zero (see the
+   reduced-motion note below). */
+html.pf-theme-snap *,
+html.pf-theme-snap *::before,
+html.pf-theme-snap *::after {
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  :root:not([data-motion="on"]),
+  :root:not([data-motion="on"]) *,
+  :root:not([data-motion="on"]) *::before,
+  :root:not([data-motion="on"]) *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     /* 0s (not 0.01ms): a zero-duration transition never starts, so changes
@@ -285,5 +372,19 @@ html.pf-vt-nav::view-transition-new(root) { animation: none; }
     transition-duration: 0s !important;
     transition-delay: 0s !important;
   }
-  ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  :root:not([data-motion="on"])::view-transition-old(*),
+  :root:not([data-motion="on"])::view-transition-new(*) { animation: none !important; }
 }
+
+/* Force-off mirrors the reduce block regardless of the OS signal. */
+:root[data-motion="off"],
+:root[data-motion="off"] *,
+:root[data-motion="off"] *::before,
+:root[data-motion="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+:root[data-motion="off"]::view-transition-old(*),
+:root[data-motion="off"]::view-transition-new(*) { animation: none !important; }

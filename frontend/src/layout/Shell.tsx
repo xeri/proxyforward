@@ -1,5 +1,5 @@
 import {ReactNode, useEffect, useRef} from 'react'
-import {prefersReduced} from '../theme'
+import {useMotion} from '../motion'
 
 // Content slides this many px beneath the sidebar's edge before clipping.
 // Inline px math — must stay a plain number; documented for token readers
@@ -22,43 +22,50 @@ export function Shell({sidebar, titlebar, children}: {
   children: ReactNode
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const {reduced} = useMotion()
 
   // The pointer is a lamp: one delegated, rAF-throttled listener writes local
-  // coordinates onto the hovered card; glass.css turns them into a traveling
-  // rim glow and a faint surface bloom. Dormant under reduced motion.
+  // coordinates onto every card within the lamp's reach — not just the hovered
+  // one — so the rim glow spills continuously across card gaps instead of
+  // cutting off at each edge. The glow layers live inside .pf-card, so the
+  // background between cards never lights up. Dormant under reduced motion;
+  // re-arms live when the Animations preference flips (Shell never remounts).
   useEffect(() => {
-    if (prefersReduced()) return
+    if (reduced) return
     const root = rootRef.current
     if (!root) return
+    // Slightly past the widest glow gradient (240px) so cards dim just after
+    // the light has visually left them.
+    const REACH = 280
     let raf = 0
-    let card: HTMLElement | null = null
     let x = 0
     let y = 0
+    const lit = new Set<HTMLElement>()
+    const drop = (el: HTMLElement) => {
+      el.style.removeProperty('--mx')
+      el.style.removeProperty('--my')
+      lit.delete(el)
+    }
     const apply = () => {
       raf = 0
-      if (!card) return
-      const r = card.getBoundingClientRect()
-      card.style.setProperty('--mx', `${x - r.left}px`)
-      card.style.setProperty('--my', `${y - r.top}px`)
-    }
-    const drop = (el: HTMLElement | null) => {
-      el?.style.removeProperty('--mx')
-      el?.style.removeProperty('--my')
+      for (const el of root.querySelectorAll<HTMLElement>('.pf-card')) {
+        const r = el.getBoundingClientRect()
+        if (x > r.left - REACH && x < r.right + REACH && y > r.top - REACH && y < r.bottom + REACH) {
+          el.style.setProperty('--mx', `${x - r.left}px`)
+          el.style.setProperty('--my', `${y - r.top}px`)
+          lit.add(el)
+        } else if (lit.has(el)) {
+          drop(el)
+        }
+      }
     }
     const onMove = (e: PointerEvent) => {
-      const hit = (e.target as Element).closest?.('.pf-card') as HTMLElement | null
-      if (hit !== card) {
-        drop(card)
-        card = hit
-      }
-      if (!card) return
       x = e.clientX
       y = e.clientY
       if (!raf) raf = requestAnimationFrame(apply)
     }
     const onLeave = () => {
-      drop(card)
-      card = null
+      for (const el of [...lit]) drop(el)
     }
     root.addEventListener('pointermove', onMove)
     root.addEventListener('pointerleave', onLeave)
@@ -66,9 +73,9 @@ export function Shell({sidebar, titlebar, children}: {
       root.removeEventListener('pointermove', onMove)
       root.removeEventListener('pointerleave', onLeave)
       if (raf) cancelAnimationFrame(raf)
-      drop(card)
+      onLeave()
     }
-  }, [])
+  }, [reduced])
 
   return (
     <div

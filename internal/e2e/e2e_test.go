@@ -26,7 +26,11 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m)
+	// winio starts one process-lifetime IO-completion goroutine on first
+	// named-pipe use (attach_test.go) and never stops it — by design, not a
+	// leak.
+	goleak.VerifyTestMain(m,
+		goleak.IgnoreAnyFunction("github.com/Microsoft/go-winio.ioCompletionProcessor"))
 }
 
 func testLogger(t *testing.T) *slog.Logger {
@@ -90,6 +94,8 @@ type harnessOpts struct {
 	// offerCaps overrides the agent's hello capability offer; an explicit
 	// empty slice simulates a legacy (pre-capability) agent.
 	offerCaps []string
+	// mcAware marks the tunnel Minecraft-aware so both seams sniff logins.
+	mcAware bool
 }
 
 func newHarness(t *testing.T, localAddr string) *harness {
@@ -135,6 +141,7 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 		LocalAddr:  localAddr,
 		PublicPort: 0, // gateway picks
 		Enabled:    true,
+		Options:    config.TunnelOptions{MinecraftAware: opts.mcAware},
 	}}
 
 	h := &harness{t: t, gw: gw, gwCancel: gwCancel, agentCfg: agentCfg, tunnelID: tunnelID, offerCaps: opts.offerCaps}
@@ -511,6 +518,57 @@ func TestTunnelRoundTrip(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// TestPerConnRTTPropagates: the gateway measures each public connection's
+// kernel RTT and reports it to the agent over the control link (conn-stats), so
+// both sides can attribute a network latency to the connection. tcpinfo is
+// best-effort, so a kernel that yields no sample skips rather than fails.
+func TestPerConnRTTPropagates(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarness(t, echoAddr)
+	addr := h.waitPublicPort()
+
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial public port: %v", err)
+	}
+	defer conn.Close()
+
+	exchange := func() {
+		conn.SetDeadline(time.Now().Add(3 * time.Second))
+		if _, err := conn.Write([]byte("ping")); err != nil {
+			return
+		}
+		io.ReadFull(conn, make([]byte, 4))
+	}
+	exchange() // prime the kernel's RTT estimate
+
+	// The gateway samples every rttSampleInterval (5s); allow a few cycles for
+	// the value to be measured and relayed.
+	deadline := time.Now().Add(20 * time.Second)
+	var gwOK, agentOK bool
+	for time.Now().Before(deadline) && !(gwOK && agentOK) {
+		exchange() // keep the connection warm so the kernel keeps a sample
+		for _, s := range h.gw.Conns.Snapshot() {
+			if s.RttMs >= 0 {
+				gwOK = true
+			}
+		}
+		for _, s := range h.agent.Conns.Snapshot() {
+			if s.RttMs >= 0 {
+				agentOK = true
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !gwOK {
+		t.Skip("kernel provided no TCP_INFO RTT sample; probe is best-effort")
+	}
+	if !agentOK {
+		t.Fatal("gateway measured RTT but it never reached the agent over conn-stats")
+	}
 }
 
 // TestAgentRestartRebinds is the ghost-listener test: kill the agent, start

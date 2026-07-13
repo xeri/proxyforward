@@ -19,6 +19,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"proxyforward/internal/config"
@@ -26,9 +27,11 @@ import (
 	"proxyforward/internal/control"
 	"proxyforward/internal/link"
 	"proxyforward/internal/linkquality"
+	"proxyforward/internal/mcsniff"
 	"proxyforward/internal/netid"
 	"proxyforward/internal/relay"
 	"proxyforward/internal/stats"
+	"proxyforward/internal/tcpinfo"
 	"proxyforward/internal/transport"
 	"proxyforward/internal/version"
 )
@@ -50,7 +53,19 @@ const (
 	pingInterval = 5 * time.Second
 	lossWindow   = linkquality.DefaultWindow
 	lossTimeout  = 2 * pingInterval
+
+	// rttSampleInterval is how often the gateway reads each live public
+	// connection's kernel RTT and reports it to the agent.
+	rttSampleInterval = 5 * time.Second
 )
+
+// rttConn is one live public connection tracked for RTT sampling: the raw
+// player-facing socket the kernel measures, and the registry entry that
+// carries the value into this gateway's own GUI and analytics.
+type rttConn struct {
+	tcp   *net.TCPConn
+	entry *conntrack.Entry
+}
 
 type Gateway struct {
 	cfg    *config.Config
@@ -66,6 +81,10 @@ type Gateway struct {
 
 	// Conns tracks live proxied connections for the GUI.
 	Conns *conntrack.Registry
+	// connSeq issues the per-connection correlation ids (ConnKey / OpenConn
+	// ConnID) ahead of registry insertion, so the key is set before the entry
+	// is visible to anyone.
+	connSeq atomic.Uint64
 	// linkTotals counts raw control-link bytes across all agent sessions of
 	// this process.
 	linkTotals stats.LinkCounters
@@ -511,6 +530,7 @@ func (g *Gateway) serveControl(ctx context.Context, sess *agentSession, ctrl tra
 	sess.setCtrl(ctrl)
 	defer sess.setCtrl(nil)
 	go g.pingLoop(ctx, sess)
+	go g.rttSampler(ctx, sess)
 	for {
 		if ctx.Err() != nil {
 			return
@@ -551,6 +571,48 @@ func (g *Gateway) pingLoop(ctx context.Context, sess *agentSession) {
 	}
 }
 
+// rttSampler reads each live public connection's kernel RTT every
+// rttSampleInterval, stamps it on the local registry entry (feeding this
+// gateway's own GUI and analytics), and — when the agent negotiated
+// CapConnStats — reports the batch so the agent attributes the same RTT to its
+// player. Bound to the session context; ends when the session does.
+func (g *Gateway) rttSampler(ctx context.Context, sess *agentSession) {
+	t := time.NewTicker(rttSampleInterval)
+	defer t.Stop()
+	report := sess.Has(control.CapConnStats)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			var batch []control.ConnStat
+			sess.rttConns.Range(func(k, v any) bool {
+				rc := v.(*rttConn)
+				d, ok := tcpinfo.RTT(rc.tcp)
+				if !ok {
+					return true
+				}
+				ms := float64(d) / float64(time.Millisecond)
+				rc.entry.SetRTT(ms)
+				if report {
+					batch = append(batch, control.ConnStat{ConnID: k.(string), RttMs: ms})
+				}
+				return true
+			})
+			// Chunk so a busy gateway never approaches MaxFrame.
+			for i := 0; i < len(batch); i += control.MaxConnStatsPerFrame {
+				end := i + control.MaxConnStatsPerFrame
+				if end > len(batch) {
+					end = len(batch)
+				}
+				if err := sess.writeControl(control.TypeConnStats, control.ConnStats{Entries: batch[i:end]}); err != nil {
+					return // stream is going away; the read loop will notice too
+				}
+			}
+		}
+	}
+}
+
 func (g *Gateway) handleControlMsg(sess *agentSession, ctrl transport.Stream, env *control.Envelope) error {
 	write := func(msgType string, payload any) error {
 		return sess.writeControl(msgType, payload)
@@ -571,7 +633,10 @@ func (g *Gateway) handleControlMsg(sess *agentSession, ctrl transport.Stream, en
 		}
 		now := time.Now()
 		rtt := now.Sub(time.Unix(0, pong.SentUnixNano))
-		sess.rttMillis.Store(rtt.Milliseconds())
+		// Clamp to ≥1ms: 0 is the "no measurement" sentinel everywhere
+		// (status, stats gauges), and a sub-millisecond LAN round-trip must
+		// not truncate into it and read as unknown.
+		sess.rttMillis.Store(max(1, rtt.Milliseconds()))
 		sess.quality.OnPong(pong.Seq, rtt)
 		if pc := sess.probe.Load(); pc != nil {
 			pc.Record(*pong, now)
@@ -727,10 +792,24 @@ func (g *Gateway) handleClient(sess *agentSession, spec control.TunnelSpec, clie
 		return
 	}
 	defer stream.Close()
+	tcp, ok := clientConn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+	// ConnID correlates this connection with the RTT reports the gateway sends
+	// the agent; the entry's own key lets the local recorder attribute gateway
+	// RTT samples. Issued before Open so the key is set before the entry is
+	// published (ConnKey is immutable after Open).
+	connID := strconv.FormatUint(g.connSeq.Add(1), 10)
+	// Splice(client, stream): AToB is client→server, so inIsAToB=true.
+	entry, closeEntry := g.Conns.Open(spec.ID, spec.Name, clientConn.RemoteAddr().String(), connID, true)
+	defer closeEntry()
+
 	stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
 	err = control.WriteMsg(stream, control.TypeOpenConn, control.OpenConn{
 		TunnelID:   spec.ID,
 		ClientAddr: clientConn.RemoteAddr().String(),
+		ConnID:     connID,
 	})
 	if err != nil {
 		sess.logger.Debug("open_conn write failed", "err", err)
@@ -738,14 +817,18 @@ func (g *Gateway) handleClient(sess *agentSession, spec control.TunnelSpec, clie
 	}
 	stream.SetWriteDeadline(time.Time{})
 
-	tcp, ok := clientConn.(*net.TCPConn)
-	if !ok {
-		return
+	// Track for RTT sampling over this connection's lifetime.
+	sess.rttConns.Store(connID, &rttConn{tcp: tcp, entry: entry})
+	defer sess.rttConns.Delete(connID)
+
+	// Minecraft-aware tunnels sniff the client's login handshake (read from
+	// the player leg here) to attribute the connection to a player. Read-only:
+	// the tap forwards bytes unchanged.
+	var client relay.Conn = tcp
+	if spec.MinecraftAware {
+		client = mcsniff.Tap(tcp, entry)
 	}
-	// Splice(client, stream): AToB is client→server, so inIsAToB=true.
-	entry, closeEntry := g.Conns.Open(spec.ID, spec.Name, clientConn.RemoteAddr().String(), true)
-	defer closeEntry()
-	if err := relay.Splice(tcp, stream, entry.Counters); err != nil {
+	if err := relay.Splice(client, stream, entry.Counters); err != nil {
 		sess.logger.Debug("splice ended with error", "client", clientConn.RemoteAddr().String(), "err", err)
 	}
 }

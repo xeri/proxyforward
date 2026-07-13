@@ -30,6 +30,18 @@ func (a *Agent) setHealthSink(notify func(tunnelID string, up bool)) {
 	a.healthSink.Store(&healthSinkBox{notify})
 }
 
+// SetHealthObserver installs (or, with nil, removes) a process-lifetime
+// observer of tunnel-local health transitions. The engine uses it to record
+// tunnel_local uptime events; it fires on every transition regardless of
+// whether a gateway session is up, so it is independent of the session sink.
+func (a *Agent) SetHealthObserver(notify func(tunnelID string, up bool)) {
+	if notify == nil {
+		a.healthObserver.Store(nil)
+		return
+	}
+	a.healthObserver.Store(&healthSinkBox{notify})
+}
+
 // LocalUp reports the last observed health of a tunnel's local target.
 // known is false until the first probe completes.
 func (a *Agent) LocalUp(tunnelID string) (up, known bool) {
@@ -84,6 +96,9 @@ func (a *Agent) probeTunnels(ctx context.Context, dialTimeout time.Duration) {
 		}
 		if sink := a.healthSink.Load(); sink != nil {
 			sink.notify(t.ID, up)
+		}
+		if obs := a.healthObserver.Load(); obs != nil {
+			obs.notify(t.ID, up)
 		}
 	}
 }

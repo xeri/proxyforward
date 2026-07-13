@@ -4,12 +4,23 @@ package ipc
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"proxyforward/internal/stats"
 )
+
+// A private pipe keeps this binary from colliding with parallel test
+// packages that serve IPC (engine, app, e2e) or a live daemon.
+func init() {
+	PipeName = fmt.Sprintf(`\\.\pipe\proxyforward-ipctest-%d`, os.Getpid())
+}
 
 func TestPipeStatusRoundTrip(t *testing.T) {
 	want := Status{
@@ -94,6 +105,193 @@ func TestPipeStatusRoundTrip(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Serve did not stop after cancel")
+	}
+}
+
+func TestPipeAnalyticsRoundTrip(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- Serve(ctx, slog.New(slog.DiscardHandler), Sources{
+			Status: func() Status { return Status{} },
+			Analytics: func(req AnalyticsReq) AnalyticsResp {
+				switch req.Op {
+				case "players":
+					// Echo the request body back inside a result envelope so the
+					// test can verify both directions survive the frame.
+					return AnalyticsResp{Body: json.RawMessage(`{"total":1,"echo":` + string(req.Body) + `}`)}
+				default:
+					return AnalyticsResp{Err: "unknown analytics op " + req.Op}
+				}
+			},
+		})
+	}()
+	defer func() { cancel(); <-serveDone }()
+
+	var (
+		c   *Client
+		err error
+	)
+	for range 100 {
+		c, err = Dial(200 * time.Millisecond)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("dial pipe: %v", err)
+	}
+	defer c.Close()
+
+	body, err := c.Analytics("players", json.RawMessage(`{"limit":80,"search":"steve"}`))
+	if err != nil {
+		t.Fatalf("analytics op: %v", err)
+	}
+	var got struct {
+		Total int `json:"total"`
+		Echo  struct {
+			Limit  int    `json:"limit"`
+			Search string `json:"search"`
+		} `json:"echo"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode analytics body %s: %v", body, err)
+	}
+	if got.Total != 1 || got.Echo.Limit != 80 || got.Echo.Search != "steve" {
+		t.Fatalf("analytics round trip mangled the payload: %s", body)
+	}
+
+	// A daemon-side error comes back as a client error, not a payload.
+	if _, err := c.Analytics("bogus", nil); err == nil {
+		t.Fatal("unknown op did not error")
+	}
+
+	// The connection survives an error reply and keeps serving.
+	if _, err := c.Analytics("players", json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("op after error reply: %v", err)
+	}
+}
+
+// TestPipeServedErrorTyping (T4b): a served analytics error must surface as
+// *OpError — the transient kind that never latches — while a dead pipe
+// yields a plain transport error.
+func TestPipeServedErrorTyping(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- Serve(ctx, slog.New(slog.DiscardHandler), Sources{
+			Status:    func() Status { return Status{} },
+			Analytics: func(req AnalyticsReq) AnalyticsResp { return AnalyticsResp{Err: "boom"} },
+		})
+	}()
+
+	var (
+		c   *Client
+		err error
+	)
+	for range 100 {
+		c, err = Dial(200 * time.Millisecond)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		cancel()
+		t.Fatalf("dial pipe: %v", err)
+	}
+	defer c.Close()
+
+	_, err = c.Analytics("players", nil)
+	var opErr *OpError
+	if !errors.As(err, &opErr) || opErr.Op != "players" || opErr.Msg != "boom" {
+		t.Fatalf("served error = %v (%T), want *OpError{players, boom}", err, err)
+	}
+
+	// Kill the daemon: the same call must now fail as a plain transport
+	// error, NOT an OpError.
+	cancel()
+	<-serveDone
+	_, err = c.Analytics("players", nil)
+	if err == nil {
+		t.Fatal("call against dead server did not error")
+	}
+	if errors.As(err, &opErr) {
+		t.Fatalf("transport failure came back typed as OpError: %v", err)
+	}
+}
+
+// TestPipeOversizeReplySubstituted (T4a): a reply that would exceed the
+// 64 KiB frame is replaced with a served error — an OpError on the client —
+// and the connection stays healthy for the next request.
+func TestPipeOversizeReplySubstituted(t *testing.T) {
+	big := json.RawMessage(`"` + strings.Repeat("A", 100*1024) + `"`)
+	ctx, cancel := context.WithCancel(context.Background())
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- Serve(ctx, slog.New(slog.DiscardHandler), Sources{
+			Status:    func() Status { return Status{} },
+			Analytics: func(req AnalyticsReq) AnalyticsResp { return AnalyticsResp{Body: big} },
+		})
+	}()
+	defer func() { cancel(); <-serveDone }()
+
+	var (
+		c   *Client
+		err error
+	)
+	for range 100 {
+		c, err = Dial(200 * time.Millisecond)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("dial pipe: %v", err)
+	}
+	defer c.Close()
+
+	_, err = c.Analytics("players", nil)
+	var opErr *OpError
+	if !errors.As(err, &opErr) || !strings.Contains(opErr.Msg, "frame") {
+		t.Fatalf("oversize reply error = %v (%T), want frame-limit OpError", err, err)
+	}
+	// The pipe was never poisoned: the same connection keeps serving.
+	if err := c.Ping(); err != nil {
+		t.Fatalf("ping after oversize reply: %v", err)
+	}
+}
+
+func TestPipeAnalyticsNilSource(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- Serve(ctx, slog.New(slog.DiscardHandler), Sources{Status: func() Status { return Status{} }})
+	}()
+	defer func() { cancel(); <-serveDone }()
+
+	var (
+		c   *Client
+		err error
+	)
+	for range 100 {
+		c, err = Dial(200 * time.Millisecond)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("dial pipe: %v", err)
+	}
+	defer c.Close()
+
+	// A daemon without an analytics store answers with an error rather than
+	// hanging the client.
+	if _, err := c.Analytics("players", nil); err == nil {
+		t.Fatal("nil analytics source did not error")
 	}
 }
 

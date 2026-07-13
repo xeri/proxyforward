@@ -5,7 +5,7 @@ import {BandwidthPanel} from '../components/BandwidthChart'
 import {NumberTicker} from '../components/NumberTicker'
 import {
   Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, ErrorBanner,
-  PageHeader, StatTile, StatusDot,
+  PageHeader, RoleWord, StatTile, StatusDot,
 } from '../components/ui'
 import {Emblem} from '../components/Emblem'
 import {IconActivity, IconClock, IconGauge, IconGlobe, IconLink, IconServer, IconUsers} from '../components/icons'
@@ -171,14 +171,14 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
       <div className="col-span-12 @3xl:col-span-6">
         <IdentityCard
           role={isAgent ? 'agent' : 'gateway'} self
-          sideLabel={`This machine · ${isAgent ? 'Agent' : 'Gateway'}`}
+          sideLabel={<>This machine · <RoleWord role={isAgent ? 'agent' : 'gateway'}>{isAgent ? 'Agent' : 'Gateway'}</RoleWord></>}
           host={status.hostname} publicIp={status.publicIp} lanIps={status.localLanIps} online
         />
       </div>
       <div className="col-span-12 @3xl:col-span-6">
         <IdentityCard
           role={isAgent ? 'gateway' : 'agent'}
-          sideLabel={`Peer · ${isAgent ? 'Gateway' : 'Agent'}`}
+          sideLabel={<>Peer · <RoleWord role={isAgent ? 'gateway' : 'agent'}>{isAgent ? 'Gateway' : 'Agent'}</RoleWord></>}
           host={status.peerHostname} publicIp={status.peerPublicIp} lanIps={status.peerLanIps}
           online={isAgent ? status.linkUp : status.agentConnected}
         />
@@ -215,35 +215,40 @@ function HealthPanel({status}: {status: UIStatus}) {
   const c = segColor[score]
 
   return (
-    <Card pad={false}>
-      <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-[auto_1px_1fr] sm:items-center">
-        <div className="flex items-center gap-3 sm:pr-1">
-          <span
-            className="grid h-12 w-12 place-items-center rounded-[var(--r-lg)] border transition-all duration-500"
-            style={{
-              color: c,
-              borderColor: `color-mix(in srgb, ${c} 40%, var(--border))`,
-              background: `color-mix(in srgb, ${c} 10%, transparent)`,
-              boxShadow: score === 'good'
-                ? `inset 0 1px 0 color-mix(in srgb, var(--bevel-top) 55%, white), 0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)`
-                : 'inset 0 1px 0 var(--bevel-top)',
-            }}
-          >
-            <IconActivity size={22} />
-          </span>
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">Link health</div>
-            <div className="mt-0.5"><Badge tone={HEALTH_TONE[score]}>{HEALTH_LABEL[score]}</Badge></div>
+    // `grid h-full` stretches the card to its grid row (the neighboring 2×2
+    // stat column sets the height); the probe row then anchors to the card
+    // bottom so no dead band opens above the identity cards.
+    <Card pad={false} className="grid h-full">
+      <div className="flex h-full flex-col">
+        <div className="grid flex-1 grid-cols-1 content-center gap-4 p-5 sm:grid-cols-[auto_1px_1fr] sm:items-center">
+          <div className="flex items-center gap-3 sm:pr-1">
+            <span
+              className="grid h-12 w-12 place-items-center rounded-[var(--r-lg)] border transition-all duration-500"
+              style={{
+                color: c,
+                borderColor: `color-mix(in srgb, ${c} 40%, var(--border))`,
+                background: `color-mix(in srgb, ${c} 10%, transparent)`,
+                boxShadow: score !== 'unknown'
+                  ? `inset 0 1px 0 color-mix(in srgb, var(--bevel-top) 55%, white), 0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)`
+                  : 'inset 0 1px 0 var(--bevel-top)',
+              }}
+            >
+              <IconActivity size={22} />
+            </span>
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">Link health</div>
+              <div className="mt-0.5"><Badge tone={HEALTH_TONE[score]}>{HEALTH_LABEL[score]}</Badge></div>
+            </div>
+          </div>
+          <div className="pf-sep-v hidden self-stretch sm:block" aria-hidden />
+          <div className="grid grid-cols-3 gap-3">
+            <HealthMetric label="Jitter" value={fmtMs(status.jitterMillis)} tone={status.jitterMillis < 0 ? 'unknown' : status.jitterMillis > 100 ? 'bad' : status.jitterMillis > 30 ? 'warn' : 'good'} />
+            <HealthMetric label="Packet loss" value={fmtPct(status.packetLossPct)} tone={status.packetLossPct < 0 ? 'unknown' : status.packetLossPct > 5 ? 'bad' : status.packetLossPct > 1 ? 'warn' : 'good'} />
+            <HealthMetric label="Round trip" value={linked ? `${status.rttMillis} ms` : '—'} tone="neutral" />
           </div>
         </div>
-        <div className="pf-sep-v hidden self-stretch sm:block" aria-hidden />
-        <div className="grid grid-cols-3 gap-3">
-          <HealthMetric label="Jitter" value={fmtMs(status.jitterMillis)} tone={status.jitterMillis < 0 ? 'unknown' : status.jitterMillis > 100 ? 'bad' : status.jitterMillis > 30 ? 'warn' : 'good'} />
-          <HealthMetric label="Packet loss" value={fmtPct(status.packetLossPct)} tone={status.packetLossPct < 0 ? 'unknown' : status.packetLossPct > 5 ? 'bad' : status.packetLossPct > 1 ? 'warn' : 'good'} />
-          <HealthMetric label="Round trip" value={linked ? `${status.rttMillis} ms` : '—'} tone="neutral" />
-        </div>
+        <LatencyProbe linked={linked} peer={isAgent ? 'gateway' : 'agent'} />
       </div>
-      <LatencyProbe linked={linked} peer={isAgent ? 'gateway' : 'agent'} />
     </Card>
   )
 }
@@ -285,7 +290,7 @@ function LatencyProbe({linked, peer}: {linked: boolean; peer: 'gateway' | 'agent
       </button>
       <div className="pf-expand" data-open={open}>
         <div>
-          <div className="px-5 pb-4">
+          <div className="px-5 pt-2 pb-4">
             <div className="flex items-center gap-3">
               <Button size="sm" onClick={run} disabled={busy || !linked}>{busy ? 'Measuring…' : 'Measure now'}</Button>
               {!linked && <span className="text-xs text-[var(--text-3)]">{peer === 'agent' ? 'No agent connected' : 'Link is down'}</span>}
@@ -330,7 +335,7 @@ function LatencyProbe({linked, peer}: {linked: boolean; peer: 'gateway' | 'agent
 function IdentityCard({role, self = false, sideLabel, host, publicIp, lanIps, online}: {
   role: 'agent' | 'gateway'
   self?: boolean
-  sideLabel: string; host?: string; publicIp?: string; lanIps?: string[]; online: boolean
+  sideLabel: ReactNode; host?: string; publicIp?: string; lanIps?: string[]; online: boolean
 }) {
   const lan = (lanIps ?? []).filter(Boolean)
   return (
@@ -373,7 +378,7 @@ function PipeNode({icon, title, state, headline, detail, extra, pulse}: {
           color: c,
           borderColor: `color-mix(in srgb, ${c} 40%, var(--border))`,
           background: `color-mix(in srgb, ${c} 9%, transparent)`,
-          boxShadow: state === 'good' ? `0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)` : 'none',
+          boxShadow: state !== 'unknown' ? `0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)` : 'none',
         }}
       >
         {icon}

@@ -21,6 +21,7 @@ import (
 	"proxyforward/internal/control"
 	"proxyforward/internal/link"
 	"proxyforward/internal/linkquality"
+	"proxyforward/internal/mcsniff"
 	"proxyforward/internal/netid"
 	"proxyforward/internal/netnotify"
 	"proxyforward/internal/proxyproto"
@@ -85,6 +86,9 @@ type Agent struct {
 	localUp sync.Map
 	// healthSink is the live session's push func; nil while disconnected.
 	healthSink atomic.Pointer[healthSinkBox]
+	// healthObserver is a process-lifetime health observer (the engine's
+	// event recorder); unlike healthSink it is not tied to a session.
+	healthObserver atomic.Pointer[healthSinkBox]
 	// healthInterval / healthDialTimeout override the probe cadence in tests;
 	// zero means the defaults.
 	healthInterval    time.Duration
@@ -400,11 +404,12 @@ func (s *session) write(msgType string, payload any) error {
 // (PP2, Minecraft awareness, bandwidth caps) stay local.
 func specFromTunnel(t config.Tunnel) control.TunnelSpec {
 	return control.TunnelSpec{
-		ID:          t.ID,
-		Name:        t.Name,
-		Type:        t.Type,
-		PublicPort:  t.PublicPort,
-		OfflineMOTD: t.Options.OfflineMOTD,
+		ID:             t.ID,
+		Name:           t.Name,
+		Type:           t.Type,
+		PublicPort:     t.PublicPort,
+		OfflineMOTD:    t.Options.OfflineMOTD,
+		MinecraftAware: t.Options.MinecraftAware,
 	}
 }
 
@@ -531,7 +536,10 @@ func (s *session) handleControlMsg(env *control.Envelope) error {
 		}
 		now := time.Now()
 		rtt := now.Sub(time.Unix(0, pong.SentUnixNano))
-		s.agent.rttMillis.Store(rtt.Milliseconds())
+		// Clamp to ≥1ms: 0 is the "no measurement" sentinel everywhere
+		// (status, stats gauges), and a sub-millisecond LAN round-trip must
+		// not truncate into it and read as unknown.
+		s.agent.rttMillis.Store(max(1, rtt.Milliseconds()))
 		s.quality.OnPong(pong.Seq, rtt)
 		if pc := s.probe.Load(); pc != nil {
 			pc.Record(*pong, now)
@@ -574,6 +582,27 @@ func (s *session) handleControlMsg(env *control.Envelope) error {
 			// One failed tunnel doesn't kill the session; others may be fine.
 			s.agent.publicPorts.Delete(r.TunnelID)
 			s.agent.logger.Error("tunnel rejected by gateway", "tunnel_id", r.TunnelID, "code", r.Code, "reason", r.Message)
+		}
+		return nil
+
+	case control.TypeConnStats:
+		cs, err := control.Decode[control.ConnStats](env)
+		if err != nil {
+			return err
+		}
+		// Route each RTT sample to its live connection by the gateway-issued
+		// ConnID (stored as the entry's ConnKey). SetRTT fires the registry's
+		// RTT hook, which records the sample into this engine's analytics.
+		//
+		// Known gap (deliberate): a gateway too old to send conn_stats means
+		// no per-player RTT on this agent, and there is no honest substitute —
+		// agent-side TCP_INFO would measure the local-server leg, and the
+		// control-link RTT would stamp every player with one identical wrong
+		// number. Self-heals when the gateway is upgraded.
+		for _, st := range cs.Entries {
+			if e := s.agent.Conns.EntryByConnKey(st.ConnID); e != nil {
+				e.SetRTT(st.RttMs)
+			}
 		}
 		return nil
 
@@ -626,10 +655,22 @@ func (s *session) handleDataStream(st transport.Stream) {
 
 	s.agent.logger.Debug("client connected", "tunnel", tun.Name, "client", oc.ClientAddr)
 	// Splice(local, stream): AToB is local→client, so In (client→server) is
-	// the B→A side — inIsAToB=false.
-	entry, closeEntry := s.agent.Conns.Open(tun.ID, tun.Name, oc.ClientAddr, false)
+	// the B→A side — inIsAToB=false. The gateway-issued ConnID keys this
+	// connection for control-link RTT reports; an old gateway sends "" and
+	// EntryByConnKey("") already guards. Passed into Open (never written
+	// post-hoc) because the control goroutine reads ConnKey concurrently.
+	entry, closeEntry := s.agent.Conns.Open(tun.ID, tun.Name, oc.ClientAddr, oc.ConnID, false)
 	defer closeEntry()
-	if err := relay.Splice(tcp, st, entry.Counters); err != nil {
+
+	// Minecraft-aware tunnels sniff the client's login handshake (which flows
+	// in on the stream leg) to attribute the connection to a player. The tap
+	// is read-only: bytes pass through untouched, so a parse quirk never
+	// disturbs the proxy.
+	var src relay.Conn = st
+	if tun.Options.MinecraftAware {
+		src = mcsniff.Tap(st, entry)
+	}
+	if err := relay.Splice(tcp, src, entry.Counters); err != nil {
 		s.agent.logger.Debug("splice ended with error", "client", oc.ClientAddr, "err", err)
 	}
 	s.agent.logger.Debug("client disconnected", "tunnel", tun.Name, "client", oc.ClientAddr)

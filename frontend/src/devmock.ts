@@ -13,6 +13,10 @@
 //   &fresh=1         — first-run data: no history, no peers yet
 //   &fx=high         — high-fx glass: refraction filter on the palette
 //   &fx=low          — low-fx glass: solid cards, no caustics/chart glow
+//   &analytics=off   — daemon without the analytics store (unsupported state)
+//   &geo=off|empty|error|pending
+//                    — GeoIP axes: unconfigured / configured-but-no-locations /
+//                      database failed to open / picked but engine not restarted
 
 type AnyFn = (...a: any[]) => any
 
@@ -28,6 +32,8 @@ export function installDevMock() {
   const axisAttached = params.get('mode') === 'attached'
   const axisFatal = params.get('fatal') === '1'
   const axisFresh = params.get('fresh') === '1'
+  const axisAnalyticsOff = params.get('analytics') === 'off'
+  const axisGeo = params.get('geo') || '' // off | empty | error | pending
   const fx = params.get('fx')
   if (fx) document.documentElement.dataset.fx = fx // &fx=high | &fx=low
 
@@ -131,6 +137,12 @@ export function installDevMock() {
       const ps = t + bucketMs <= CONN_SINCE
         ? null
         : [0, 1, 2, 3].map(i => rttMs(t + (i + 0.5) * bucketMs / 4))
+      // Identified players track the connection gauge minus the odd probe.
+      const pls = cs ? cs.map(c => Math.max(0, c - (c > 2 ? 1 : 0))) : null
+      // Packet loss: usually 0 with rare small blips, like the live mock.
+      const ls = cs
+        ? [0, 1, 2, 3].map(i => (vnoise(t + (i + 0.5) * bucketMs / 4, 60_000, 13) > 0.9 ? 0.4 : 0))
+        : null
       buckets.push({
         t,
         out: Math.round(mean(rs) * durSec), in: Math.round(mean(us) * durSec),
@@ -142,6 +154,12 @@ export function installDevMock() {
         ...(ps
           ? {ro: ps[0], rh: Math.max(...ps), rl: Math.min(...ps), rc: ps[3]}
           : {ro: -1, rh: -1, rl: -1, rc: -1}),
+        ...(pls
+          ? {po: pls[0], ph: Math.max(...pls), pl: Math.min(...pls), pc: pls[3]}
+          : {po: -1, ph: -1, pl: -1, pc: -1}),
+        ...(ls
+          ? {lo: ls[0], lh: Math.max(...ls), ll: Math.min(...ls), lc: ls[3]}
+          : {lo: -1, lh: -1, ll: -1, lc: -1}),
       })
     }
     return {windowMs, bucketMs, buckets}
@@ -179,8 +197,8 @@ export function installDevMock() {
     bytesIn: 0,
     bytesOut: 0,
     conns: [
-      {id: 1, tunnelName: 'Minecraft', clientAddr: '203.0.113.44:51422', startedAt: Date.now() - 92000, bytesIn: 1_240_000, bytesOut: 8_900_000},
-      {id: 2, tunnelName: 'Minecraft', clientAddr: '198.51.100.7:60011', startedAt: Date.now() - 15000, bytesIn: 120_000, bytesOut: 640_000},
+      {id: 1, tunnelName: 'Minecraft', clientAddr: '203.0.113.44:51422', startedAt: Date.now() - 92000, bytesIn: 1_240_000, bytesOut: 8_900_000, playerName: 'Notch', playerUuid: '069a79f4-44e9-4726-a5be-fca90e38aaf5', rttMs: 34},
+      {id: 2, tunnelName: 'Minecraft', clientAddr: '198.51.100.7:60011', startedAt: Date.now() - 15000, bytesIn: 120_000, bytesOut: 640_000, playerName: 'jeb_', playerUuid: '853c80ef-3c37-49fd-aa49-938b674adae6', rttMs: 58},
     ] as any[],
   }
   const config = {
@@ -193,6 +211,7 @@ export function installDevMock() {
     Metrics: {PrometheusEnabled: false, PrometheusAddr: '127.0.0.1:9464'},
     Logging: {Level: 'info', FileEnabled: true},
     UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: true, Autostart: false},
+    Analytics: {RetentionDays: 180, MojangLookups: true, GeoIPCityPath: '', GeoIPASNPath: ''},
   }
 
   // Link-quality mock: healthy jitter/loss on the agent; the gateway leaves
@@ -235,6 +254,7 @@ export function installDevMock() {
     cumulativeUptimeMs: 96 * 3_600_000 + (Date.now() - PROCESS_START),
     linkSessions: 14,
     historyUnsupported: false,
+    analyticsUnsupported: axisAnalyticsOff,
     engineFatal: axisFatal ? 'authentication failed: the gateway rejected this agent\'s token (it may have been rotated) — re-pair with a fresh code' : '',
     }
   }
@@ -266,6 +286,311 @@ export function installDevMock() {
     emit('tick', status())
   }, 500)
 
+  // ---- players & sessions (analytics mock) ----
+  // Deterministic wall of players derived from the same hash noise as the
+  // traffic model. The first two carry the live connections' UUIDs so the
+  // "online" join lights them up; every ~11th player is cracked/offline.
+  const MC_NAMES = [
+    'Notch', 'jeb_', 'Herobrine_x', 'EnderQueen', 'CraftyPete', 'redstone_rat', 'Skyfall9', 'ObsidianMike',
+    'PixelPaula', 'TNT_Tim', 'shulker_sam', 'DiamondDee', 'GrassBlockGus', 'Nether_Nia', 'ZombieZoe', 'creeper_carl',
+    'IronGolemIan', 'BlazeRunner', 'AxolotlAmy', 'villager_vic', 'PhantomPhil', 'CopperCleo', 'WardenWill', 'slime_sue',
+    'ElytraElla', 'BeaconBen', 'kelp_farmer', 'AncientDebra', 'PiglinPia', 'trident_troy', 'MooshroomMo', 'SoulSandSid',
+    'GhastGreta', 'lodestone_lu', 'HuskHarvey', 'CalciteCass', 'sniffer_stan', 'BreezeBex', 'MaceMarty', 'cherry_chloe',
+    'TuffTina', 'VexVernon', 'camel_kai', 'StriderStella', 'AlayAllan', 'frog_light_fi', 'BundleBoris', 'SusStewNed',
+  ]
+  const CCS = ['NZ', 'AU', 'US', 'DE', 'GB', 'FR', 'SE', 'BR', 'JP', 'CA']
+  const COUNTRY_NAMES: Record<string, string> = {
+    NZ: 'New Zealand', AU: 'Australia', US: 'United States', DE: 'Germany',
+    GB: 'United Kingdom', FR: 'France', SE: 'Sweden', BR: 'Brazil', JP: 'Japan', CA: 'Canada',
+  }
+  const hex32 = (seed: number) => {
+    let s = ''
+    for (let k = 0; k < 8; k++) s += Math.floor(hash01(seed * 8 + k) * 0xffff).toString(16).padStart(4, '0')
+    return s
+  }
+  const dashUuid = (seed: number) => {
+    const h = hex32(seed)
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+  }
+  const mockPlayers = MC_NAMES.map((name, i) => {
+    const offline = i > 1 && i % 11 === 7
+    const uuid = i === 0 ? '069a79f4-44e9-4726-a5be-fca90e38aaf5'
+      : i === 1 ? '853c80ef-3c37-49fd-aa49-938b674adae6'
+      : offline ? 'offline:' + name.toLowerCase() : dashUuid(i + 101)
+    // Recent-skewed last-seen inside the 12-day recording window; the two
+    // live players are "seen" now.
+    const lastSeen = i < 2 ? now0 : now0 - Math.round(hash01(i * 7 + 1) ** 2 * 12 * 86_400_000) - 60_000
+    const firstSeen = Math.max(INSTALLED_AT, lastSeen - Math.round(hash01(i * 7 + 2) * 30 * 86_400_000) - 3_600_000)
+    const sessions = 1 + Math.floor(hash01(i * 7 + 3) ** 1.6 * 80)
+    const playMs = sessions * Math.round((20 + 160 * hash01(i * 7 + 4)) * 60_000)
+    const bytesOut = sessions * Math.round(30_000_000 + 400_000_000 * hash01(i * 7 + 5))
+    return {
+      uuid, name, offline, online: i < 2 && state.linkUp,
+      firstSeen, lastSeen, sessions, playMs,
+      bytesIn: Math.round(bytesOut / 96), bytesOut,
+      lastCc: CCS[Math.floor(hash01(i * 7 + 6) * CCS.length)],
+      rttMs: offline ? 0 : Math.round(15 + 120 * hash01(i * 7 + 8) ** 2),
+    }
+  })
+  // Connection history, newest first. The first two rows are the live
+  // connections (endedMs 0); the rest scatter across the recording window.
+  const mockSessions = (() => {
+    const rows = state.conns.map((c: any, i: number) => ({
+      id: 5000 + i, tunnelName: c.tunnelName, clientIp: c.clientAddr.split(':')[0],
+      playerName: c.playerName, playerUuid: c.playerUuid, startedMs: c.startedAt, endedMs: 0,
+      bytesIn: c.bytesIn, bytesOut: c.bytesOut, cc: CCS[i], rttAvg: 20 + i * 9,
+    }))
+    for (let s = 0; s < 240; s++) {
+      const p = mockPlayers[Math.floor(hash01(s * 13 + 3) * mockPlayers.length)]
+      const startedMs = now0 - 120_000 - Math.round(hash01(s * 13 + 5) ** 1.4 * 12 * 86_400_000)
+      const durMs = Math.round((2 + 220 * hash01(s * 13 + 7) ** 2) * 60_000)
+      const bytesOut = Math.round(durMs / 1000 * 40_000 * (0.3 + hash01(s * 13 + 9)))
+      rows.push({
+        id: 4999 - s, tunnelName: 'Minecraft', clientIp: `${13 + s % 200}.${37 + (s * 7) % 200}.${(s * 11) % 250}.${(s * 17) % 250}`,
+        playerName: p.name, playerUuid: p.uuid, startedMs, endedMs: startedMs + durMs,
+        bytesIn: Math.round(bytesOut / 96), bytesOut, cc: p.lastCc, rttAvg: p.rttMs || 25,
+      })
+    }
+    return rows.sort((a, b) => b.startedMs - a.startedMs)
+  })()
+  const playersPage = (q: any) => {
+    if (isWizard || axisFresh) return {total: 0, players: []}
+    let rows = mockPlayers.slice()
+    if (q?.search) rows = rows.filter(p => p.name.toLowerCase().includes(q.search.trim().toLowerCase()))
+    if (q?.tunnelId && q.tunnelId !== tunnelID) rows = []
+    if (q?.cc) rows = rows.filter(p => p.lastCc === q.cc)
+    const sort = q?.sort
+    rows.sort((a, b) =>
+      sort === 'name' ? a.name.localeCompare(b.name)
+      : sort === 'playtime' ? b.playMs - a.playMs
+      : sort === 'sessions' ? b.sessions - a.sessions
+      : sort === 'data' ? (b.bytesIn + b.bytesOut) - (a.bytesIn + a.bytesOut)
+      : b.lastSeen - a.lastSeen)
+    const offset = Math.max(0, q?.offset || 0)
+    const limit = q?.limit > 0 && q.limit <= 80 ? q.limit : 80
+    return {total: rows.length, players: rows.slice(offset, offset + limit)}
+  }
+  const playerDetail = (uuid: string) => {
+    const p = mockPlayers.find(x => x.uuid === uuid)
+    if (!p || isWizard || axisFresh) return {card: {}, names: [], ips: [], recent: []}
+    const i = mockPlayers.indexOf(p)
+    const names = [{name: p.name, firstSeen: p.firstSeen, lastSeen: p.lastSeen}]
+    if (!p.offline && hash01(i * 31 + 2) > 0.7) // some players renamed once
+      names.push({name: p.name + '_old', firstSeen: p.firstSeen - 40 * 86_400_000, lastSeen: p.firstSeen})
+    const ips = [{
+      ip: `${20 + i}.${113 - i}.${(i * 13) % 250}.${(i * 29) % 250}`,
+      firstSeen: p.firstSeen, lastSeen: p.lastSeen, sessions: p.sessions, cc: p.lastCc,
+    }]
+    if (hash01(i * 31 + 4) > 0.6) ips.push({
+      ip: `${90 + i}.${44 + i}.${(i * 7) % 250}.${(i * 3) % 250}`,
+      firstSeen: p.firstSeen, lastSeen: p.firstSeen + 86_400_000, sessions: 2, cc: p.lastCc,
+    })
+    const recent = mockSessions.filter(s => s.playerUuid === uuid).slice(0, 25)
+    return {card: p, names, ips, recent}
+  }
+  const playerHistory = (uuid: string, windowMs: number) => {
+    const p = mockPlayers.find(x => x.uuid === uuid)
+    if (!p || isWizard || axisFresh) return []
+    if (!windowMs) windowMs = now0 - p.firstSeen
+    const share = 0.15 + 0.5 * hash01(mockPlayers.indexOf(p) * 31 + 6)
+    const bucketMs = Math.max(15_000, Math.ceil(windowMs / 300 / 15_000) * 15_000)
+    const t0 = Math.floor((Date.now() - windowMs) / bucketMs) * bucketMs
+    const pts: any[] = []
+    for (let t = Math.max(t0, p.firstSeen); t <= Date.now(); t += bucketMs) {
+      // Only emit buckets where the player was plausibly online.
+      if (vnoise(t, 3_600_000, 17 + mockPlayers.indexOf(p)) < 0.45) continue
+      const durSec = bucketMs / 1000
+      pts.push({t, out: Math.round(downRate(t) * share * durSec), in: Math.round(upRate(t) * share * durSec)})
+    }
+    return pts.slice(-300)
+  }
+  // Per-player latency: a personal baseline (the player's ping) with slow
+  // drift, min/max spread around it. Buckets align with playerHistory.
+  const playerLatency = (uuid: string, windowMs: number) => {
+    const p = mockPlayers.find(x => x.uuid === uuid)
+    if (!p || !p.rttMs || isWizard || axisFresh) return []
+    if (!windowMs) windowMs = now0 - p.firstSeen
+    const bucketMs = Math.max(60_000, Math.ceil(windowMs / 300 / 60_000) * 60_000)
+    const t0 = Math.floor((Date.now() - windowMs) / bucketMs) * bucketMs
+    const seed = mockPlayers.indexOf(p)
+    const pts: any[] = []
+    for (let t = Math.max(t0, p.firstSeen); t <= Date.now(); t += bucketMs) {
+      if (vnoise(t, 3_600_000, 17 + seed) < 0.45) continue // offline gaps
+      const avg = p.rttMs * (0.82 + 0.36 * vnoise(t, 240_000, 30 + seed))
+      const spread = 3 + 10 * vnoise(t, 90_000, 40 + seed)
+      pts.push({t, avg, min: Math.max(1, avg - spread), max: avg + spread})
+    }
+    return pts.slice(-300)
+  }
+  const sessionsPage = (q: any) => {
+    if (isWizard || axisFresh) return {total: 0, sessions: []}
+    let rows = mockSessions
+    if (q?.playerUuid) rows = rows.filter(s => s.playerUuid === q.playerUuid)
+    if (q?.tunnelId && q.tunnelId !== tunnelID) rows = []
+    if (q?.cc) rows = rows.filter(s => s.cc === q.cc)
+    if (q?.sinceMs > 0) rows = rows.filter(s => s.startedMs >= q.sinceMs)
+    const offset = Math.max(0, q?.offset || 0)
+    const limit = q?.limit > 0 && q.limit <= 100 ? q.limit : 100
+    return {total: rows.length, sessions: rows.slice(offset, offset + limit)}
+  }
+  // Session replay: per-connection traffic + RTT across the session's life,
+  // integrated from the same rate model so a replay agrees with the tiles.
+  const sessionTimeline = (id: number) => {
+    const s = mockSessions.find((x: any) => x.id === id)
+    if (!s || isWizard || axisFresh) return {traffic: [], rtt: []}
+    const end = s.endedMs || Date.now()
+    const span = Math.max(15_000, end - s.startedMs)
+    const bucketMs = Math.max(15_000, Math.ceil(span / 300 / 15_000) * 15_000)
+    const share = 0.2 + 0.5 * hash01(id)
+    const traffic: any[] = []
+    const rtt: any[] = []
+    for (let t = s.startedMs; t <= end; t += bucketMs) {
+      const durSec = Math.min(bucketMs, end - t + 1) / 1000
+      traffic.push({t, out: Math.round(downRate(t) * share * durSec), in: Math.round(upRate(t) * share * durSec)})
+      const avg = (s.rttAvg || 25) * (0.85 + 0.3 * vnoise(t, 120_000, 55))
+      const spread = 3 + 8 * vnoise(t, 60_000, 56)
+      rtt.push({t, avg, min: Math.max(1, avg - spread), max: avg + spread})
+    }
+    return {traffic: traffic.slice(-300), rtt: rtt.slice(-300)}
+  }
+
+  // GeoIP axes: 'off' leaves paths unset (unconfigured empty state); the
+  // other three configure a city path whose load state varies — 'empty'
+  // loads but locates nothing, 'error' fails to open (MmdbBadge Failed),
+  // 'pending' is picked but the engine hasn't restarted (MmdbBadge Pending).
+  if (axisGeo && axisGeo !== 'off') config.Analytics.GeoIPCityPath = 'C:\\maxmind\\GeoLite2-City.mmdb'
+  const geoStatus = () => ({
+    cityLoaded: axisGeo ? axisGeo === 'empty' : !!config.Analytics.GeoIPCityPath,
+    asnLoaded: !axisGeo && !!config.Analytics.GeoIPASNPath,
+    ...(axisGeo === 'error' ? {cityError: 'open C:\\maxmind\\GeoLite2-City.mmdb: unsupported database format'} : {}),
+  })
+
+  // Country aggregates for the world heatmap + latency-by-country list, rolled
+  // up from the same session history the wall uses so the views agree.
+  const geoSnapshot = (rangeMs: number) => {
+    if (isWizard || axisFresh || axisGeo) return []
+    const since = rangeMs > 0 ? now0 - rangeMs : 0
+    const by = new Map<string, {players: Set<string>; sessions: number; bytesIn: number; bytesOut: number; rttSum: number; rttN: number}>()
+    for (const s of mockSessions) {
+      if (!s.cc || s.startedMs < since) continue
+      let a = by.get(s.cc)
+      if (!a) { a = {players: new Set(), sessions: 0, bytesIn: 0, bytesOut: 0, rttSum: 0, rttN: 0}; by.set(s.cc, a) }
+      a.players.add(s.playerUuid)
+      a.sessions++; a.bytesIn += s.bytesIn; a.bytesOut += s.bytesOut
+      if (s.rttAvg > 0) { a.rttSum += s.rttAvg; a.rttN++ }
+    }
+    return [...by.entries()]
+      .map(([cc, a]) => ({
+        cc, country: COUNTRY_NAMES[cc] || cc, players: a.players.size, sessions: a.sessions,
+        bytesIn: a.bytesIn, bytesOut: a.bytesOut, rttAvg: a.rttN ? a.rttSum / a.rttN : 0,
+      }))
+      .sort((x, y) => y.sessions - x.sessions)
+  }
+
+  // ---- dashboard aggregates (analytics Phase 8) ----
+  // Summary integrates the same rate/gauge model the chart serves, so the
+  // tiles agree with the bandwidth history for any range.
+  const summary = (rangeMs: number) => {
+    const now = Date.now()
+    if (isWizard || axisFresh) {
+      return {
+        rangeMs, bytesIn: 0, bytesOut: 0, sessions: 0, uniquePlayers: 0,
+        peakPlayers: -1, peakPlayersAt: 0, peakInBps: 0, peakInAt: 0, peakOutBps: 0, peakOutAt: 0,
+        avgRttMs: -1, avgLossPct: -1, linkUptimePct: -1,
+        recInBps: 0, recInAt: 0, recOutBps: 0, recOutAt: 0, recPlayers: -1, recPlayersAt: 0, recConns: -1, recConnsAt: 0,
+        lifetimeBytesIn: 0, lifetimeBytesOut: 0, lifetimeUptimeMs: 0, linkSessions: 0,
+      }
+    }
+    const since = rangeMs > 0 ? now - rangeMs : CONN_SINCE
+    const from = Math.max(since, CONN_SINCE)
+    const step = Math.max(60_000, Math.round((now - from) / 400))
+    let bytesIn = 0, bytesOut = 0, peakIn = 0, peakInAt = 0, peakOut = 0, peakOutAt = 0
+    let peakPlayers = -1, peakPlayersAt = 0, rttSum = 0, rttN = 0, lossSum = 0, lossN = 0
+    for (let t = from; t <= now; t += step) {
+      const dr = downRate(t), ur = upRate(t)
+      bytesOut += dr * step / 1000
+      bytesIn += ur * step / 1000
+      if (dr > peakOut) { peakOut = dr; peakOutAt = t }
+      if (ur > peakIn) { peakIn = ur; peakInAt = t }
+      const pl = Math.max(0, connCount(t) - 1)
+      if (pl > peakPlayers) { peakPlayers = pl; peakPlayersAt = t }
+      rttSum += rttMs(t); rttN++
+      lossSum += vnoise(t, 60_000, 13) > 0.9 ? 0.4 : 0; lossN++
+    }
+    const inWindow = mockSessions.filter(s => s.startedMs >= since)
+    const st = status()
+    return {
+      rangeMs, bytesIn: Math.round(bytesIn), bytesOut: Math.round(bytesOut),
+      sessions: inWindow.length, uniquePlayers: new Set(inWindow.map(s => s.playerUuid)).size,
+      peakPlayers, peakPlayersAt, peakInBps: peakIn, peakInAt, peakOutBps: peakOut, peakOutAt,
+      avgRttMs: rttN ? rttSum / rttN : -1, avgLossPct: lossN ? lossSum / lossN : -1,
+      linkUptimePct: 99.2 - 1.4 * vnoise(now, 3_600_000, 21),
+      recInBps: peakIn * 1.35, recInAt: CONN_SINCE + 3 * 86_400_000,
+      recOutBps: peakOut * 1.35, recOutAt: CONN_SINCE + 3 * 86_400_000,
+      recPlayers: Math.max(peakPlayers, 12), recPlayersAt: CONN_SINCE + 5 * 86_400_000,
+      recConns: Math.max(peakPlayers + 2, 14), recConnsAt: CONN_SINCE + 5 * 86_400_000,
+      lifetimeBytesIn: st.allTimeBytesIn, lifetimeBytesOut: st.allTimeBytesOut,
+      lifetimeUptimeMs: st.cumulativeUptimeMs, linkSessions: st.linkSessions,
+    }
+  }
+  // Peak-hours matrix: hourly player samples bucketed by weekday × hour, the
+  // same shape the backend rolls up from rollup_hourly.
+  const peakMatrix = (weeks: number) => {
+    const cells = Array.from({length: 7}, () => Array.from({length: 24}, () => ({avg: -1, max: -1})))
+    if (isWizard || axisFresh) return {cells}
+    const w = weeks > 0 ? weeks : 8
+    const sum = Array.from({length: 7}, () => new Array(24).fill(0))
+    const cnt = Array.from({length: 7}, () => new Array(24).fill(0))
+    const now = Date.now()
+    const start = Math.floor(Math.max(CONN_SINCE, now - w * 7 * 86_400_000) / 3_600_000) * 3_600_000
+    for (let t = start; t <= now; t += 3_600_000) {
+      const d = new Date(t), dow = d.getDay(), hod = d.getHours()
+      const players = Math.max(0, connCount(t) - 1)
+      sum[dow][hod] += players; cnt[dow][hod]++
+      const peak = players + (connCount(t + 1_800_000) > players ? 1 : 0)
+      if (peak > cells[dow][hod].max) cells[dow][hod].max = peak
+    }
+    for (let i = 0; i < 7; i++) for (let j = 0; j < 24; j++) if (cnt[i][j] > 0) cells[i][j].avg = sum[i][j] / cnt[i][j]
+    return {cells}
+  }
+  // Uptime: mostly-up timelines with a few deterministic flaps; the percentage
+  // is integrated from the same events the timeline renders.
+  const uptimePctOf = (events: {t: number; up: boolean}[], a: number, b: number) => {
+    if (!events.length || b <= a) return -1
+    let up = 0, cursor = a, state = events[0].up
+    for (const e of events) {
+      if (e.t <= a || e.t >= b) continue
+      if (state) up += e.t - cursor
+      cursor = e.t; state = e.up
+    }
+    if (state) up += b - cursor
+    return up / (b - a) * 100
+  }
+  const flapEvents = (a: number, b: number, seed: number, downMs: number) => {
+    const ev = [{t: a, up: true}]
+    const gap = (b - a) / 5
+    for (let k = 1; k <= 4; k++) {
+      if (hash01(seed * 10 + k) > 0.6) {
+        const dt = a + gap * k + hash01(seed * 10 + k + 100) * gap * 0.4
+        const down = Math.round(dt), up = Math.round(dt + downMs * (0.5 + hash01(seed * 10 + k + 200)))
+        if (down < b) ev.push({t: down, up: false})
+        if (up < b) ev.push({t: up, up: true})
+      }
+    }
+    return ev.sort((x, y) => x.t - y.t).slice(-100)
+  }
+  const tunnelUptime = (windowMs: number) => {
+    const now = Date.now()
+    if (isWizard || axisFresh) return {link: {tunnelId: '', name: 'Control link', uptimePct: -1, events: []}, tunnels: []}
+    const since = windowMs > 0 ? now - windowMs : CONN_SINCE
+    const linkEv = flapEvents(Math.max(since, CONN_SINCE), now, 1, 75_000)
+    const tunEv = flapEvents(Math.max(since, CONN_SINCE), now, 2, 22 * 60_000)
+    return {
+      link: {tunnelId: '', name: 'Control link', uptimePct: uptimePctOf(linkEv, Math.max(since, CONN_SINCE), now), events: linkEv},
+      tunnels: [{tunnelId: tunnelID, name: 'Minecraft', uptimePct: uptimePctOf(tunEv, Math.max(since, CONN_SINCE), now), events: tunEv}],
+    }
+  }
+
   const ok = <T,>(v: T) => Promise.resolve(v)
   // Attached mode: a service owns the engine — gated bindings reject exactly
   // like the real backend so the UI's disabled/degraded states can be tested.
@@ -277,6 +602,21 @@ export function installDevMock() {
     Status: () => ok(status()),
     BandwidthHistory: (windowMs: number, maxBuckets: number) => ok(bandwidthHistory(windowMs, maxBuckets)),
     PeerStats: () => ok(isWizard || axisFresh ? [] : peerStats()),
+    // Analytics reads work in attached mode too (they ride the IPC envelope).
+    Players: (q: any) => ok(playersPage(q)),
+    PlayerDetail: (uuid: string) => ok(playerDetail(uuid)),
+    PlayerHistory: (uuid: string, windowMs: number) => ok(playerHistory(uuid, windowMs)),
+    PlayerLatency: (uuid: string, windowMs: number) => ok(playerLatency(uuid, windowMs)),
+    Sessions: (q: any) => ok(sessionsPage(q)),
+    SessionTimeline: (id: number) => ok(sessionTimeline(id)),
+    GeoStatus: () => ok(geoStatus()),
+    GeoSnapshot: (rangeMs: number) => ok(geoSnapshot(rangeMs)),
+    Summary: (rangeMs: number) => ok(summary(rangeMs)),
+    PeakMatrix: (weeks: number) => ok(peakMatrix(weeks)),
+    TunnelUptime: (windowMs: number) => ok(tunnelUptime(windowMs)),
+    // A picker isn't available in browser dev; hand back a plausible path so the
+    // field + status badge can be exercised.
+    BrowseMMDB: (title: string) => ok(/asn/i.test(title) ? 'C:\\maxmind\\GeoLite2-ASN.mmdb' : 'C:\\maxmind\\GeoLite2-City.mmdb'),
     GetConfig: () => ok(config),
     PairingCode: () => gated(() => 'pf1://play.example.com:8474/3f8a1c9e2b7d4056a1b2c3d4e5f60718#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'),
     Version: () => ok('0.1.0-dev'),
@@ -290,6 +630,7 @@ export function installDevMock() {
     RestartEngine: () => gated(() => undefined),
     RegenerateToken: () => gated(() => undefined),
     OpenConfigDir: () => ok(undefined),
+    OpenExternal: (u: string) => { window.open(u, '_blank'); return ok(undefined) },
     ExportDiagnostics: () => ok('C\\\\Users\\\\you\\\\Downloads\\\\proxyforward-diagnostics.zip'),
     ExportSetup: () => gated(() => 'C\\\\Users\\\\you\\\\Downloads\\\\desktop-dev.pfsetup'),
     ChooseAndInspectSetupFile: () => gated(() => ({
@@ -322,6 +663,9 @@ export function installDevMock() {
       '<text x="48" y="64" font-size="52" font-family="sans-serif" font-weight="700" text-anchor="middle" fill="#fff">x</text></svg>')),
   }
   w.go = {app: {App}}
+  // Flag for helpers that must know there is no Go asset server behind them
+  // (avatarUrl falls back to mc-heads / inline SVG in browser dev).
+  w.__pfDevMock = true
   // eslint-disable-next-line no-console
   console.info('[devmock] installed — scenario:', scenario)
 }

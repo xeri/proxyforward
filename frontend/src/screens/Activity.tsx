@@ -79,7 +79,7 @@ export function Activity({attached}: {attached: boolean}) {
         <div className="pf-toolbar relative flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3 py-2">
           <div className="w-36"><Select value={level} onChange={setLevel} options={[
             {value: 'all', label: 'All levels'},
-            ...LEVELS.map(l => ({value: l, label: l[0].toUpperCase() + l.slice(1) + '+'})),
+            ...LEVELS.map(l => ({value: l, label: l[0].toUpperCase() + l.slice(1)})),
           ]} /></div>
           <div className="min-w-40 flex-1"><TextInput value={query} onChange={setQuery} placeholder="Filter messages…" /></div>
           <Checkbox checked={follow} onChange={setFollow} label="Follow" />

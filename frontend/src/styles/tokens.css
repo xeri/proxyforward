@@ -104,6 +104,10 @@
   --input-bg-hover: rgba(255, 255, 255, 0.08);
   --btn-bg: rgba(255, 255, 255, 0.08);
   --btn-bg-hover: rgba(255, 255, 255, 0.13);
+  /* Primary buttons are accent glass, not solid accent — translucent enough
+     for the backdrop to frost through, opaque enough for --accent-contrast. */
+  --btn-accent-fill: color-mix(in srgb, var(--accent) 80%, transparent);
+  --btn-accent-fill-hover: color-mix(in srgb, var(--accent-hover) 88%, transparent);
   --sep: rgba(255, 255, 255, 0.08);
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.55);
   --shadow-pop: 0 24px 64px -16px rgba(0, 0, 0, 0.65);
@@ -157,7 +161,7 @@
 
   /* Precision-milled glass: tightly constrained corners — just enough round
      to kill the jaggies, never bubble-soft. rounded-full still survives only
-     on status dots and toggle knobs. */
+     on status dots; even toggle knobs are milled (r-sm track, 3px knob). */
   --r-xs: 4px;
   --r-sm: 6px;
   --r-md: 10px; /* inputs, buttons, nav items */
@@ -191,10 +195,14 @@
   --sidebar-w: 224px;  /* Shell grid column — Sidebar px math must agree */
   --nav-item-h: 36px;  /* Sidebar ITEM_H — the sliding indicator's px math */
 
-  /* Motion. */
+  /* Motion. Fast/base stay tight — press and hover feedback must feel
+     immediate; the slow tier is where the luxurious glide lives. */
   --dur-fast: 120ms;
   --dur: 200ms;
-  --dur-slow: 320ms;
+  --dur-slow: 420ms;
+  --dur-page-out: 280ms; /* nav VT outgoing pane */
+  --dur-page-in: 500ms;  /* nav VT incoming pane — VTs block input, cap ~0.5s */
+  --dur-theme: 1050ms;   /* relight sweep/glare/reglaze — THEME_SWEEP_MS (theme.ts) */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 }
@@ -264,6 +272,9 @@
   --input-bg-hover: rgba(255, 255, 255, 0.7);
   --btn-bg: rgba(25, 28, 38, 0.06);
   --btn-bg-hover: rgba(25, 28, 38, 0.1);
+  /* Bright backdrops wash translucent accent out fast — run nearly opaque. */
+  --btn-accent-fill: color-mix(in srgb, var(--accent) 92%, transparent);
+  --btn-accent-fill-hover: color-mix(in srgb, var(--accent-hover) 96%, transparent);
   --sep: rgba(25, 28, 38, 0.12);
   /* Ice catches hotter whites: the arc/streak/caustics need far more strength
      to read over a bright backdrop. */

@@ -3,8 +3,8 @@ package stats
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 )
@@ -13,10 +13,73 @@ import (
 // (multiple of one day in millis).
 const base = int64(1_700_006_400_000) // 2023-11-15 00:00:00 UTC
 
-func fresh(t *testing.T) (*Store, string) {
+// memPersister is an in-memory Persister with the same merge semantics as
+// the SQL implementation: SaveStats honors DirtyFromT and FloorT, so a
+// watermark bug that under-writes buckets surfaces here too.
+type memPersister struct {
+	life  Lifetime
+	peers []PeerStat
+	tiers map[int]map[int64]Bucket
+	have  bool
+
+	saves       int
+	lastWritten int // buckets actually stored by the most recent save
+}
+
+func (m *memPersister) LoadStats() (*SnapshotData, error) {
+	if !m.have {
+		return nil, nil
+	}
+	snap := &SnapshotData{Lifetime: m.life, Peers: append([]PeerStat(nil), m.peers...)}
+	tiers := make([]int, 0, len(m.tiers))
+	for ti := range m.tiers {
+		tiers = append(tiers, ti)
+	}
+	sort.Ints(tiers)
+	for _, ti := range tiers {
+		ts := TierSnapshot{Tier: ti}
+		for _, b := range m.tiers[ti] {
+			ts.Buckets = append(ts.Buckets, b)
+		}
+		sort.Slice(ts.Buckets, func(i, j int) bool { return ts.Buckets[i].T < ts.Buckets[j].T })
+		snap.Tiers = append(snap.Tiers, ts)
+	}
+	return snap, nil
+}
+
+func (m *memPersister) SaveStats(snap *SnapshotData) error {
+	m.saves++
+	m.have = true
+	m.life = snap.Lifetime
+	m.peers = append([]PeerStat(nil), snap.Peers...)
+	if m.tiers == nil {
+		m.tiers = map[int]map[int64]Bucket{}
+	}
+	m.lastWritten = 0
+	for _, ts := range snap.Tiers {
+		rows := m.tiers[ts.Tier]
+		if rows == nil {
+			rows = map[int64]Bucket{}
+			m.tiers[ts.Tier] = rows
+		}
+		for t := range rows {
+			if t < ts.FloorT {
+				delete(rows, t)
+			}
+		}
+		for _, b := range ts.Buckets {
+			if b.T >= ts.DirtyFromT {
+				rows[b.T] = b
+				m.lastWritten++
+			}
+		}
+	}
+	return nil
+}
+
+func fresh(t *testing.T) *Store {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "stats.json")
-	return Open(path, nil), path
+	return Open(nil, nil)
 }
 
 // feed pushes samples every stepMs for total duration, with rate bytes/sec in
@@ -24,7 +87,7 @@ func fresh(t *testing.T) (*Store, string) {
 // deterministically over 3..6 so conn OHLC survives aggregation checks.
 func feed(s *Store, start int64, stepMs, durMs int64, inRate, outRate int64) (appIn, appOut int64) {
 	for t := start; t <= start+durMs; t += stepMs {
-		s.Sample(time.UnixMilli(t), appIn, appOut, appIn+appIn/10, appOut+appOut/10, int(3+((t-start)/stepMs)%4), 25)
+		s.Sample(time.UnixMilli(t), appIn, appOut, appIn+appIn/10, appOut+appOut/10, int(3+((t-start)/stepMs)%4), -1, 25, -1)
 		appIn += inRate * stepMs / 1000
 		appOut += outRate * stepMs / 1000
 	}
@@ -32,7 +95,7 @@ func feed(s *Store, start int64, stepMs, durMs int64, inRate, outRate int64) (ap
 }
 
 func TestCascadeAndHistory(t *testing.T) {
-	s, _ := fresh(t)
+	s := fresh(t)
 	// 65s of steady 10 KB/s in, 100 KB/s out at 100ms cadence.
 	end := base + 65_000
 	feed(s, base, 100, 65_000, 10_000, 100_000)
@@ -79,17 +142,17 @@ func TestCascadeAndHistory(t *testing.T) {
 }
 
 func TestAggregationOHLC(t *testing.T) {
-	s, _ := fresh(t)
+	s := fresh(t)
 	// Four 100ms samples with rates 1k, 4k, 2k, 3k B/s out.
 	rates := []int64{1000, 4000, 2000, 3000}
 	var out int64
 	for i, r := range rates {
 		ts := base + int64(i+1)*100
-		s.Sample(time.UnixMilli(ts), 0, out, 0, 0, 2, -1)
+		s.Sample(time.UnixMilli(ts), 0, out, 0, 0, 2, -1, -1, -1)
 		out += r / 10 // bytes accrued in the NEXT 100ms at rate r
 	}
 	// One more sample to land the last delta.
-	s.Sample(time.UnixMilli(base+500), 0, out, 0, 0, 2, -1)
+	s.Sample(time.UnixMilli(base+500), 0, out, 0, 0, 2, -1, -1, -1)
 
 	// Aggregating the four 100ms buckets down to ≤2 groups (groups align to
 	// absolute boundaries, so the window may straddle two): byte sums must be
@@ -116,8 +179,8 @@ func TestAggregationOHLC(t *testing.T) {
 }
 
 func TestPersistRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "stats.json")
-	s := Open(path, nil)
+	p := &memPersister{}
+	s := Open(p, nil)
 	// 10 minutes of 1s samples: fills T2 (15s) with 40 buckets.
 	end := base + 600_000
 	feed(s, base, 1000, 600_000, 50_000, 500_000)
@@ -129,8 +192,12 @@ func TestPersistRoundTrip(t *testing.T) {
 	if err := s.Flush(); err != nil {
 		t.Fatalf("flush: %v", err)
 	}
+	firstWritten := p.lastWritten
+	if firstWritten == 0 {
+		t.Fatal("first flush wrote nothing")
+	}
 
-	s2 := Open(path, nil)
+	s2 := Open(p, nil)
 	after := s2.historyAt(end, 3_600_000, 240)
 	if len(after.Buckets) != len(before.Buckets) {
 		t.Fatalf("restored bucket count = %d, want %d", len(after.Buckets), len(before.Buckets))
@@ -160,7 +227,7 @@ func TestPersistRoundTrip(t *testing.T) {
 	// The cascade must resume: new samples fold into the restored tiers.
 	in, out := int64(50_000*600), int64(500_000*600)
 	for ts := end + 1000; ts <= end+60_000; ts += 1000 {
-		s2.Sample(time.UnixMilli(ts), in, out, 0, 0, 2, -1)
+		s2.Sample(time.UnixMilli(ts), in, out, 0, 0, 2, -1, -1, -1)
 		in += 50_000
 		out += 500_000
 	}
@@ -168,10 +235,41 @@ func TestPersistRoundTrip(t *testing.T) {
 	if len(resumed.Buckets) <= len(after.Buckets) {
 		t.Fatalf("cascade did not resume after restore: %d buckets", len(resumed.Buckets))
 	}
+
+	// A restored store's watermark starts empty, so its first flush rewrites
+	// everything once…
+	if err := s2.Flush(); err != nil {
+		t.Fatalf("second flush: %v", err)
+	}
+	fullRewrite := p.lastWritten
+	if fullRewrite < firstWritten {
+		t.Fatalf("restored store's first flush wrote %d buckets, want at least the original %d", fullRewrite, firstWritten)
+	}
+	// …but its next flush must skip finalized buckets (the dirty watermark):
+	// only buckets at or after each tier's previous current one are rewritten.
+	for ts := end + 61_000; ts <= end+90_000; ts += 1000 {
+		s2.Sample(time.UnixMilli(ts), in, out, 0, 0, 2, -1, -1, -1)
+		in += 50_000
+		out += 500_000
+	}
+	if err := s2.Flush(); err != nil {
+		t.Fatalf("third flush: %v", err)
+	}
+	if p.lastWritten >= fullRewrite {
+		t.Fatalf("incremental flush wrote %d buckets, want fewer than the full rewrite's %d (watermark not applied)", p.lastWritten, fullRewrite)
+	}
+
+	// And the persister still holds the full history: old + new buckets.
+	live := s2.historyAt(end+90_000, 3_600_000, 240)
+	s3 := Open(p, nil)
+	final := s3.historyAt(end+90_000, 3_600_000, 240)
+	if len(final.Buckets) != len(live.Buckets) {
+		t.Fatalf("incremental save lost buckets: restored %d, live had %d", len(final.Buckets), len(live.Buckets))
+	}
 }
 
 func TestPeerEviction(t *testing.T) {
-	s, _ := fresh(t)
+	s := fresh(t)
 	for i := range 600 {
 		s.ConnOpened("10.0." + strconv.Itoa(i/250) + "." + strconv.Itoa(i%250) + ":1000")
 	}
@@ -187,46 +285,29 @@ func TestPeerEviction(t *testing.T) {
 }
 
 func TestRebaselineOnCounterReset(t *testing.T) {
-	s, _ := fresh(t)
-	s.Sample(time.UnixMilli(base), 1_000_000, 2_000_000, 0, 0, 2, -1)
-	s.Sample(time.UnixMilli(base+100), 1_001_000, 2_010_000, 0, 0, 2, -1)
+	s := fresh(t)
+	s.Sample(time.UnixMilli(base), 1_000_000, 2_000_000, 0, 0, 2, -1, -1, -1)
+	s.Sample(time.UnixMilli(base+100), 1_001_000, 2_010_000, 0, 0, 2, -1, -1, -1)
 	life := s.Lifetime()
 	if life.BytesIn != 1000 || life.BytesOut != 10_000 {
 		t.Fatalf("lifetime after 2 samples = %+v", life)
 	}
 	// Engine restart: totals drop to near zero. Must not go negative or spike.
-	s.Sample(time.UnixMilli(base+200), 500, 700, 0, 0, 2, -1)
+	s.Sample(time.UnixMilli(base+200), 500, 700, 0, 0, 2, -1, -1, -1)
 	life = s.Lifetime()
 	if life.BytesIn != 1000 || life.BytesOut != 10_000 {
 		t.Fatalf("lifetime after reset = %+v, want unchanged", life)
 	}
 	// Deltas accumulate again from the new baseline.
-	s.Sample(time.UnixMilli(base+300), 1500, 1700, 0, 0, 2, -1)
+	s.Sample(time.UnixMilli(base+300), 1500, 1700, 0, 0, 2, -1, -1, -1)
 	life = s.Lifetime()
 	if life.BytesIn != 2000 || life.BytesOut != 11_000 {
 		t.Fatalf("lifetime after re-baseline = %+v", life)
 	}
 }
 
-func TestCorruptFileStartsFresh(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "stats.json")
-	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	s := Open(path, nil)
-	if s.Lifetime().BytesIn != 0 {
-		t.Fatal("corrupt file produced non-empty store")
-	}
-	if _, err := os.Stat(path + ".bad"); err != nil {
-		t.Fatalf("corrupt file was not renamed aside: %v", err)
-	}
-	if err := s.Flush(); err != nil {
-		t.Fatalf("flush after corrupt load: %v", err)
-	}
-}
-
 func TestHistoryEmptyAndAll(t *testing.T) {
-	s, _ := fresh(t)
+	s := fresh(t)
 	if h := s.History(60_000, 300); len(h.Buckets) != 0 {
 		t.Fatalf("empty store returned %d buckets", len(h.Buckets))
 	}
@@ -243,12 +324,12 @@ func TestHistoryEmptyAndAll(t *testing.T) {
 }
 
 func TestConnGaugeSampleAndMerge(t *testing.T) {
-	s, _ := fresh(t)
+	s := fresh(t)
 	// Baseline sample (no bucket), then three samples with varying counts.
-	s.Sample(time.UnixMilli(base), 0, 0, 0, 0, 3, -1)
-	s.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 5, -1)
-	s.Sample(time.UnixMilli(base+200), 0, 2000, 0, 0, 2, -1)
-	s.Sample(time.UnixMilli(base+300), 0, 3000, 0, 0, 7, -1)
+	s.Sample(time.UnixMilli(base), 0, 0, 0, 0, 3, -1, -1, -1)
+	s.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 5, -1, -1, -1)
+	s.Sample(time.UnixMilli(base+200), 0, 2000, 0, 0, 2, -1, -1, -1)
+	s.Sample(time.UnixMilli(base+300), 0, 3000, 0, 0, 7, -1, -1, -1)
 
 	// Raw T0 buckets: the gauge is flat within a slot.
 	h := s.historyAt(base+400, 15_000, 300)
@@ -282,7 +363,7 @@ func TestConnGaugeSampleAndMerge(t *testing.T) {
 }
 
 func TestConnCascadeToCoarseTiers(t *testing.T) {
-	s, _ := fresh(t)
+	s := fresh(t)
 	// 65s at 100ms cadence; feed varies the count over 3..6. The 15m window is
 	// served by T1, so its buckets exist only via the cascade.
 	end := base + 65_000
@@ -302,13 +383,13 @@ func TestConnCascadeToCoarseTiers(t *testing.T) {
 }
 
 func TestRttGaugeSampleAndMerge(t *testing.T) {
-	s, _ := fresh(t)
+	s := fresh(t)
 	// Baseline (no bucket), then three samples with varying RTTs. A -1 reading
 	// (no link) must record as unknown, not a real 0 ms.
-	s.Sample(time.UnixMilli(base), 0, 0, 0, 0, 3, 30)
-	s.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 5, 40)
-	s.Sample(time.UnixMilli(base+200), 0, 2000, 0, 0, 2, 20)
-	s.Sample(time.UnixMilli(base+300), 0, 3000, 0, 0, 7, 55)
+	s.Sample(time.UnixMilli(base), 0, 0, 0, 0, 3, -1, 30, -1)
+	s.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 5, -1, 40, -1)
+	s.Sample(time.UnixMilli(base+200), 0, 2000, 0, 0, 2, -1, 20, -1)
+	s.Sample(time.UnixMilli(base+300), 0, 3000, 0, 0, 7, -1, 55, -1)
 
 	// Raw T0 buckets: the gauge is flat within a slot.
 	h := s.historyAt(base+400, 15_000, 300)
@@ -342,9 +423,9 @@ func TestRttGaugeSampleAndMerge(t *testing.T) {
 }
 
 func TestRttUnknownWhenNonPositive(t *testing.T) {
-	s, _ := fresh(t)
-	s.Sample(time.UnixMilli(base), 0, 0, 0, 0, 2, -1)
-	s.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 2, -1)
+	s := fresh(t)
+	s.Sample(time.UnixMilli(base), 0, 0, 0, 0, 2, -1, -1, -1)
+	s.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 2, -1, -1, -1)
 	h := s.historyAt(base+200, 15_000, 300)
 	if len(h.Buckets) == 0 {
 		t.Fatal("no buckets")
@@ -354,7 +435,76 @@ func TestRttUnknownWhenNonPositive(t *testing.T) {
 	}
 }
 
-func TestStatsV2ToV3Migration(t *testing.T) {
+func TestPlayersAndLossGauges(t *testing.T) {
+	s := fresh(t)
+	// Baseline, then samples with known player counts and loss. Zero is a
+	// real reading for both; only negative means unknown.
+	s.Sample(time.UnixMilli(base), 0, 0, 0, 0, 2, 3, -1, 0)
+	s.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 2, 4, -1, 0)
+	s.Sample(time.UnixMilli(base+200), 0, 2000, 0, 0, 2, 0, -1, 2.5)
+	s.Sample(time.UnixMilli(base+300), 0, 3000, 0, 0, 2, 6, -1, 1)
+
+	h := s.historyAt(base+400, 15_000, 300)
+	wantP := []float64{4, 0, 6}
+	wantL := []float64{0, 2.5, 1}
+	if len(h.Buckets) != len(wantP) {
+		t.Fatalf("raw bucket count = %d, want %d", len(h.Buckets), len(wantP))
+	}
+	for i, b := range h.Buckets {
+		if b.PlayersC != wantP[i] || b.PlayersH != wantP[i] {
+			t.Fatalf("bucket %d players = %f/%f, want %f", i, b.PlayersH, b.PlayersC, wantP[i])
+		}
+		if b.LossC != wantL[i] {
+			t.Fatalf("bucket %d loss = %f, want %f", i, b.LossC, wantL[i])
+		}
+	}
+
+	// Merged group: players h/l span the range, loss c is the last reading.
+	h = s.historyAt(base+400, 400, 1)
+	var pl, ph float64 = 1 << 30, -1
+	for _, b := range h.Buckets {
+		pl = min(pl, b.PlayersL)
+		ph = max(ph, b.PlayersH)
+	}
+	if ph != 6 || pl != 0 {
+		t.Fatalf("merged players H/L = %f/%f, want 6/0", ph, pl)
+	}
+	if c := h.Buckets[len(h.Buckets)-1].LossC; c != 1 {
+		t.Fatalf("merged LossC = %f, want 1", c)
+	}
+
+	// Unknown stays unknown.
+	s2 := fresh(t)
+	s2.Sample(time.UnixMilli(base), 0, 0, 0, 0, 2, -1, -1, -1)
+	s2.Sample(time.UnixMilli(base+100), 0, 1000, 0, 0, 2, -1, -1, -1)
+	h = s2.historyAt(base+200, 15_000, 300)
+	if b := h.Buckets[0]; b.PlayersC != -1 || b.LossC != -1 {
+		t.Fatalf("unmeasured players/loss should be unknown (-1), got %f/%f", b.PlayersC, b.LossC)
+	}
+}
+
+func TestLoadLegacyJSONCorrupt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stats.json")
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadLegacyJSON(path); err == nil {
+		t.Fatal("corrupt file did not error")
+	}
+	// Unsupported version is an error too (newer file from a downgrade).
+	if err := os.WriteFile(path, []byte(`{"v":99}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadLegacyJSON(path); err == nil {
+		t.Fatal("unsupported version did not error")
+	}
+	// Missing file surfaces as ErrNotExist for the importer to swallow.
+	if _, err := LoadLegacyJSON(filepath.Join(t.TempDir(), "absent.json")); !os.IsNotExist(err) {
+		t.Fatalf("missing file error = %v, want ErrNotExist", err)
+	}
+}
+
+func TestLoadLegacyJSONV2(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "stats.json")
 	// A v2 file: 15-element packed rows (conn gauge present, no RTT gauge).
 	v2 := `{"v":2,"lifetime":{"bytesIn":1000,"bytesOut":10000,"firstRunMs":1},"peers":[],` +
@@ -362,10 +512,14 @@ func TestStatsV2ToV3Migration(t *testing.T) {
 	if err := os.WriteFile(path, []byte(v2), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := Open(path, nil)
-	if _, err := os.Stat(path + ".bad"); err == nil {
-		t.Fatal("v2 file was renamed aside instead of migrated")
+	snap, err := LoadLegacyJSON(path)
+	if err != nil {
+		t.Fatalf("load v2: %v", err)
 	}
+
+	p := &memPersister{}
+	p.SaveStats(snap)
+	s := Open(p, nil)
 	h := s.historyAt(base+15_000, 3_600_000, 300)
 	if len(h.Buckets) != 1 {
 		t.Fatalf("restored bucket count = %d, want 1", len(h.Buckets))
@@ -377,9 +531,12 @@ func TestStatsV2ToV3Migration(t *testing.T) {
 	if b.RttO != -1 || b.RttH != -1 || b.RttL != -1 || b.RttC != -1 {
 		t.Fatalf("v2 rtt gauge should be unknown (-1), got %+v", b)
 	}
+	if b.PlayersC != -1 || b.LossC != -1 {
+		t.Fatalf("v2 players/loss gauges should be unknown (-1), got %+v", b)
+	}
 }
 
-func TestStatsV1Migration(t *testing.T) {
+func TestLoadLegacyJSONV1(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "stats.json")
 	// A v1 file: 11-element packed rows, no connection gauge.
 	v1 := `{"v":1,"lifetime":{"bytesIn":1000,"bytesOut":10000,"firstRunMs":1},"peers":[],` +
@@ -387,14 +544,17 @@ func TestStatsV1Migration(t *testing.T) {
 	if err := os.WriteFile(path, []byte(v1), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	snap, err := LoadLegacyJSON(path)
+	if err != nil {
+		t.Fatalf("load v1: %v", err)
+	}
+	if snap.Lifetime.BytesIn != 1000 || snap.Lifetime.BytesOut != 10_000 {
+		t.Fatalf("v1 lifetime not restored: %+v", snap.Lifetime)
+	}
 
-	s := Open(path, nil)
-	if _, err := os.Stat(path + ".bad"); err == nil {
-		t.Fatal("v1 file was renamed aside instead of migrated")
-	}
-	if life := s.Lifetime(); life.BytesIn != 1000 || life.BytesOut != 10_000 {
-		t.Fatalf("v1 lifetime not restored: %+v", life)
-	}
+	p := &memPersister{}
+	p.SaveStats(snap)
+	s := Open(p, nil)
 	h := s.historyAt(base+15_000, 3_600_000, 300)
 	if len(h.Buckets) != 1 {
 		t.Fatalf("restored bucket count = %d, want 1", len(h.Buckets))
@@ -410,32 +570,15 @@ func TestStatsV1Migration(t *testing.T) {
 		t.Fatalf("v1 rtt gauge should be unknown (-1), got %+v", b)
 	}
 
-	// Rewrite and reload: the sentinel must survive a v2 round-trip.
-	if err := s.Flush(); err != nil {
-		t.Fatalf("flush: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"v":3`) {
-		t.Fatalf("rewritten file is not v3: %.100s", data)
-	}
-	s2 := Open(path, nil)
-	h = s2.historyAt(base+15_000, 3_600_000, 300)
-	if len(h.Buckets) != 1 || h.Buckets[0].ConnC != -1 {
-		t.Fatalf("sentinel lost across v2 round-trip: %+v", h.Buckets)
-	}
-
 	// New samples inside the migrated bucket's 15s slot cascade into it; the
 	// unknown (-1) side must adopt the first known value, not poison it.
-	s2.Sample(time.UnixMilli(base+100), 0, 0, 0, 0, 4, -1) // baseline only
+	s.Sample(time.UnixMilli(base+100), 0, 0, 0, 0, 4, -1, -1, -1) // baseline only
 	var out int64
 	for ts := base + 200; ts <= base+2_500; ts += 100 {
 		out += 50
-		s2.Sample(time.UnixMilli(ts), 0, out, 0, 0, 4, -1)
+		s.Sample(time.UnixMilli(ts), 0, out, 0, 0, 4, -1, -1, -1)
 	}
-	h = s2.historyAt(base+2_500, 3_600_000, 300)
+	h = s.historyAt(base+2_500, 3_600_000, 300)
 	if len(h.Buckets) != 1 {
 		t.Fatalf("post-migration bucket count = %d, want 1", len(h.Buckets))
 	}

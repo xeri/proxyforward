@@ -141,6 +141,39 @@ func TestCapSet(t *testing.T) {
 	}
 }
 
+func TestSupportedCapabilities(t *testing.T) {
+	s := NewCapSet(SupportedCapabilities)
+	if !s.Has(CapTunnelSync) || !s.Has(CapTunnelUDP) || !s.Has(CapConnStats) {
+		t.Fatalf("supported set missing a built-in capability: %v", SupportedCapabilities)
+	}
+	// A sync-only peer (older build) must negotiate away tunnel-udp and
+	// conn-stats — an old agent that never offers conn-stats gets no RTT
+	// frames.
+	got := IntersectCaps(SupportedCapabilities, []string{CapTunnelSync})
+	if !reflect.DeepEqual(got, []string{CapTunnelSync}) {
+		t.Fatalf("against a sync-only peer: got %v want [tunnel-sync]", got)
+	}
+}
+
+func TestConnStatsRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	in := ConnStats{Entries: []ConnStat{{ConnID: "42", RttMs: 23.5}, {ConnID: "7", RttMs: 101}}}
+	if err := WriteMsg(&buf, TypeConnStats, in); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	env, err := ReadMsg(&buf, MaxFrame)
+	if err != nil || env.Type != TypeConnStats {
+		t.Fatalf("read: %v type=%q", err, env.Type)
+	}
+	got, err := Decode[ConnStats](env)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !reflect.DeepEqual(got.Entries, in.Entries) {
+		t.Fatalf("round trip mismatch: %+v != %+v", got.Entries, in.Entries)
+	}
+}
+
 func TestMultipleFramesSequential(t *testing.T) {
 	var buf bytes.Buffer
 	for seq := uint64(1); seq <= 3; seq++ {

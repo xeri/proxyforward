@@ -115,6 +115,25 @@ func serveConn(ctx context.Context, logger *slog.Logger, conn net.Conn, src Sour
 				peers = peers[:maxIPCEntries]
 			}
 			err = control.WriteMsg(conn, TypePeersResp, PeersResp{Peers: peers})
+		case TypeAnalyticsReq:
+			req, decErr := control.Decode[AnalyticsReq](env)
+			if decErr != nil {
+				logger.Debug("ipc: bad analytics request", "err", decErr)
+				return
+			}
+			resp := AnalyticsResp{Err: "analytics unavailable"}
+			if src.Analytics != nil {
+				resp = src.Analytics(*req)
+			}
+			err = control.WriteMsg(conn, TypeAnalyticsResp, resp)
+			if errors.Is(err, control.ErrFrameTooLarge) {
+				// WriteMsg size-checks before writing a byte, so the pipe is
+				// still clean: substitute a served error instead of tearing
+				// the connection down. The client surfaces it as an OpError
+				// (transient), never an unsupported-daemon latch.
+				logger.Warn("ipc: analytics reply exceeds frame limit", "op", req.Op)
+				err = control.WriteMsg(conn, TypeAnalyticsResp, AnalyticsResp{Err: "reply exceeds frame limit"})
+			}
 		default:
 			logger.Debug("ipc: ignoring unknown request", "type", env.Type)
 			continue

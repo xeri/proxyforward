@@ -347,9 +347,141 @@ aside.pf-sheet {
 }
 :root[data-theme="light"] .pf-caustic::before { mix-blend-mode: soft-light; }
 /* The reduced-motion kill switch only zeroes durations — a frozen caustic
-   would still read as a stray streak, so remove the layer outright. */
+   would still read as a stray streak, so remove the layer outright. Scoped
+   like motion.css's kill switch: the data-motion override wins. */
 @media (prefers-reduced-motion: reduce) {
-  .pf-caustic { display: none; }
+  :root:not([data-motion="on"]) .pf-caustic { display: none; }
+}
+:root[data-motion="off"] .pf-caustic { display: none; }
+
+/* Milled glass buttons: a thin frosted film riding the card glass, machined
+   under the app's one light source — an angled catch-light film crossing the
+   face and a specular ring that brightens toward the light corner (the same
+   mask-composite trick as the card rims, at button scale). Each variant's
+   fill, text, and glow stay Tailwind utilities in ui.tsx: this recipe owns
+   only material (blur, film, rim) — background-image composites over any
+   background-color, and positioning stays with the consumer (ui.tsx sets
+   `relative`). */
+.pf-btn {
+  background-image: linear-gradient(
+    var(--light-angle),
+    rgba(255, 255, 255, 0.14),
+    rgba(255, 255, 255, 0.04) 38%,
+    rgba(255, 255, 255, 0) 60%,
+    rgba(255, 255, 255, 0.06)
+  );
+  backdrop-filter: blur(10px) saturate(150%);
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+}
+.pf-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  opacity: 0.55;
+  background: linear-gradient(
+    var(--light-angle),
+    var(--edge-hi),
+    var(--edge-mid) 32%,
+    transparent 58%,
+    var(--edge-lo) 100%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  transition: opacity 0.2s ease;
+}
+.pf-btn:hover:not(:disabled)::before { opacity: 0.9; }
+.pf-btn:disabled::before { opacity: 0.3; }
+
+/* Menu glass: floating option lists (Select). Far more opaque than the other
+   floats — options must stay legible over whatever surface they cover — but
+   still milled: angled fill, bevel pair, deep pop shadow. */
+.pf-menu {
+  background:
+    var(--noise-glass),
+    linear-gradient(
+      var(--light-angle),
+      color-mix(in oklab, var(--panel-2) 96%, white),
+      color-mix(in srgb, var(--panel) 96%, transparent) 55%
+    );
+  backdrop-filter: blur(var(--blur-float)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(150%);
+  border: 1px solid var(--border-strong);
+  box-shadow:
+    inset 0 1px 0 var(--bevel-top),
+    inset 0 -1px 0 var(--bevel-bot),
+    var(--shadow-key),
+    var(--shadow-pop);
+}
+
+/* Frozen glare on menu glass, same optics as the other floats; motion.css
+   sweeps it once as the surface arrives (save bar, Select list). */
+.pf-menu::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 42%, var(--sheen) 47%, var(--glare) 50%, transparent 58%);
+  background-size: 250% 250%;
+  background-position: 50% 50%;
+  mix-blend-mode: screen;
+}
+
+/* Accent-filled buttons read as pressed glass jewels: the card softbox arc
+   at button scale over the angled film, so the fill curves under the light
+   instead of sitting flat. Rides pf-btn (same element, later declaration). */
+.pf-btn-hot {
+  background-image:
+    radial-gradient(130% 90% at 50% -45%, rgba(255, 255, 255, 0.28) 0 55%, transparent 56%),
+    linear-gradient(
+      var(--light-angle),
+      rgba(255, 255, 255, 0.2),
+      rgba(255, 255, 255, 0.05) 40%,
+      rgba(255, 255, 255, 0) 62%,
+      rgba(255, 255, 255, 0.08)
+    );
+}
+
+/* Role word: an outlined glass token naming a role — cyan agent, violet
+   gateway (consumer sets --role-c). The 1px ring is lit along --light-angle
+   like every other milled edge; the fill is a whisper of the role hue. */
+.pf-role-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
+  border-radius: var(--r-xs);
+  font-weight: 600;
+  color: color-mix(in srgb, var(--role-c, var(--accent)) 78%, var(--text));
+  background: linear-gradient(
+    var(--light-angle),
+    color-mix(in srgb, var(--role-c, var(--accent)) 16%, transparent),
+    color-mix(in srgb, var(--role-c, var(--accent)) 7%, transparent) 60%
+  );
+}
+.pf-role-chip::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    var(--light-angle),
+    color-mix(in srgb, var(--role-c, var(--accent)) 80%, white),
+    color-mix(in srgb, var(--role-c, var(--accent)) 45%, transparent) 45%,
+    color-mix(in srgb, var(--role-c, var(--accent)) 18%, transparent) 75%,
+    color-mix(in srgb, var(--role-c, var(--accent)) 55%, transparent)
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
 }
 
 /* Chart line bloom: tiny per-series glow (consumed by BandwidthChart via
@@ -357,6 +489,17 @@ aside.pf-sheet {
 .pf-chart-glow {
   filter: drop-shadow(0 0 4px color-mix(in srgb, currentColor 55%, transparent));
 }
+
+/* Headline chart series: neon bloom — a tight core plus a wide soft halo, so
+   the glass glows under the line. Light runs cooler; low-fx kills it. */
+.pf-chart-glow-hot {
+  filter:
+    drop-shadow(0 0 3px color-mix(in srgb, currentColor 85%, transparent))
+    drop-shadow(0 0 11px color-mix(in srgb, currentColor 40%, transparent));
+}
+/* Filterless under-halo stroke: a fat translucent twin of the line, the part
+   of the bloom that survives busy tween frames. */
+.pf-chart-halo { opacity: 0.18; }
 
 /* Light glass is ice: gentler transmission (the backdrop is already bright)
    and glare soft-lights instead of screening (screen whites out). */
@@ -379,6 +522,43 @@ aside.pf-sheet {
 :root[data-theme="light"] .pf-card {
   backdrop-filter: blur(var(--blur-card)) saturate(120%) brightness(1.02);
   -webkit-backdrop-filter: blur(var(--blur-card)) saturate(120%) brightness(1.02);
+}
+/* Ice buttons: white-on-white won't read, so the film keeps a hot catch at
+   the light corner but exits through a faint dark seat — the shadow side
+   does the talking. The rim ring flips automatically via the edge tokens. */
+:root[data-theme="light"] .pf-btn {
+  background-image: linear-gradient(
+    var(--light-angle),
+    rgba(255, 255, 255, 0.45),
+    rgba(255, 255, 255, 0.12) 38%,
+    rgba(255, 255, 255, 0) 60%,
+    rgba(25, 28, 38, 0.05)
+  );
+  backdrop-filter: blur(10px) saturate(115%);
+  -webkit-backdrop-filter: blur(10px) saturate(115%);
+}
+:root[data-theme="light"] .pf-menu {
+  backdrop-filter: blur(var(--blur-float)) saturate(120%);
+  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(120%);
+}
+:root[data-theme="light"] .pf-menu::after {
+  mix-blend-mode: soft-light;
+}
+:root[data-theme="light"] .pf-btn-hot {
+  background-image:
+    radial-gradient(130% 90% at 50% -45%, rgba(255, 255, 255, 0.4) 0 55%, transparent 56%),
+    linear-gradient(
+      var(--light-angle),
+      rgba(255, 255, 255, 0.5),
+      rgba(255, 255, 255, 0.14) 40%,
+      rgba(255, 255, 255, 0) 62%,
+      rgba(25, 28, 38, 0.06)
+    );
+}
+:root[data-theme="light"] .pf-chart-glow-hot {
+  filter:
+    drop-shadow(0 0 2px color-mix(in srgb, currentColor 50%, transparent))
+    drop-shadow(0 0 8px color-mix(in srgb, currentColor 25%, transparent));
 }
 :root[data-theme="light"] .pf-sheet::after,
 :root[data-theme="light"] .pf-island::after,
@@ -403,3 +583,13 @@ aside.pf-sheet {
 }
 :root[data-fx="low"] .pf-caustic { display: none; }
 :root[data-fx="low"] .pf-chart-glow { filter: none; }
+:root[data-fx="low"] .pf-chart-glow-hot { filter: none; }
+:root[data-fx="low"] .pf-chart-halo { opacity: 0; }
+:root[data-fx="low"] .pf-btn {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+:root[data-fx="low"] .pf-menu {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}

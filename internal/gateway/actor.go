@@ -59,6 +59,11 @@ type agentSession struct {
 	// health maps tunnelID → the agent's last reported local-backend state;
 	// the offline responder consults it.
 	health sync.Map
+
+	// rttConns tracks this session's live public connections for the RTT
+	// sampler: connID (string) → *rttConn. Populated by handleClient for the
+	// connection's lifetime.
+	rttConns sync.Map
 }
 
 // setCtrl publishes (or clears, with nil) the control stream for writers.
