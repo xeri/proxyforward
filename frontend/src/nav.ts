@@ -1,9 +1,9 @@
 import {ReactElement} from 'react'
 import {
-  IconActivity, IconConnections, IconDashboard, IconSettings, IconTunnels,
+  IconActivity, IconAnalytics, IconConnections, IconDashboard, IconPlayers, IconSettings, IconTunnels,
 } from './components/icons'
 
-export type NavId = 'overview' | 'traffic' | 'tunnels' | 'activity' | 'settings'
+export type NavId = 'overview' | 'traffic' | 'players' | 'analytics' | 'tunnels' | 'activity' | 'settings'
 
 export type NavItem = {
   id: NavId
@@ -16,10 +16,12 @@ export type NavItem = {
 export const NAV_MAIN: NavItem[] = [
   {id: 'overview', label: 'Overview', icon: IconDashboard, shortcut: '1'},
   {id: 'traffic', label: 'Traffic', icon: IconConnections, shortcut: '2'},
-  {id: 'tunnels', label: 'Tunnels', icon: IconTunnels, shortcut: '3'},
-  {id: 'activity', label: 'Activity', icon: IconActivity, shortcut: '4'},
+  {id: 'players', label: 'Players', icon: IconPlayers, shortcut: '3'},
+  {id: 'analytics', label: 'Analytics', icon: IconAnalytics, shortcut: '4'},
+  {id: 'tunnels', label: 'Tunnels', icon: IconTunnels, shortcut: '5'},
+  {id: 'activity', label: 'Activity', icon: IconActivity, shortcut: '6'},
 ]
 
 export const NAV_SETTINGS: NavItem = {
-  id: 'settings', label: 'Settings', icon: IconSettings, shortcut: '5',
+  id: 'settings', label: 'Settings', icon: IconSettings, shortcut: '7',
 }

@@ -19,7 +19,7 @@ export type Column<T> = {
  * no rows never looks broken. Presentational only; sorting/merging stays with
  * the caller.
  */
-export function DataTable<T>({columns, rows, rowKey, empty, dense = false, stickyHeader = false, className = ''}: {
+export function DataTable<T>({columns, rows, rowKey, empty, dense = false, stickyHeader = false, className = '', onRowClick}: {
   columns: Column<T>[]
   rows: T[]
   rowKey: (r: T) => string | number
@@ -27,6 +27,8 @@ export function DataTable<T>({columns, rows, rowKey, empty, dense = false, stick
   dense?: boolean
   stickyHeader?: boolean
   className?: string
+  /** When set, rows are clickable (cursor + keyboard-activatable). */
+  onRowClick?: (r: T) => void
 }) {
   if (rows.length === 0) {
     return (
@@ -52,7 +54,17 @@ export function DataTable<T>({columns, rows, rowKey, empty, dense = false, stick
         </thead>
         <tbody>
           {rows.map(r => (
-            <tr key={rowKey(r)} className="border-b border-[var(--border)] transition-colors duration-200 last:border-0 hover:bg-[var(--panel-2)]/50">
+            <tr
+              key={rowKey(r)}
+              onClick={onRowClick ? () => onRowClick(r) : undefined}
+              tabIndex={onRowClick ? 0 : undefined}
+              onKeyDown={onRowClick ? e => {
+                // Space activates like Enter (button semantics); preventDefault
+                // stops the page scrolling.
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRowClick(r) }
+              } : undefined}
+              className={`border-b border-[var(--border)] transition-colors duration-200 last:border-0 hover:bg-[var(--panel-2)]/50 ${onRowClick ? 'cursor-pointer' : ''}`}
+            >
               {columns.map(c => (
                 <td
                   key={c.key}

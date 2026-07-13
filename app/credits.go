@@ -37,7 +37,9 @@ type avatarMeta struct {
 
 func (a *App) avatarCacheDir() string { return filepath.Join(a.configDir, "cache") }
 func (a *App) avatarImgPath() string  { return filepath.Join(a.avatarCacheDir(), "xeri-avatar.img") }
-func (a *App) avatarMetaPath() string { return filepath.Join(a.avatarCacheDir(), "xeri-avatar.meta.json") }
+func (a *App) avatarMetaPath() string {
+	return filepath.Join(a.avatarCacheDir(), "xeri-avatar.meta.json")
+}
 
 // CreatorInfo returns the static creator credit for the About panel.
 func (a *App) CreatorInfo() map[string]string {

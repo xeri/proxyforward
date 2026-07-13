@@ -31,10 +31,21 @@ const (
 	// full-set desired-state tunnel sync instead of per-tunnel
 	// register/unregister frames.
 	CapTunnelSync = "tunnel-sync"
+	// CapTunnelUDP: the peer relays type:"udp" tunnel specs. Each UDP flow
+	// (one client source address) gets its own data stream: the usual
+	// OpenConn header, then raw datagrams framed as a 2-byte big-endian
+	// length + payload (not JSON envelopes).
+	CapTunnelUDP = "tunnel-udp"
+	// CapConnStats: the agent accepts TypeConnStats frames carrying the
+	// gateway's per-connection RTT measurements (keyed by OpenConn.ConnID) so
+	// the agent's GUI and analytics can attribute a real network RTT to each
+	// player. Gateway → agent only; a legacy agent that never offers it simply
+	// receives no frames.
+	CapConnStats = "conn-stats"
 )
 
 // SupportedCapabilities is everything this build implements, both roles.
-var SupportedCapabilities = []string{CapTunnelSync}
+var SupportedCapabilities = []string{CapTunnelSync, CapTunnelUDP, CapConnStats}
 
 // IntersectCaps returns offered ∩ supported, preserving supported's order.
 // Nil-safe on both arguments; unknown offered strings are simply dropped.
@@ -95,6 +106,8 @@ const (
 	// Desired-state tunnel sync (requires CapTunnelSync).
 	TypeSyncTunnels = "sync_tunnels" // agent → gateway: full desired set
 	TypeSyncResult  = "sync_result"  // gateway → agent: per-tunnel outcomes
+	// Per-connection RTT report, gateway → agent (requires CapConnStats).
+	TypeConnStats = "conn_stats"
 )
 
 // Hello error codes.
@@ -167,12 +180,16 @@ type HelloErr struct {
 type TunnelSpec struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-	Type string `json:"type"` // tcp (udp reserved)
+	Type string `json:"type"` // tcp | udp (udp requires CapTunnelUDP)
 	// PublicPort 0 asks the gateway to pick an ephemeral port.
 	PublicPort int `json:"publicPort"`
 	// OfflineMOTD, when set, keeps the public port answering Minecraft status
 	// pings with this message while the tunnel's backend is unavailable.
 	OfflineMOTD string `json:"offlineMotd,omitempty"`
+	// MinecraftAware lets the gateway passively sniff the login handshake to
+	// attribute connections to player names. omitempty keeps frames to legacy
+	// gateways byte-identical to v1.
+	MinecraftAware bool `json:"minecraftAware,omitempty"`
 }
 
 type Register struct {
@@ -247,10 +264,31 @@ type Health struct {
 type OpenConn struct {
 	TunnelID   string `json:"tunnelId"`
 	ClientAddr string `json:"clientAddr"`
-	// ConnID is set in per-conn transport mode so the agent's data dial can
-	// be matched to this offer.
+	// ConnID identifies this proxied connection. It is set in per-conn
+	// transport mode so the agent's data dial can be matched to this offer,
+	// and always set otherwise so the agent can correlate later TypeConnStats
+	// RTT reports (stored as the entry's ConnKey).
 	ConnID string `json:"connId,omitempty"`
 }
+
+// ConnStat is one connection's measured round-trip time. ConnID matches the
+// OpenConn.ConnID the gateway issued for that connection.
+type ConnStat struct {
+	ConnID string  `json:"c"`
+	RttMs  float64 `json:"r"`
+}
+
+// ConnStats carries a batch of per-connection RTT measurements, gateway →
+// agent (CapConnStats). The gateway chunks reports to at most
+// MaxConnStatsPerFrame entries so a frame never approaches MaxFrame.
+type ConnStats struct {
+	Entries []ConnStat `json:"entries"`
+}
+
+// MaxConnStatsPerFrame bounds one conn_stats frame. Each entry is a short id
+// plus a number (well under 64 bytes), so 200 keeps the frame far below
+// MaxFrame's 64 KiB.
+const MaxConnStatsPerFrame = 200
 
 var (
 	ErrFrameTooLarge = errors.New("control: frame exceeds size limit")

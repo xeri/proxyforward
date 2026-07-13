@@ -46,13 +46,29 @@ type Bucket struct {
 	ConnC float64 `json:"cc"`
 
 	// Rtt* is the OHLC of the control-link round-trip time in milliseconds (a
-	// gauge, not a rate) observed within the slot. -1 on all four means
-	// unknown: the bucket predates RTT sampling, or the role has no RTT (the
-	// gateway does not measure it). RttC < 0 is the canonical unknown check.
+	// gauge, not a rate) observed within the slot. Both roles heartbeat the
+	// link and sample it (readings clamp to ≥1ms so they never collapse into
+	// the sentinel). -1 on all four means unknown: the bucket predates RTT
+	// sampling, or the link was down. RttC < 0 is the canonical unknown check.
 	RttO float64 `json:"ro"`
 	RttH float64 `json:"rh"`
 	RttL float64 `json:"rl"`
 	RttC float64 `json:"rc"`
+
+	// Players* is the OHLC of the identified-player count (a gauge). -1 on
+	// all four means unknown: the bucket predates player sampling, or no
+	// tunnel is Minecraft-aware. PlayersC < 0 is the canonical unknown check.
+	PlayersO float64 `json:"po"`
+	PlayersH float64 `json:"ph"`
+	PlayersL float64 `json:"pl"`
+	PlayersC float64 `json:"pc"`
+
+	// Loss* is the OHLC of control-link packet loss in percent (a gauge).
+	// -1 on all four means unknown; 0 is a real "no loss" reading.
+	LossO float64 `json:"lo"`
+	LossH float64 `json:"lh"`
+	LossL float64 `json:"ll"`
+	LossC float64 `json:"lc"`
 }
 
 // HistoryResult is one rendered window: buckets oldest-first, the last one
@@ -145,6 +161,8 @@ func (r *ring) mergeCur(b Bucket) {
 		dst.OutO, dst.OutH, dst.OutL, dst.OutC = b.OutO, b.OutH, b.OutL, b.OutC
 		dst.ConnO, dst.ConnH, dst.ConnL, dst.ConnC = b.ConnO, b.ConnH, b.ConnL, b.ConnC
 		dst.RttO, dst.RttH, dst.RttL, dst.RttC = b.RttO, b.RttH, b.RttL, b.RttC
+		dst.PlayersO, dst.PlayersH, dst.PlayersL, dst.PlayersC = b.PlayersO, b.PlayersH, b.PlayersL, b.PlayersC
+		dst.LossO, dst.LossH, dst.LossL, dst.LossC = b.LossO, b.LossH, b.LossL, b.LossC
 		r.curEmpty = false
 		return
 	}
@@ -154,38 +172,31 @@ func (r *ring) mergeCur(b Bucket) {
 	dst.OutC = b.OutC
 	dst.OutH = max(dst.OutH, b.OutH)
 	dst.OutL = min(dst.OutL, b.OutL)
-	mergeConn(dst, b)
-	mergeRtt(dst, b)
+	mergeGauges(dst, b)
 }
 
-// mergeConn folds b's connection gauge into dst, skipping unknown (-1)
-// sides so pre-upgrade buckets never poison a merge.
-func mergeConn(dst *Bucket, b Bucket) {
-	if b.ConnC < 0 {
+// mergeGauge folds one gauge OHLC into another, skipping unknown (-1) sides
+// so pre-upgrade or unmeasured buckets never poison a merge.
+func mergeGauge(dstO, dstH, dstL, dstC *float64, bO, bH, bL, bC float64) {
+	if bC < 0 {
 		return // source unknown: keep dst as-is (known or unknown)
 	}
-	if dst.ConnC < 0 {
-		dst.ConnO, dst.ConnH, dst.ConnL, dst.ConnC = b.ConnO, b.ConnH, b.ConnL, b.ConnC
+	if *dstC < 0 {
+		*dstO, *dstH, *dstL, *dstC = bO, bH, bL, bC
 		return
 	}
-	dst.ConnC = b.ConnC
-	dst.ConnH = max(dst.ConnH, b.ConnH)
-	dst.ConnL = min(dst.ConnL, b.ConnL)
+	*dstC = bC
+	*dstH = max(*dstH, bH)
+	*dstL = min(*dstL, bL)
 }
 
-// mergeRtt folds b's round-trip gauge into dst, skipping unknown (-1) sides so
-// pre-upgrade or RTT-less (gateway) buckets never poison a merge.
-func mergeRtt(dst *Bucket, b Bucket) {
-	if b.RttC < 0 {
-		return // source unknown: keep dst as-is (known or unknown)
-	}
-	if dst.RttC < 0 {
-		dst.RttO, dst.RttH, dst.RttL, dst.RttC = b.RttO, b.RttH, b.RttL, b.RttC
-		return
-	}
-	dst.RttC = b.RttC
-	dst.RttH = max(dst.RttH, b.RttH)
-	dst.RttL = min(dst.RttL, b.RttL)
+// mergeGauges folds every gauge family (conn, rtt, players, loss) of b into
+// dst.
+func mergeGauges(dst *Bucket, b Bucket) {
+	mergeGauge(&dst.ConnO, &dst.ConnH, &dst.ConnL, &dst.ConnC, b.ConnO, b.ConnH, b.ConnL, b.ConnC)
+	mergeGauge(&dst.RttO, &dst.RttH, &dst.RttL, &dst.RttC, b.RttO, b.RttH, b.RttL, b.RttC)
+	mergeGauge(&dst.PlayersO, &dst.PlayersH, &dst.PlayersL, &dst.PlayersC, b.PlayersO, b.PlayersH, b.PlayersL, b.PlayersC)
+	mergeGauge(&dst.LossO, &dst.LossH, &dst.LossL, &dst.LossC, b.LossO, b.LossH, b.LossL, b.LossC)
 }
 
 // valid reports whether absolute index i holds real data (not a stale lap or
@@ -200,12 +211,17 @@ func (r *ring) valid(i int64) bool {
 // Store owns the tier rings, peer records, and lifetime counters. All methods
 // are safe for concurrent use; a single mutex suffices at these rates.
 type Store struct {
-	mu     sync.Mutex
-	path   string
-	logger *slog.Logger
-	tiers  []*ring
-	peers  map[string]*PeerStat
-	life   Lifetime
+	mu      sync.Mutex
+	persist Persister // nil = memory-only (persistence unavailable)
+	logger  *slog.Logger
+	tiers   []*ring
+	peers   map[string]*PeerStat
+	life    Lifetime
+
+	// lastCurT tracks, per persisted tier, the current bucket's start time at
+	// the last successful save: only buckets at or after it can have changed
+	// since, so the next save skips everything older.
+	lastCurT map[int]int64
 
 	// Sampler baselines: totals are monotonic per engine run; the first
 	// sample only records them, a negative delta re-baselines.
@@ -220,16 +236,18 @@ type Store struct {
 	flushMu sync.Mutex
 }
 
-// Open loads the store from path, or starts fresh. A corrupt or unreadable
-// file is renamed aside (.bad) and never blocks engine start.
-func Open(path string, logger *slog.Logger) *Store {
+// Open restores the store from p, or starts fresh. p may be nil (persistence
+// unavailable): the store then runs memory-only. A load failure never blocks
+// engine start.
+func Open(p Persister, logger *slog.Logger) *Store {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	s := &Store{
-		path:   path,
-		logger: logger,
-		peers:  make(map[string]*PeerStat),
+		persist:  p,
+		logger:   logger,
+		peers:    make(map[string]*PeerStat),
+		lastCurT: make(map[int]int64),
 	}
 	for _, ts := range tierSpecs {
 		s.tiers = append(s.tiers, newRing(ts.resMs, ts.slots))
@@ -242,10 +260,139 @@ func Open(path string, logger *slog.Logger) *Store {
 	return s
 }
 
+// load restores state from the persister into the freshly-constructed store.
+func (s *Store) load() {
+	if s.persist == nil {
+		return
+	}
+	snap, err := s.persist.LoadStats()
+	if err != nil {
+		s.logger.Warn("stats: restore failed — starting fresh", "err", err)
+		return
+	}
+	if snap == nil {
+		return
+	}
+	s.life = snap.Lifetime
+	for _, p := range snap.Peers {
+		if len(s.peers) >= maxPeers {
+			break
+		}
+		pc := p
+		s.peers[p.IP] = &pc
+	}
+	for _, ts := range snap.Tiers {
+		if ts.Tier < 0 || ts.Tier >= len(s.tiers) {
+			continue
+		}
+		restoreTier(s.tiers[ts.Tier], ts.Buckets)
+	}
+}
+
+// restoreTier places persisted buckets back into a ring. Only buckets within
+// one ring-length of the newest survive; older ones would collide with newer
+// slots. The newest becomes the ring's current so the cascade resumes where
+// the previous run stopped.
+func restoreTier(r *ring, buckets []Bucket) {
+	var newest int64 = -1
+	for _, b := range buckets {
+		if b.T <= 0 || b.T%r.resMs != 0 {
+			continue // misaligned entry: drop it, keep the rest
+		}
+		if idx := b.T / r.resMs; idx > newest {
+			newest = idx
+		}
+	}
+	if newest < 0 {
+		return
+	}
+	floor := newest - int64(len(r.buf)) + 1
+	for _, b := range buckets {
+		if b.T <= 0 || b.T%r.resMs != 0 {
+			continue
+		}
+		idx := b.T / r.resMs
+		if idx < floor {
+			continue
+		}
+		r.buf[r.pos(idx)] = b
+	}
+	r.cur = newest
+	r.curEmpty = false
+}
+
+// snapshotLocked builds the persistable image; mu must be held. Only valid
+// buckets are included (idle servers stay sparse), oldest first.
+func (s *Store) snapshotLocked() *SnapshotData {
+	snap := &SnapshotData{
+		Lifetime: s.life,
+		Peers:    make([]PeerStat, 0, len(s.peers)),
+	}
+	for _, p := range s.peers {
+		snap.Peers = append(snap.Peers, *p)
+	}
+	for ti, spec := range tierSpecs {
+		if !spec.persist {
+			continue
+		}
+		r := s.tiers[ti]
+		if r.cur < 0 {
+			continue
+		}
+		ts := TierSnapshot{Tier: ti, ResMs: r.resMs, DirtyFromT: s.lastCurT[ti]}
+		floorIdx := r.cur - int64(len(r.buf)) + 1
+		ts.FloorT = max(floorIdx*r.resMs, 0)
+		for i := floorIdx; i <= r.cur; i++ {
+			if i >= 0 && r.valid(i) {
+				ts.Buckets = append(ts.Buckets, r.buf[r.pos(i)])
+			}
+		}
+		snap.Tiers = append(snap.Tiers, ts)
+	}
+	return snap
+}
+
+// Flush saves the store through the persister and folds accrued uptime into
+// the lifetime counter. Memory-only stores just fold uptime.
+func (s *Store) Flush() error {
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
+
+	s.mu.Lock()
+	now := time.Now()
+	s.life.UptimeMs += now.Sub(s.upMark).Milliseconds()
+	s.upMark = now
+	var snap *SnapshotData
+	if s.persist != nil {
+		snap = s.snapshotLocked()
+	}
+	s.mu.Unlock()
+
+	if s.persist == nil {
+		return nil
+	}
+	if err := s.persist.SaveStats(snap); err != nil {
+		return err
+	}
+	// Advance the dirty watermarks only after the save landed; a failed save
+	// keeps everything dirty for the next attempt.
+	s.mu.Lock()
+	for _, ts := range snap.Tiers {
+		if n := len(ts.Buckets); n > 0 {
+			s.lastCurT[ts.Tier] = ts.Buckets[n-1].T
+		}
+	}
+	s.mu.Unlock()
+	return nil
+}
+
 // Sample ingests one reading of the monotonic byte totals. Call it on a
 // steady cadence (~10 Hz); the instantaneous rate is the delta over the
 // actual elapsed time, so jitter and system sleeps do not fabricate spikes.
-func (s *Store) Sample(now time.Time, appIn, appOut, linkIn, linkOut int64, conns int, rttMs float64) {
+// Gauges record unknown when unmeasured: players < 0, rttMs <= 0 (no link or
+// a role that does not measure it), lossPct < 0. A zero players/loss reading
+// is real data.
+func (s *Store) Sample(now time.Time, appIn, appOut, linkIn, linkOut int64, conns, players int, rttMs, lossPct float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := now.UnixMilli()
@@ -274,16 +421,28 @@ func (s *Store) Sample(now time.Time, appIn, appOut, linkIn, linkOut int64, conn
 	c := float64(conns)
 	// RTT is a gauge; a non-positive reading (no link, or a role that does not
 	// measure it) records as unknown so it never plots a bogus zero.
-	rttO, rttH, rttL, rttC := -1.0, -1.0, -1.0, -1.0
+	rtt := -1.0
 	if rttMs > 0 {
-		rttO, rttH, rttL, rttC = rttMs, rttMs, rttMs, rttMs
+		rtt = rttMs
+	}
+	// Players and loss are gauges where zero is a real reading; only negative
+	// means unmeasured.
+	ply := -1.0
+	if players >= 0 {
+		ply = float64(players)
+	}
+	loss := -1.0
+	if lossPct >= 0 {
+		loss = lossPct
 	}
 	s.add(0, Bucket{
 		T: t, In: dIn, Out: dOut,
 		InO: inRate, InH: inRate, InL: inRate, InC: inRate,
 		OutO: outRate, OutH: outRate, OutL: outRate, OutC: outRate,
 		ConnO: c, ConnH: c, ConnL: c, ConnC: c,
-		RttO: rttO, RttH: rttH, RttL: rttL, RttC: rttC,
+		RttO: rtt, RttH: rtt, RttL: rtt, RttC: rtt,
+		PlayersO: ply, PlayersH: ply, PlayersL: ply, PlayersC: ply,
+		LossO: loss, LossH: loss, LossL: loss, LossC: loss,
 	})
 }
 
@@ -390,8 +549,7 @@ func (s *Store) historyAt(nowMs, windowMs int64, maxBuckets int) HistoryResult {
 		dst.OutC = b.OutC
 		dst.OutH = max(dst.OutH, b.OutH)
 		dst.OutL = min(dst.OutL, b.OutL)
-		mergeConn(dst, b)
-		mergeRtt(dst, b)
+		mergeGauges(dst, b)
 	}
 	return HistoryResult{WindowMs: windowMs, BucketMs: k * r.resMs, Buckets: out}
 }

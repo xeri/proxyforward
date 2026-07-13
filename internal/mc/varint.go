@@ -142,4 +142,56 @@ func (r *bodyReader) uint16() uint16 {
 	return v
 }
 
+// boolean reads one byte as a Minecraft Boolean (0 = false, non-zero = true).
+func (r *bodyReader) boolean() bool {
+	if r.err != nil {
+		return false
+	}
+	if r.off >= len(r.b) {
+		r.fail(ErrTruncated)
+		return false
+	}
+	b := r.b[r.off]
+	r.off++
+	return b != 0
+}
+
+// uuid reads a 16-byte big-endian UUID. ok is false (without failing the
+// reader) when fewer than 16 bytes remain, so an optional trailing UUID that
+// a client omitted is simply absent rather than an error.
+func (r *bodyReader) uuid() (u [16]byte, ok bool) {
+	if r.err != nil || r.off+16 > len(r.b) {
+		return u, false
+	}
+	copy(u[:], r.b[r.off:r.off+16])
+	r.off += 16
+	return u, true
+}
+
+// skip advances past n bytes, failing on truncation.
+func (r *bodyReader) skip(n int) {
+	if r.err != nil {
+		return
+	}
+	if n < 0 || r.off+n > len(r.b) {
+		r.fail(ErrTruncated)
+		return
+	}
+	r.off += n
+}
+
+// skipByteArray consumes a VarInt-length-prefixed byte array of at most
+// maxBytes.
+func (r *bodyReader) skipByteArray(maxBytes int) {
+	n := r.varint()
+	if r.err != nil {
+		return
+	}
+	if n < 0 || int(n) > maxBytes {
+		r.fail(fmt.Errorf("%w: byte array declared %d, cap %d", ErrStringTooLong, n, maxBytes))
+		return
+	}
+	r.skip(int(n))
+}
+
 func (r *bodyReader) remaining() int { return len(r.b) - r.off }

@@ -103,12 +103,34 @@ func TestValidateCatches(t *testing.T) {
 		"agent missing token": {func(c *Config) { c.Agent.Token = "" }, "agent.token"},
 		"bad fingerprint":     {func(c *Config) { c.Agent.CertFingerprint = "md5:zz" }, "cert_fingerprint"},
 		"bad transport":       {func(c *Config) { c.Agent.Transport = "carrier-pigeon" }, "transport"},
-		"udp tunnel":          {func(c *Config) { c.Agent.Tunnels[0].Type = TunnelUDP }, "only \"tcp\""},
+		"bad tunnel type":     {func(c *Config) { c.Agent.Tunnels[0].Type = "sctp" }, "type"},
 		"bad local addr":      {func(c *Config) { c.Agent.Tunnels[0].LocalAddr = "localhost" }, "local_addr"},
 		"bad public port":     {func(c *Config) { c.Agent.Tunnels[0].PublicPort = 70000 }, "public_port"},
 		"duplicate tunnel id": {func(c *Config) { c.Agent.Tunnels = append(c.Agent.Tunnels, c.Agent.Tunnels[0]) }, "duplicate"},
 		"bad log level":       {func(c *Config) { c.Logging.Level = "loud" }, "logging.level"},
 		"bad theme":           {func(c *Config) { c.UI.Theme = "hotdog" }, "ui.theme"},
+		"udp minecraft-aware": {func(c *Config) {
+			c.Agent.Tunnels[0].Type = TunnelUDP
+			c.Agent.Tunnels[0].Options.MinecraftAware = true
+		}, "minecraft_aware"},
+		"udp proxy-protocol": {func(c *Config) {
+			c.Agent.Tunnels[0].Type = TunnelUDP
+			c.Agent.Tunnels[0].Options.ProxyProtocolV2 = true
+		}, "proxy_protocol_v2"},
+		"udp offline-motd": {func(c *Config) {
+			c.Agent.Tunnels[0].Type = TunnelUDP
+			c.Agent.Tunnels[0].Options.OfflineMOTD = "brb"
+		}, "offline_motd"},
+		"duplicate udp port": {func(c *Config) {
+			c.Agent.Tunnels[0].Type = TunnelUDP
+			dup := c.Agent.Tunnels[0]
+			dup.ID = NewID()
+			c.Agent.Tunnels = append(c.Agent.Tunnels, dup)
+		}, "already used by another enabled udp tunnel"},
+		"retention too short": {func(c *Config) { c.Analytics.RetentionDays = 0 }, "retention_days"},
+		"retention too long":  {func(c *Config) { c.Analytics.RetentionDays = 4000 }, "retention_days"},
+		"geoip not mmdb":      {func(c *Config) { c.Analytics.GeoIPCityPath = `C:\geo\GeoLite2-City.zip` }, "geoip_city_path"},
+		"geoip asn not mmdb":  {func(c *Config) { c.Analytics.GeoIPASNPath = "asn.dat" }, "geoip_asn_path"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -120,6 +142,27 @@ func TestValidateCatches(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantSub) {
 				t.Errorf("error %q does not mention %q", err, tc.wantSub)
+			}
+		})
+	}
+}
+
+func TestValidateAccepts(t *testing.T) {
+	cases := map[string]func(*Config){
+		"udp tunnel": func(c *Config) { c.Agent.Tunnels[0].Type = TunnelUDP },
+		"tcp and udp share a public port": func(c *Config) {
+			udp := c.Agent.Tunnels[0]
+			udp.ID = NewID()
+			udp.Type = TunnelUDP
+			c.Agent.Tunnels = append(c.Agent.Tunnels, udp)
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := validAgentConfig()
+			mutate(cfg)
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("expected valid config, got %v", err)
 			}
 		})
 	}

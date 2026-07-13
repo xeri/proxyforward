@@ -1,11 +1,11 @@
 import {useEffect, useRef, useState} from 'react'
-import {prefersReduced} from '../theme'
+import {prefersReduced} from '../motion'
 
 /**
  * NumberTicker: interpolates numeric changes so stats glide instead of snap.
  * Pass the raw number and a formatter; reduced-motion users get instant values.
  */
-export function NumberTicker({value, format = String, duration = 350, className = ''}: {
+export function NumberTicker({value, format = String, duration = 500, className = ''}: {
   value: number
   format?: (n: number) => string
   duration?: number

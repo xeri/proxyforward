@@ -4,7 +4,9 @@ import {Column, DataTable} from '../components/DataTable'
 import {Badge, Card, CopyIcon, MonoChip, PageHeader} from '../components/ui'
 import {IconConnections, IconLink, IconUsers} from '../components/icons'
 import {usePeers} from '../history'
-import {fmtBytes, fmtRate, UIStatus} from '../state'
+import {NavId} from '../nav'
+import {openDossierOnMount} from '../players'
+import {fmtBytes, fmtRate, fmtRtt, hasRtt, UIStatus} from '../state'
 
 // Per-IP current-rate tracker: module-level so tab switches don't reset the
 // baselines. Rates come from diffing live-connection byte totals between
@@ -40,7 +42,7 @@ function currentRates(conns: {clientAddr: string; bytesIn: number; bytesOut: num
 
 /** Traffic: one subject, one screen — the link itself, the bandwidth history,
  * live sessions, and every client ever seen. */
-export function Traffic({status}: {status: UIStatus}) {
+export function Traffic({status, onNavigate}: {status: UIStatus; onNavigate: (id: NavId) => void}) {
   const conns = [...(status.connections ?? [])].sort((a, b) => a.startedAt - b.startedAt)
   const peers = usePeers()
 
@@ -55,6 +57,9 @@ export function Traffic({status}: {status: UIStatus}) {
   const clients = mergeClients(peers, conns)
   const selfIP = stripPort(status.peerAddr ?? '')
 
+  // Player and Ping columns are unconditional: RTT is protocol-agnostic, a
+  // stable layout beats columns that pop in and out, and the Players wall's
+  // MinecraftAware empty state is what teaches the feature.
   const sessionCols: Column<(typeof conns)[number]>[] = [
     {
       key: 'ip', header: 'Client IP', pin: true, mono: true,
@@ -70,10 +75,44 @@ export function Traffic({status}: {status: UIStatus}) {
       },
     },
     {key: 'port', header: 'Port', render: c => <MonoChip>{splitAddr(c.clientAddr).port || '—'}</MonoChip>},
+    {
+      key: 'player', header: 'Player',
+      // Identified players link through to their dossier; a sniffed name
+      // without a resolved UUID has no dossier to open and stays plain text.
+      render: c => {
+        const uuid = c.playerUuid
+        return c.playerName
+        ? (uuid
+          ? (
+            <button
+              type="button"
+              title={`Open ${c.playerName} in Players`}
+              onClick={() => { openDossierOnMount(uuid); onNavigate('players') }}
+              className="group inline-flex items-center gap-1.5"
+            >
+              <span className="inline-flex h-1.5 w-1.5 rounded-full" style={{background: 'var(--good)'}} />
+              <span className="font-medium text-[var(--text)] underline-offset-2 transition-colors group-hover:text-[var(--accent)] group-hover:underline">{c.playerName}</span>
+            </button>
+          )
+          : (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex h-1.5 w-1.5 rounded-full" style={{background: 'var(--good)'}} />
+              <span className="font-medium text-[var(--text)]">{c.playerName}</span>
+            </span>
+          ))
+        : <span className="text-[var(--text-3)]">—</span>
+      },
+    },
     {key: 'tunnel', header: 'Tunnel', render: c => <span className="text-[var(--text-2)]">{c.tunnelName || '—'}</span>},
     {key: 'dur', header: 'Duration', render: c => <span className="tabular-nums text-[var(--text-2)]">{fmtElapsed(Date.now() - c.startedAt)}</span>},
     {key: 'rx', header: 'Received', align: 'right', render: c => fmtBytes(c.bytesOut)},
     {key: 'tx', header: 'Sent', align: 'right', render: c => fmtBytes(c.bytesIn)},
+    {
+      key: 'rtt', header: 'Ping', align: 'right',
+      render: c => hasRtt(c.rttMs)
+        ? <span className="tabular-nums text-[var(--rtt)]">{fmtRtt(c.rttMs)}</span>
+        : <span className="text-[var(--text-3)]">—</span>,
+    },
   ]
 
   const clientCols: Column<ClientRow>[] = [
@@ -115,7 +154,7 @@ export function Traffic({status}: {status: UIStatus}) {
 
       <div className="grid grid-cols-1 gap-4 @min-[88rem]:grid-cols-2">
         <Card title="Live sessions" pad={false}
-          action={<div className="pr-4"><Badge tone={conns.length ? 'good' : 'neutral'}>{conns.length} live</Badge></div>}>
+          action={<div className="pr-4"><Badge tone={conns.length ? 'good' : 'neutral'}>{status.connectionsTotal || conns.length} live</Badge></div>}>
           <DataTable
             columns={sessionCols} rows={conns} rowKey={c => c.id}
             empty={{
@@ -124,6 +163,11 @@ export function Traffic({status}: {status: UIStatus}) {
               hint: 'Sessions appear here the moment a player joins through the tunnel.',
             }}
           />
+          {status.connectionsTruncated && (
+            <div className="px-4 py-2 text-[11px] tabular-nums text-[var(--text-3)]">
+              showing {conns.length} of {status.connectionsTotal} connections
+            </div>
+          )}
         </Card>
 
         <Card title="Every client" subtitle="Lifetime totals for every IP that has ever connected" pad={false}
@@ -163,7 +207,7 @@ function LinkStrip({status}: {status: UIStatus}) {
               color: c,
               borderColor: `color-mix(in srgb, ${c} 40%, var(--border))`,
               background: `color-mix(in srgb, ${c} 9%, transparent)`,
-              boxShadow: up ? `0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)` : 'none',
+              boxShadow: `0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)`,
             }}
           >
             <IconLink size={19} />

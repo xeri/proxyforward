@@ -1,10 +1,10 @@
-import {ReactNode, useEffect, useRef, useState} from 'react'
+import {ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react'
 import {
-  CreatorAvatar, CreatorInfo, FirewallRepair, FirewallStatus, GetConfig, InstallService,
-  OpenConfigDir, OpenCreatorURL, RegenerateToken, RestartEngine, SaveSettings, ServiceStatus,
-  UninstallService,
+  BrowseMMDB, CreatorAvatar, CreatorInfo, FirewallRepair, FirewallStatus, GeoStatus, GetConfig,
+  InstallService, OpenConfigDir, OpenCreatorURL, OpenExternal, RegenerateToken, RestartEngine,
+  SaveSettings, ServiceStatus, UninstallService,
 } from '../../wailsjs/go/app/App'
-import {config} from '../../wailsjs/go/models'
+import {config, geo} from '../../wailsjs/go/models'
 import {
   Badge, Banner, Button, Card, ErrorBanner, Field, FormRow, PageHeader,
   SegmentedControl, Select, Skeleton, TextInput, Toggle, WarnWash,
@@ -14,6 +14,7 @@ import {IconExternal, IconMonitor, IconMoon, IconRefresh, IconSun} from '../comp
 import {UIStatus} from '../state'
 import {ThemePref, useTheme} from '../theme'
 import {fxPref, setFxPref} from '../fx'
+import {MotionPref, useMotion} from '../motion'
 
 type Cfg = config.Config
 
@@ -35,14 +36,21 @@ export function Settings({status}: {status: UIStatus}) {
     {id: 'behavior', label: 'Behavior'},
     {id: 'connection', label: 'Connection'},
     ...(!isAgent ? [{id: 'security', label: 'Security'}] : []),
+    {id: 'analytics', label: 'Analytics'},
     {id: 'telemetry', label: 'Telemetry'},
     {id: 'system', label: 'System'},
     {id: 'backup', label: 'Backup'},
     {id: 'about', label: 'About'},
   ]
 
+  // Geo status reflects what the running engine loaded, not the staged config,
+  // so it refreshes after a save (which restarts the engine) rather than on
+  // every keystroke.
+  const [geoStatus, setGeoStatus] = useState<geo.Status | null>(null)
+  const refreshGeo = () => GeoStatus().then(setGeoStatus).catch(() => setGeoStatus(null))
+
   const reload = () => GetConfig().then(c => { setCfg(c); setDirty(false) }).catch(e => setErr(String(e)))
-  useEffect(() => { reload() }, [])
+  useEffect(() => { reload(); refreshGeo() }, [])
 
   // Loading: skeletons that match the final geometry, so the real content
   // crossfades into place without a layout shift.
@@ -75,6 +83,7 @@ export function Settings({status}: {status: UIStatus}) {
     try {
       await SaveSettings(cfg)
       if (!attached) { try { await RestartEngine() } catch (e) { setErr(String(e)) } }
+      refreshGeo()
       setDirty(false)
       setNote('Saved. The engine reconnected with the new settings.')
     } catch (e) { setErr(String(e)) }
@@ -98,9 +107,12 @@ export function Settings({status}: {status: UIStatus}) {
       <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-[150px_minmax(0,1fr)]">
         <SectionRail sections={sections} />
 
+        <div className="min-w-0">
         <div className="pf-stagger min-w-0 space-y-4 pb-24">
           <Section id="appearance" title="Appearance">
             <ThemeRow />
+            <Divider />
+            <MotionRow />
             <Divider />
             <FxRow />
           </Section>
@@ -166,7 +178,38 @@ export function Settings({status}: {status: UIStatus}) {
             </Section>
           )}
 
-          <Section id="telemetry" title="Telemetry" subtitle="Logging detail and the optional metrics endpoint.">
+          <Section id="analytics" title="Analytics" subtitle="History, player identity, and geo enrichment — everything is stored locally, nothing leaves this machine.">
+            <Field label="History retention" hint="How long connection and player history is kept before it's pruned (1–3650 days).">
+              <div className="w-40">
+                <TextInput mono value={String(cfg.Analytics.RetentionDays)}
+                  onChange={v => patch(c => { c.Analytics.RetentionDays = parseInt(v, 10) || 0 })} />
+              </div>
+            </Field>
+            <Divider />
+            <Toggle checked={cfg.Analytics.MojangLookups} onChange={v => patch(c => { c.Analytics.MojangLookups = v })}
+              label="Resolve player identities"
+              hint="Look up sniffed usernames against Mojang for UUIDs and skins. Turn off for offline-mode (cracked) servers." />
+            <Divider />
+            <div className="pt-1 text-sm font-medium text-[var(--text)]">GeoIP databases</div>
+            <div className="mt-1 text-xs leading-relaxed text-[var(--text-3)]">
+              Optional MaxMind GeoLite2 <code className="rounded-[var(--r-xs)] bg-[var(--panel-2)] px-1 py-0.5 font-mono">.mmdb</code> files
+              add country and network data to sessions. They aren't bundled — download them free with a{' '}
+              <button onClick={() => OpenExternal('https://www.maxmind.com/en/geolite2/signup')}
+                className="text-[var(--accent)] hover:underline">MaxMind account</button>.
+            </div>
+            <div className="mt-3 space-y-3">
+              <MmdbField label="City database (country)" path={cfg.Analytics.GeoIPCityPath}
+                onChange={p => patch(c => { c.Analytics.GeoIPCityPath = p })}
+                loaded={geoStatus?.cityLoaded ?? false} error={geoStatus?.cityError}
+                attached={attached} browseTitle="Select GeoLite2 City database" />
+              <MmdbField label="ASN database (network)" path={cfg.Analytics.GeoIPASNPath}
+                onChange={p => patch(c => { c.Analytics.GeoIPASNPath = p })}
+                loaded={geoStatus?.asnLoaded ?? false} error={geoStatus?.asnError}
+                attached={attached} browseTitle="Select GeoLite2 ASN database" />
+            </div>
+          </Section>
+
+          <Section id="telemetry" title="Telemetry" subtitle="Logging detail and the optional metrics endpoint — everything is stored locally, nothing is sent anywhere.">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Log level">
                 <Select value={cfg.Logging.Level} onChange={v => patch(c => { c.Logging.Level = v })} options={[
@@ -201,65 +244,132 @@ export function Settings({status}: {status: UIStatus}) {
 
           {note && !dirty && <div className="pf-fade text-sm text-[var(--good)]">{note}</div>}
         </div>
-      </div>
 
-      {/* Save bar: floats above everything while changes are staged. */}
-      {dirty && (
-        <div className="pf-slide-up pf-glass fixed bottom-6 left-1/2 z-40 flex items-center gap-3 rounded-[var(--r-lg)] px-4 py-2.5">
-          <span className="text-sm text-[var(--text-2)]">Unsaved changes</span>
-          <Button variant="ghost" size="sm" onClick={reload}>Discard</Button>
-          <Button size="sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save & apply'}</Button>
+        {/* Save bar: sticky inside the cards column so it centers on the
+            cards, not the viewport. Lives outside the pf-stagger list — a
+            late-mounting child would inherit the entrance cascade's delay.
+            Opaque menu glass with the accent bleeding through from behind:
+            unsaved state should glow, not whisper. */}
+        {dirty && (
+          <div className="pointer-events-none sticky bottom-6 z-40 -mt-14 flex justify-center pb-1">
+            <div
+              className="pf-slide-up pf-menu pf-bleed pointer-events-auto relative flex items-center gap-4 rounded-[var(--r-lg)] py-3 pl-5 pr-3"
+              style={{
+                ['--bleed' as string]: 'var(--accent)',
+                ['--bleed-strength' as string]: '28%',
+                boxShadow: 'inset 0 1px 0 var(--bevel-top), inset 0 -1px 0 var(--bevel-bot), 0 0 0 1px color-mix(in srgb, var(--accent) 40%, var(--border-strong)), 0 12px 48px -12px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow-pop)',
+              }}
+            >
+              <span className="text-sm font-medium text-[var(--text)]">Unsaved changes</span>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" onClick={reload}>Discard</Button>
+                <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save & apply'}</Button>
+              </div>
+            </div>
+          </div>
+        )}
         </div>
-      )}
+      </div>
     </div>
   )
 }
 
 /** SectionRail: sticky scrollspy nav. Tracks the scroll position of the app's
- * main scroll container and highlights the section under the reading line. */
+ * main scroll container and a traveling accent indicator glides to the
+ * section under the reading line. */
 function SectionRail({sections}: {sections: SectionDef[]}) {
   const [active, setActive] = useState(sections[0]?.id ?? '')
   const railRef = useRef<HTMLElement>(null)
+  // Indicator geometry is measured, not tokenized: buttons are content-sized
+  // and the list changes with role (Security). The sticky nav is both the
+  // offsetParent and the containing block, so offsetTop maps 1:1.
+  const [ind, setInd] = useState<{top: number; height: number} | null>(null)
+  // Transitions arm one frame after mount — the first measurement must land
+  // without animating or the indicator flies in from y=0 on every visit.
+  const [armed, setArmed] = useState(false)
+  useEffect(() => { setArmed(true) }, [])
+
+  const sectionsKey = sections.map(s => s.id).join(',')
+  useLayoutEffect(() => {
+    const btn = railRef.current?.querySelector<HTMLElement>(`[data-sec="${active}"]`)
+    if (btn) setInd({top: btn.offsetTop, height: btn.offsetHeight})
+  }, [active, sectionsKey])
+
+  // Click pinning: a jump highlights its target immediately and holds it
+  // while the smooth scroll plays out — otherwise the spy recomputes mid-
+  // flight and a bottom-clamped target (Backup) loses to whatever the scroll
+  // settles on. The pin releases once scroll events go quiet.
+  const pinRef = useRef(false)
+  const settleRef = useRef(0)
 
   useEffect(() => {
     const scroller = railRef.current?.closest('main')
     if (!scroller) return
     const onScroll = () => {
+      if (pinRef.current) {
+        window.clearTimeout(settleRef.current)
+        settleRef.current = window.setTimeout(() => { pinRef.current = false }, 160)
+        return
+      }
       // The titlebar overlays the scroller; its height is the scroller's top
-      // padding, so the reading line sits 96px below the visible chrome.
+      // padding, so the reading line starts 96px below the visible chrome.
       const chrome = parseFloat(getComputedStyle(scroller).paddingTop) || 0
-      const line = scroller.getBoundingClientRect().top + chrome + 96
+      const rectTop = scroller.getBoundingClientRect().top
+      const base = rectTop + chrome + 96
+      // The line descends with scroll progress, reaching the bottom of the
+      // scrollport at full scroll: sections in the last screenful (Backup)
+      // whose tops can never climb to a fixed line still get their turn, in
+      // order, before the scroller runs out of travel.
+      const maxScroll = scroller.scrollHeight - scroller.clientHeight
+      const progress = maxScroll > 0 ? Math.min(1, scroller.scrollTop / maxScroll) : 0
+      const floor = rectTop + scroller.clientHeight - 24
+      const line = base + Math.max(0, floor - base) * progress
       let current = sections[0]?.id ?? ''
       for (const s of sections) {
         const el = document.getElementById(`s-${s.id}`)
         if (el && el.getBoundingClientRect().top <= line) current = s.id
       }
-      // Fully scrolled: the last section wins even if its top never crosses
-      // the reading line (short final sections could otherwise never light).
-      if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) {
-        current = sections[sections.length - 1]?.id ?? current
-      }
       setActive(current)
     }
     onScroll()
     scroller.addEventListener('scroll', onScroll, {passive: true})
-    return () => scroller.removeEventListener('scroll', onScroll)
+    return () => {
+      scroller.removeEventListener('scroll', onScroll)
+      window.clearTimeout(settleRef.current)
+    }
   }, [sections.map(s => s.id).join(',')])
 
   const jump = (id: string) => {
+    setActive(id)
+    pinRef.current = true
+    // A jump that needs no scrolling emits no scroll events — release the
+    // pin on a timer so the spy doesn't stay frozen.
+    window.clearTimeout(settleRef.current)
+    settleRef.current = window.setTimeout(() => { pinRef.current = false }, 400)
     document.getElementById(`s-${id}`)?.scrollIntoView({behavior: 'smooth', block: 'start'})
   }
 
   return (
     <nav ref={railRef} className="sticky top-[var(--chrome-top)] hidden flex-col gap-0.5 md:flex" aria-label="Settings sections">
+      {/* Traveling highlight: the same glass the sidebar's active nav wears —
+          accent internal glow, lit ring, inset catch-light (pf-nav-glow) —
+          gliding between items instead of teleporting. Buttons keep a
+          transparent border for identical geometry. Opacity stays outside
+          the transition list — it flips instantly on first measure. */}
+      <div
+        aria-hidden
+        className={`pf-nav-glow pointer-events-none absolute left-0 w-full rounded-[var(--r-sm)] ${
+          armed ? 'transition-[transform,height] duration-[var(--dur-slow)] [transition-timing-function:var(--ease-spring)]' : ''
+        }`}
+        style={{height: ind?.height ?? 0, transform: `translateY(${ind?.top ?? 0}px)`, opacity: ind ? 1 : 0}}
+      />
       {sections.map(s => (
         <button
           key={s.id}
+          data-sec={s.id}
           onClick={() => jump(s.id)}
-          className={`rounded-[var(--r-sm)] border-l-2 px-3 py-1.5 text-left text-[13px] transition-all duration-200 ${
-            active === s.id
-              ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_8%,transparent)] font-medium text-[var(--text)]'
-              : 'border-transparent text-[var(--text-3)] hover:text-[var(--text)]'
+          className={`relative rounded-[var(--r-sm)] border border-transparent px-3 py-1.5 text-left text-[13px] transition-colors duration-200 ${
+            active === s.id ? 'font-medium text-[var(--text)]' : 'text-[var(--text-3)] hover:text-[var(--text)]'
           }`}
         >{s.label}</button>
       ))}
@@ -279,10 +389,35 @@ function ThemeRow() {
       <SegmentedControl<ThemePref>
         value={pref}
         onChange={setPref}
-        className="w-64"
+        className="shrink-0"
         options={[
           {value: 'light', label: <><IconSun size={13} /> Light</>},
           {value: 'dark', label: <><IconMoon size={13} /> Dark</>},
+          {value: 'system', label: <><IconMonitor size={13} /> System</>},
+        ]}
+      />
+    </div>
+  )
+}
+
+/** MotionRow: overrides the OS reduced-motion signal (Windows "Animation
+ * effects"). On/Off force it; System follows Windows. Client-side only,
+ * applied instantly via data-motion (motion.ts). */
+function MotionRow() {
+  const {pref, setPref} = useMotion()
+  return (
+    <div className="flex items-center justify-between gap-4 py-2">
+      <div>
+        <div className="text-sm font-medium text-[var(--text)]">Animations</div>
+        <div className="mt-0.5 text-xs text-[var(--text-3)]">System follows Windows' animation-effects setting.</div>
+      </div>
+      <SegmentedControl<MotionPref>
+        value={pref}
+        onChange={setPref}
+        className="shrink-0"
+        options={[
+          {value: 'on', label: 'On'},
+          {value: 'off', label: 'Off'},
           {value: 'system', label: <><IconMonitor size={13} /> System</>},
         ]}
       />
@@ -431,6 +566,44 @@ function AboutSection({status}: {status: UIStatus}) {
       </div>
     </Section>
   )
+}
+
+/** MmdbField: a GeoLite2 database path with a Browse picker and a live status
+ * badge. The badge reflects what the engine actually loaded (from GeoStatus),
+ * so it lags a staged edit until the change is saved and the engine restarts —
+ * a "Pending" state bridges that gap. Browse is engine-mode only; attached, the
+ * path is still editable and applies when the service next hands off. */
+function MmdbField({label, path, onChange, loaded, error, attached, browseTitle}: {
+  label: string; path: string; onChange: (p: string) => void
+  loaded: boolean; error?: string; attached: boolean; browseTitle: string
+}) {
+  const [busy, setBusy] = useState(false)
+  const browse = async () => {
+    setBusy(true)
+    try { const p = await BrowseMMDB(browseTitle); if (p) onChange(p) }
+    catch { /* picker cancelled */ }
+    finally { setBusy(false) }
+  }
+  return (
+    <Field label={label}>
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <TextInput mono value={path} onChange={onChange} placeholder="Not set" />
+        </div>
+        {!attached && <Button variant="ghost" size="sm" onClick={browse} disabled={busy}>{busy ? '…' : 'Browse'}</Button>}
+        <MmdbBadge path={path} loaded={loaded} error={error} />
+      </div>
+    </Field>
+  )
+}
+
+/** MmdbBadge: nothing when no path is set; otherwise Loaded / Failed / Pending
+ * from the engine's view of that path. */
+function MmdbBadge({path, loaded, error}: {path: string; loaded: boolean; error?: string}) {
+  if (!path.trim()) return null
+  if (error) return <span title={error}><Badge tone="warn">Failed</Badge></span>
+  if (loaded) return <Badge tone="good">Loaded</Badge>
+  return <Badge tone="neutral">Pending</Badge>
 }
 
 function Section({id, title, subtitle, action, children}: {

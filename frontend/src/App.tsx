@@ -6,6 +6,8 @@ import {Sidebar} from './layout/Sidebar'
 import {NAV_MAIN, NAV_SETTINGS, NavId} from './nav'
 import {Overview} from './screens/Overview'
 import {Traffic} from './screens/Traffic'
+import {Players} from './screens/Players'
+import {Analytics} from './screens/Analytics'
 import {Activity} from './screens/Activity'
 import {Settings} from './screens/Settings'
 import {Tunnels} from './screens/Tunnels'
@@ -13,7 +15,7 @@ import {Wizard} from './screens/Wizard'
 import {CommandPalette} from './components/CommandPalette'
 import {Spinner} from './components/ui'
 import {UIStatus, useTick} from './state'
-import {prefersReduced} from './theme'
+import {prefersReduced} from './motion'
 
 const supportsVT = typeof (document as Document & {startViewTransition?: unknown}).startViewTransition === 'function'
 
@@ -81,7 +83,7 @@ export default function App() {
     }
   }
 
-  // Ctrl+K opens the palette; Ctrl+1..5 jump straight to a screen.
+  // Ctrl+K opens the palette; Ctrl+1..6 jump straight to a screen.
   const [palette, setPalette] = useState(false)
   useEffect(() => {
     const items = [...NAV_MAIN, NAV_SETTINGS]
@@ -109,7 +111,7 @@ export default function App() {
       // the sheet while the wizard morphs into the console.
       const html = document.documentElement
       html.classList.add('pf-glaze')
-      window.setTimeout(() => html.classList.remove('pf-glaze'), 1300)
+      window.setTimeout(() => html.classList.remove('pf-glaze'), 1600)
       doc.startViewTransition(() => flushSync(() => setWizardHold(false)))
     } else {
       setWizardHold(false)
@@ -149,7 +151,9 @@ export default function App() {
       >
         <div key={nav} className={supportsVT ? '' : 'pf-page'}>
           {nav === 'overview' && <Overview status={s} onNavigate={go} />}
-          {nav === 'traffic' && <Traffic status={s} />}
+          {nav === 'traffic' && <Traffic status={s} onNavigate={go} />}
+          {nav === 'players' && <Players status={s} />}
+          {nav === 'analytics' && <Analytics status={s} />}
           {nav === 'tunnels' && <Tunnels status={s} />}
           {nav === 'activity' && <Activity attached={s.mode === 'attached'} />}
           {nav === 'settings' && <Settings status={s} />}

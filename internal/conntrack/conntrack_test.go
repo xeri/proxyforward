@@ -9,9 +9,9 @@ func TestOpenSnapshotClose(t *testing.T) {
 	r := NewRegistry()
 
 	// e1: splice's first arg is the client leg (inIsAToB=true).
-	e1, close1 := r.Open("t1", "Tunnel", "1.2.3.4:1111", true)
+	e1, close1 := r.Open("t1", "Tunnel", "1.2.3.4:1111", "k1", true)
 	// e2: reversed orientation (inIsAToB=false).
-	e2, close2 := r.Open("t1", "Tunnel", "1.2.3.4:2222", false)
+	e2, close2 := r.Open("t1", "Tunnel", "1.2.3.4:2222", "", false)
 
 	e1.Counters.AToB.Store(100) // in
 	e1.Counters.BToA.Store(10)  // out
@@ -62,6 +62,50 @@ func TestOpenSnapshotClose(t *testing.T) {
 	}
 }
 
+// TestConnKeySetBeforeHooks pins the WS2 contract: ConnKey is populated in
+// the entry before onOpen fires (the recorder snapshots it there) and before
+// the entry is findable by key.
+func TestConnKeySetBeforeHooks(t *testing.T) {
+	r := NewRegistry()
+	var seen string
+	r.SetHooks(func(e *Entry) { seen = e.ConnKey }, nil, nil, nil)
+
+	e, closeEntry := r.Open("t1", "Tunnel", "1.2.3.4:1111", "key-42", true)
+	defer closeEntry()
+	if seen != "key-42" {
+		t.Fatalf("onOpen saw ConnKey %q, want key-42", seen)
+	}
+	if got := r.EntryByConnKey("key-42"); got != e {
+		t.Fatalf("EntryByConnKey returned %v, want the opened entry", got)
+	}
+	if r.EntryByConnKey("") != nil {
+		t.Fatal("empty key must never match")
+	}
+}
+
+// TestPlayerCountDedupes: one player on two connections counts once, whether
+// keyed by UUID or (for UUID-less handshakes) by name.
+func TestPlayerCountDedupes(t *testing.T) {
+	r := NewRegistry()
+	e1, c1 := r.Open("t", "T", "1.2.3.4:1", "", true)
+	e2, c2 := r.Open("t", "T", "1.2.3.4:2", "", true)
+	e3, c3 := r.Open("t", "T", "1.2.3.4:3", "", true)
+	defer c1()
+	defer c2()
+	defer c3()
+
+	e1.SetPlayer(PlayerInfo{Name: "Steve", UUID: "u-1"})
+	e2.SetPlayer(PlayerInfo{Name: "steve", UUID: ""}) // pre-1.19: no UUID
+	if got := r.PlayerCount(); got != 2 {
+		t.Fatalf("PlayerCount = %d, want 2 (u-1 + name:steve)", got)
+	}
+	// Same identity on a second connection must not double-count.
+	e3.SetPlayer(PlayerInfo{Name: "Steve", UUID: "u-1"})
+	if got := r.PlayerCount(); got != 2 {
+		t.Fatalf("PlayerCount after dup conn = %d, want 2", got)
+	}
+}
+
 // TestTotalsMonotonicDuringClose guards the live→closed handoff: a reader
 // sampling Totals while connections close must never see the total dip
 // (bandwidth graphs diff consecutive samples).
@@ -70,7 +114,7 @@ func TestTotalsMonotonicDuringClose(t *testing.T) {
 	const n = 500
 	closers := make([]func(), 0, n)
 	for i := 0; i < n; i++ {
-		e, c := r.Open("t", "T", "1.2.3.4:1", true)
+		e, c := r.Open("t", "T", "1.2.3.4:1", "", true)
 		e.Counters.AToB.Store(1000)
 		closers = append(closers, c)
 	}

@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react'
 import {fmtUptime, useTickStale, UIStatus} from '../state'
-import {Spinner} from './ui'
+import {RoleWord, Spinner} from './ui'
 
 /**
  * The one-glance link state in the title bar: state + consequence, with RTT,
@@ -30,7 +30,9 @@ export function ConnectionPill({status}: {status: UIStatus}) {
 
   const label = isAgent
     ? up ? 'Connected' : 'Reconnecting…'
-    : up ? 'Agent online' : 'Waiting for agent'
+    : up
+      ? <><RoleWord role="agent">Agent</RoleWord> online</>
+      : <>Waiting for <RoleWord role="agent">agent</RoleWord></>
   // Once up, the health rollup drives the dot so jitter/loss degradation shows
   // at a glance. Both roles measure their own health.
   const health = status.healthScore

@@ -67,3 +67,22 @@ export function fmtDuration(ms: number): string {
   if (m > 0) return `${m}m ${sec}s`
   return `${sec}s`
 }
+
+/** hasRtt: the one RTT-known predicate. Backends use both -1 and 0 as "no
+ * sample" sentinels, so anything ≤ 0 renders as unknown. */
+export function hasRtt(ms: number): boolean {
+  return ms > 0
+}
+
+/** fmtRtt renders a known round-trip time ("34 ms"). Guard with hasRtt. */
+export function fmtRtt(ms: number): string {
+  return `${Math.round(ms)} ms`
+}
+
+/** flagEmoji turns an ISO country code into its regional-indicator emoji,
+ * null when the code is missing/invalid (callers pick their own fallback). */
+export function flagEmoji(cc?: string): string | null {
+  if (!cc || !/^[A-Za-z]{2}$/.test(cc)) return null
+  const up = cc.toUpperCase()
+  return String.fromCodePoint(0x1f1e6 + up.charCodeAt(0) - 65, 0x1f1e6 + up.charCodeAt(1) - 65)
+}

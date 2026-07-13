@@ -5,12 +5,23 @@
 package conntrack
 
 import (
+	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"proxyforward/internal/relay"
 )
+
+// PlayerInfo is the identity sniffed from a Minecraft login handshake. UUID
+// is the client's self-declared id (authoritative only in online mode) and
+// may be empty; the identity service resolves the authoritative UUID later.
+type PlayerInfo struct {
+	Name     string
+	UUID     string
+	Protocol int32
+}
 
 // Entry is one live proxied connection. Counter direction is explicit:
 // In = client → server bytes, Out = server → client bytes.
@@ -21,11 +32,62 @@ type Entry struct {
 	ClientAddr string
 	StartedAt  time.Time
 
+	// ConnKey correlates this connection with per-connection reports that
+	// arrive over the control link (e.g. gateway-measured RTT); empty when
+	// the transport does not assign one. Immutable after Open — it is read
+	// unlocked by EntryByConnKey callers and snapshotted by open hooks.
+	ConnKey string
+
+	// player holds the sniffed Minecraft identity once the login handshake is
+	// parsed; nil until then. Read/written lock-free from the splice tap.
+	player atomic.Pointer[PlayerInfo]
+
+	// rttBits holds the last measured round-trip time in milliseconds as
+	// float64 bits; -1 means unknown. On the gateway it is the kernel's
+	// TCP_INFO estimate for the public leg; on the agent it is that value
+	// relayed over the control link. Read/written lock-free.
+	rttBits atomic.Uint64
+
 	// Counters is handed to relay.Splice. Which atomic maps to In vs Out
 	// depends on argument order at the splice site; the opener says so via
 	// inIsAToB.
 	Counters *relay.Counters
 	inIsAToB bool
+
+	reg *Registry // for SetPlayer to fire the registry's onPlayer hook
+}
+
+// SetPlayer records the sniffed identity and fires the registry's player
+// hook. Safe to call from the splice goroutine; the hook runs outside the
+// registry lock.
+func (e *Entry) SetPlayer(p PlayerInfo) {
+	e.player.Store(&p)
+	if e.reg != nil && e.reg.onPlayer != nil {
+		e.reg.onPlayer(e)
+	}
+}
+
+// Player returns the sniffed identity, or nil if none has been seen.
+func (e *Entry) Player() *PlayerInfo { return e.player.Load() }
+
+// SetRTT records a fresh round-trip measurement (milliseconds) and fires the
+// registry's RTT hook. Safe to call from the sampler / control goroutine; the
+// hook runs outside the registry lock.
+func (e *Entry) SetRTT(ms float64) {
+	e.rttBits.Store(math.Float64bits(ms))
+	if e.reg != nil && e.reg.onRTT != nil {
+		e.reg.onRTT(e)
+	}
+}
+
+// RTT returns the last measured round-trip time in milliseconds, or -1 when
+// none has been recorded.
+func (e *Entry) RTT() float64 {
+	b := e.rttBits.Load()
+	if b == 0 {
+		return -1 // never stored (Open seeds -1, so this is a defensive default)
+	}
+	return math.Float64frombits(b)
 }
 
 func (e *Entry) bytesIn() int64 {
@@ -51,6 +113,12 @@ type Snapshot struct {
 	StartedAt  int64  `json:"startedAt"` // unix millis
 	BytesIn    int64  `json:"bytesIn"`
 	BytesOut   int64  `json:"bytesOut"`
+	// Player identity, present once the login handshake was sniffed.
+	PlayerName string `json:"playerName,omitempty"`
+	PlayerUUID string `json:"playerUuid,omitempty"`
+	Protocol   int32  `json:"protocol,omitempty"`
+	// RttMs is the last measured round-trip time in milliseconds; -1 unknown.
+	RttMs float64 `json:"rttMs"`
 }
 
 // Registry tracks live connections and lifetime byte totals.
@@ -63,9 +131,12 @@ type Registry struct {
 	closedIn  atomic.Int64
 	closedOut atomic.Int64
 
-	// Optional observers (the stats store); set before traffic flows.
-	onOpen  func(clientAddr string)
-	onClose func(clientAddr string, bytesIn, bytesOut int64)
+	// Optional observers; set before traffic flows. Hooks run outside the
+	// registry lock and must not call back into the registry.
+	onOpen   func(e *Entry)
+	onClose  func(e *Entry, bytesIn, bytesOut int64)
+	onPlayer func(e *Entry)
+	onRTT    func(e *Entry)
 }
 
 func NewRegistry() *Registry {
@@ -73,32 +144,39 @@ func NewRegistry() *Registry {
 }
 
 // SetHooks installs connection observers: onOpen fires when a connection is
-// registered, onClose with the final byte counts when it ends. Install before
-// traffic flows; hooks run outside the registry lock and must not call back
-// into the registry.
-func (r *Registry) SetHooks(onOpen func(clientAddr string), onClose func(clientAddr string, bytesIn, bytesOut int64)) {
-	r.onOpen, r.onClose = onOpen, onClose
+// registered, onClose with the final byte counts when it ends, onPlayer when
+// a sniffed player identity is attached, onRTT when a fresh round-trip
+// measurement lands. Any may be nil. Install before traffic flows; hooks run
+// outside the registry lock and must not call back into the registry.
+func (r *Registry) SetHooks(onOpen func(e *Entry), onClose func(e *Entry, bytesIn, bytesOut int64), onPlayer, onRTT func(e *Entry)) {
+	r.onOpen, r.onClose, r.onPlayer, r.onRTT = onOpen, onClose, onPlayer, onRTT
 }
 
 // Open registers a connection and returns its entry plus a close func to
-// call when the splice ends. inIsAToB declares counter orientation: true
-// when the splice's first argument is the client-facing leg.
-func (r *Registry) Open(tunnelID, tunnelName, clientAddr string, inIsAToB bool) (*Entry, func()) {
+// call when the splice ends. connKey is the control-link correlation id (""
+// when the transport assigns none) and is fixed here, before the entry is
+// published, so it is never written after another goroutine can see it.
+// inIsAToB declares counter orientation: true when the splice's first
+// argument is the client-facing leg.
+func (r *Registry) Open(tunnelID, tunnelName, clientAddr, connKey string, inIsAToB bool) (*Entry, func()) {
 	e := &Entry{
 		TunnelID:   tunnelID,
 		TunnelName: tunnelName,
 		ClientAddr: clientAddr,
+		ConnKey:    connKey,
 		StartedAt:  time.Now(),
 		Counters:   &relay.Counters{},
 		inIsAToB:   inIsAToB,
+		reg:        r,
 	}
+	e.rttBits.Store(math.Float64bits(-1)) // unknown until first measurement
 	r.mu.Lock()
 	r.next++
 	e.ID = r.next
 	r.conns[e.ID] = e
 	r.mu.Unlock()
 	if r.onOpen != nil {
-		r.onOpen(clientAddr)
+		r.onOpen(e)
 	}
 
 	var once sync.Once
@@ -114,7 +192,7 @@ func (r *Registry) Open(tunnelID, tunnelName, clientAddr string, inIsAToB bool) 
 			delete(r.conns, e.ID)
 			r.mu.Unlock()
 			if r.onClose != nil {
-				r.onClose(e.ClientAddr, in, out)
+				r.onClose(e, in, out)
 			}
 		})
 	}
@@ -126,7 +204,7 @@ func (r *Registry) Snapshot() []Snapshot {
 	defer r.mu.Unlock()
 	out := make([]Snapshot, 0, len(r.conns))
 	for _, e := range r.conns {
-		out = append(out, Snapshot{
+		s := Snapshot{
 			ID:         e.ID,
 			TunnelID:   e.TunnelID,
 			TunnelName: e.TunnelName,
@@ -134,7 +212,12 @@ func (r *Registry) Snapshot() []Snapshot {
 			StartedAt:  e.StartedAt.UnixMilli(),
 			BytesIn:    e.bytesIn(),
 			BytesOut:   e.bytesOut(),
-		})
+			RttMs:      e.RTT(),
+		}
+		if p := e.player.Load(); p != nil {
+			s.PlayerName, s.PlayerUUID, s.Protocol = p.Name, p.UUID, p.Protocol
+		}
+		out = append(out, s)
 	}
 	// Map order is random; stable output keeps the GUI table from jumping.
 	for i := 1; i < len(out); i++ {
@@ -150,6 +233,45 @@ func (r *Registry) Count() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.conns)
+}
+
+// PlayerCount reports how many distinct players have a sniffed identity on a
+// live connection — the "players online" gauge, distinct from raw
+// connections. Deduped by identity key (handshake UUID, else lowercased
+// name), so one player with two connections counts once.
+func (r *Registry) PlayerCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	seen := make(map[string]struct{}, len(r.conns))
+	for _, e := range r.conns {
+		p := e.player.Load()
+		if p == nil {
+			continue
+		}
+		key := p.UUID
+		if key == "" {
+			key = "name:" + strings.ToLower(p.Name)
+		}
+		seen[key] = struct{}{}
+	}
+	return len(seen)
+}
+
+// EntryByConnKey returns the live entry whose ConnKey matches, or nil. Used
+// to route per-connection reports (e.g. RTT) that arrive over the control
+// link keyed by the gateway-issued connection id.
+func (r *Registry) EntryByConnKey(key string) *Entry {
+	if key == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.conns {
+		if e.ConnKey == key {
+			return e
+		}
+	}
+	return nil
 }
 
 // Totals reports lifetime bytes (closed + live), for bandwidth graphs that

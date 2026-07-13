@@ -1,3 +1,534 @@
+export namespace analytics {
+	
+	export class CountryAgg {
+	    cc: string;
+	    country: string;
+	    players: number;
+	    sessions: number;
+	    bytesIn: number;
+	    bytesOut: number;
+	    rttAvg: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CountryAgg(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cc = source["cc"];
+	        this.country = source["country"];
+	        this.players = source["players"];
+	        this.sessions = source["sessions"];
+	        this.bytesIn = source["bytesIn"];
+	        this.bytesOut = source["bytesOut"];
+	        this.rttAvg = source["rttAvg"];
+	    }
+	}
+	export class IPSpan {
+	    ip: string;
+	    firstSeen: number;
+	    lastSeen: number;
+	    sessions: number;
+	    cc: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IPSpan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ip = source["ip"];
+	        this.firstSeen = source["firstSeen"];
+	        this.lastSeen = source["lastSeen"];
+	        this.sessions = source["sessions"];
+	        this.cc = source["cc"];
+	    }
+	}
+	export class LatencyPoint {
+	    t: number;
+	    avg: number;
+	    min: number;
+	    max: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new LatencyPoint(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.t = source["t"];
+	        this.avg = source["avg"];
+	        this.min = source["min"];
+	        this.max = source["max"];
+	    }
+	}
+	export class NameSpan {
+	    name: string;
+	    firstSeen: number;
+	    lastSeen: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new NameSpan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.firstSeen = source["firstSeen"];
+	        this.lastSeen = source["lastSeen"];
+	    }
+	}
+	export class PeakCell {
+	    avg: number;
+	    max: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PeakCell(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.avg = source["avg"];
+	        this.max = source["max"];
+	    }
+	}
+	export class PeakMatrix {
+	    cells: PeakCell[][];
+	
+	    static createFrom(source: any = {}) {
+	        return new PeakMatrix(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cells = this.convertValues(source["cells"], PeakCell);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PlayerCard {
+	    uuid: string;
+	    name: string;
+	    offline: boolean;
+	    online: boolean;
+	    firstSeen: number;
+	    lastSeen: number;
+	    sessions: number;
+	    playMs: number;
+	    bytesIn: number;
+	    bytesOut: number;
+	    lastCc: string;
+	    rttMs: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlayerCard(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.uuid = source["uuid"];
+	        this.name = source["name"];
+	        this.offline = source["offline"];
+	        this.online = source["online"];
+	        this.firstSeen = source["firstSeen"];
+	        this.lastSeen = source["lastSeen"];
+	        this.sessions = source["sessions"];
+	        this.playMs = source["playMs"];
+	        this.bytesIn = source["bytesIn"];
+	        this.bytesOut = source["bytesOut"];
+	        this.lastCc = source["lastCc"];
+	        this.rttMs = source["rttMs"];
+	    }
+	}
+	export class SessionMeta {
+	    id: number;
+	    tunnelName: string;
+	    clientIp: string;
+	    playerName: string;
+	    playerUuid: string;
+	    startedMs: number;
+	    endedMs: number;
+	    bytesIn: number;
+	    bytesOut: number;
+	    cc: string;
+	    rttAvg: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionMeta(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.tunnelName = source["tunnelName"];
+	        this.clientIp = source["clientIp"];
+	        this.playerName = source["playerName"];
+	        this.playerUuid = source["playerUuid"];
+	        this.startedMs = source["startedMs"];
+	        this.endedMs = source["endedMs"];
+	        this.bytesIn = source["bytesIn"];
+	        this.bytesOut = source["bytesOut"];
+	        this.cc = source["cc"];
+	        this.rttAvg = source["rttAvg"];
+	    }
+	}
+	export class PlayerDetail {
+	    card: PlayerCard;
+	    names: NameSpan[];
+	    ips: IPSpan[];
+	    recent: SessionMeta[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PlayerDetail(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.card = this.convertValues(source["card"], PlayerCard);
+	        this.names = this.convertValues(source["names"], NameSpan);
+	        this.ips = this.convertValues(source["ips"], IPSpan);
+	        this.recent = this.convertValues(source["recent"], SessionMeta);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PlayersPage {
+	    total: number;
+	    players: PlayerCard[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PlayersPage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total = source["total"];
+	        this.players = this.convertValues(source["players"], PlayerCard);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PlayersQuery {
+	    search: string;
+	    sort: string;
+	    tunnelId: string;
+	    cc: string;
+	    offset: number;
+	    limit: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlayersQuery(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.search = source["search"];
+	        this.sort = source["sort"];
+	        this.tunnelId = source["tunnelId"];
+	        this.cc = source["cc"];
+	        this.offset = source["offset"];
+	        this.limit = source["limit"];
+	    }
+	}
+	
+	export class TrafficPoint {
+	    t: number;
+	    in: number;
+	    out: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TrafficPoint(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.t = source["t"];
+	        this.in = source["in"];
+	        this.out = source["out"];
+	    }
+	}
+	export class SessionTimeline {
+	    traffic: TrafficPoint[];
+	    rtt: LatencyPoint[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionTimeline(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.traffic = this.convertValues(source["traffic"], TrafficPoint);
+	        this.rtt = this.convertValues(source["rtt"], LatencyPoint);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SessionsPage {
+	    total: number;
+	    sessions: SessionMeta[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionsPage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total = source["total"];
+	        this.sessions = this.convertValues(source["sessions"], SessionMeta);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SessionsQuery {
+	    playerUuid: string;
+	    tunnelId: string;
+	    cc: string;
+	    sinceMs: number;
+	    offset: number;
+	    limit: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionsQuery(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.playerUuid = source["playerUuid"];
+	        this.tunnelId = source["tunnelId"];
+	        this.cc = source["cc"];
+	        this.sinceMs = source["sinceMs"];
+	        this.offset = source["offset"];
+	        this.limit = source["limit"];
+	    }
+	}
+	export class Summary {
+	    rangeMs: number;
+	    bytesIn: number;
+	    bytesOut: number;
+	    sessions: number;
+	    uniquePlayers: number;
+	    peakPlayers: number;
+	    peakPlayersAt: number;
+	    peakInBps: number;
+	    peakInAt: number;
+	    peakOutBps: number;
+	    peakOutAt: number;
+	    avgRttMs: number;
+	    avgLossPct: number;
+	    linkUptimePct: number;
+	    recInBps: number;
+	    recInAt: number;
+	    recOutBps: number;
+	    recOutAt: number;
+	    recPlayers: number;
+	    recPlayersAt: number;
+	    recConns: number;
+	    recConnsAt: number;
+	    lifetimeBytesIn: number;
+	    lifetimeBytesOut: number;
+	    lifetimeUptimeMs: number;
+	    linkSessions: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Summary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rangeMs = source["rangeMs"];
+	        this.bytesIn = source["bytesIn"];
+	        this.bytesOut = source["bytesOut"];
+	        this.sessions = source["sessions"];
+	        this.uniquePlayers = source["uniquePlayers"];
+	        this.peakPlayers = source["peakPlayers"];
+	        this.peakPlayersAt = source["peakPlayersAt"];
+	        this.peakInBps = source["peakInBps"];
+	        this.peakInAt = source["peakInAt"];
+	        this.peakOutBps = source["peakOutBps"];
+	        this.peakOutAt = source["peakOutAt"];
+	        this.avgRttMs = source["avgRttMs"];
+	        this.avgLossPct = source["avgLossPct"];
+	        this.linkUptimePct = source["linkUptimePct"];
+	        this.recInBps = source["recInBps"];
+	        this.recInAt = source["recInAt"];
+	        this.recOutBps = source["recOutBps"];
+	        this.recOutAt = source["recOutAt"];
+	        this.recPlayers = source["recPlayers"];
+	        this.recPlayersAt = source["recPlayersAt"];
+	        this.recConns = source["recConns"];
+	        this.recConnsAt = source["recConnsAt"];
+	        this.lifetimeBytesIn = source["lifetimeBytesIn"];
+	        this.lifetimeBytesOut = source["lifetimeBytesOut"];
+	        this.lifetimeUptimeMs = source["lifetimeUptimeMs"];
+	        this.linkSessions = source["linkSessions"];
+	    }
+	}
+	
+	export class UptimeSpan {
+	    t: number;
+	    up: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UptimeSpan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.t = source["t"];
+	        this.up = source["up"];
+	    }
+	}
+	export class TunnelUptime {
+	    tunnelId: string;
+	    name: string;
+	    uptimePct: number;
+	    events: UptimeSpan[];
+	
+	    static createFrom(source: any = {}) {
+	        return new TunnelUptime(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tunnelId = source["tunnelId"];
+	        this.name = source["name"];
+	        this.uptimePct = source["uptimePct"];
+	        this.events = this.convertValues(source["events"], UptimeSpan);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class UptimeReport {
+	    link: TunnelUptime;
+	    tunnels: TunnelUptime[];
+	
+	    static createFrom(source: any = {}) {
+	        return new UptimeReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.link = this.convertValues(source["link"], TunnelUptime);
+	        this.tunnels = this.convertValues(source["tunnels"], TunnelUptime);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace app {
 	
 	export class ConnUI {
@@ -7,6 +538,9 @@ export namespace app {
 	    startedAt: number;
 	    bytesIn: number;
 	    bytesOut: number;
+	    playerName?: string;
+	    playerUuid?: string;
+	    rttMs: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnUI(source);
@@ -20,6 +554,9 @@ export namespace app {
 	        this.startedAt = source["startedAt"];
 	        this.bytesIn = source["bytesIn"];
 	        this.bytesOut = source["bytesOut"];
+	        this.playerName = source["playerName"];
+	        this.playerUuid = source["playerUuid"];
+	        this.rttMs = source["rttMs"];
 	    }
 	}
 	export class LatencyResult {
@@ -124,6 +661,9 @@ export namespace app {
 	    cumulativeUptimeMs: number;
 	    linkSessions: number;
 	    historyUnsupported?: boolean;
+	    analyticsUnsupported?: boolean;
+	    connectionsTruncated?: boolean;
+	    connectionsTotal?: number;
 	    engineFatal?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -163,6 +703,9 @@ export namespace app {
 	        this.cumulativeUptimeMs = source["cumulativeUptimeMs"];
 	        this.linkSessions = source["linkSessions"];
 	        this.historyUnsupported = source["historyUnsupported"];
+	        this.analyticsUnsupported = source["analyticsUnsupported"];
+	        this.connectionsTruncated = source["connectionsTruncated"];
+	        this.connectionsTotal = source["connectionsTotal"];
 	        this.engineFatal = source["engineFatal"];
 	    }
 	
@@ -291,6 +834,24 @@ export namespace config {
 		    return a;
 		}
 	}
+	export class AnalyticsConfig {
+	    RetentionDays: number;
+	    MojangLookups: boolean;
+	    GeoIPCityPath: string;
+	    GeoIPASNPath: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AnalyticsConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.RetentionDays = source["RetentionDays"];
+	        this.MojangLookups = source["MojangLookups"];
+	        this.GeoIPCityPath = source["GeoIPCityPath"];
+	        this.GeoIPASNPath = source["GeoIPASNPath"];
+	    }
+	}
 	export class UIConfig {
 	    Theme: string;
 	    MinimizeToTray: boolean;
@@ -368,6 +929,7 @@ export namespace config {
 	    Metrics: MetricsConfig;
 	    Logging: LoggingConfig;
 	    UI: UIConfig;
+	    Analytics: AnalyticsConfig;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -381,6 +943,7 @@ export namespace config {
 	        this.Metrics = this.convertValues(source["Metrics"], MetricsConfig);
 	        this.Logging = this.convertValues(source["Logging"], LoggingConfig);
 	        this.UI = this.convertValues(source["UI"], UIConfig);
+	        this.Analytics = this.convertValues(source["Analytics"], AnalyticsConfig);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -406,6 +969,29 @@ export namespace config {
 	
 	
 	
+
+}
+
+export namespace geo {
+	
+	export class Status {
+	    cityLoaded: boolean;
+	    asnLoaded: boolean;
+	    cityError?: string;
+	    asnError?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cityLoaded = source["cityLoaded"];
+	        this.asnLoaded = source["asnLoaded"];
+	        this.cityError = source["cityError"];
+	        this.asnError = source["asnError"];
+	    }
+	}
 
 }
 
@@ -456,6 +1042,14 @@ export namespace stats {
 	    rh: number;
 	    rl: number;
 	    rc: number;
+	    po: number;
+	    ph: number;
+	    pl: number;
+	    pc: number;
+	    lo: number;
+	    lh: number;
+	    ll: number;
+	    lc: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Bucket(source);
@@ -482,6 +1076,14 @@ export namespace stats {
 	        this.rh = source["rh"];
 	        this.rl = source["rl"];
 	        this.rc = source["rc"];
+	        this.po = source["po"];
+	        this.ph = source["ph"];
+	        this.pl = source["pl"];
+	        this.pc = source["pc"];
+	        this.lo = source["lo"];
+	        this.lh = source["lh"];
+	        this.ll = source["ll"];
+	        this.lc = source["lc"];
 	    }
 	}
 	export class HistoryResult {

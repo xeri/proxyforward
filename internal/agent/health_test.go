@@ -56,6 +56,14 @@ func TestHealthCheckerTransitions(t *testing.T) {
 		defer mu.Unlock()
 		pushes = append(pushes, up)
 	})
+	// A process-lifetime observer (the engine's event recorder) sees the same
+	// transitions independently of the session sink.
+	var obs []bool
+	a.SetHealthObserver(func(id string, up bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		obs = append(obs, up)
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -80,5 +88,8 @@ func TestHealthCheckerTransitions(t *testing.T) {
 	defer mu.Unlock()
 	if len(pushes) != 2 || pushes[0] != true || pushes[1] != false {
 		t.Fatalf("pushes = %v, want [true false] (transitions only)", pushes)
+	}
+	if len(obs) != 2 || obs[0] != true || obs[1] != false {
+		t.Fatalf("observer = %v, want [true false] (transitions only)", obs)
 	}
 }

@@ -2,21 +2,23 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"log/slog"
 	"net"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	_ "modernc.org/sqlite"
+
+	"proxyforward/internal/analytics"
 	"proxyforward/internal/config"
 )
 
 // TestStatsLifecycle runs a real gateway engine briefly and verifies the
-// stats store samples and lands on disk at shutdown. The IPC pipe may be
-// owned by another process on a dev machine; that only fails Run's error
-// path, not the store lifecycle this test asserts on.
+// stats store samples and lands in the analytics database at shutdown. The
+// IPC pipe may be owned by another process on a dev machine; that only fails
+// Run's error path, not the store lifecycle this test asserts on.
 func TestStatsLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	// Config validation requires a concrete port; borrow a free one.
@@ -64,14 +66,49 @@ func TestStatsLifecycle(t *testing.T) {
 		t.Fatal("engine did not stop")
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "stats.json"))
+	// The final flush must have landed in analytics.db before Run returned:
+	// reopen the database and restore the snapshot.
+	db, err := analytics.Open(dir, analytics.Options{}, logger)
 	if err != nil {
-		t.Fatalf("stats.json not written at shutdown: %v", err)
+		t.Fatalf("analytics.db not reopenable after shutdown: %v", err)
 	}
-	var f struct {
-		V int `json:"v"`
+	defer db.Close()
+	snap, err := db.LoadStats()
+	if err != nil {
+		t.Fatalf("stats not restorable from analytics.db: %v", err)
 	}
-	if err := json.Unmarshal(data, &f); err != nil || f.V != 3 {
-		t.Fatalf("stats.json malformed (v=%d, err=%v)", f.V, err)
+	if snap == nil {
+		t.Fatal("analytics.db holds no stats snapshot after shutdown")
+	}
+	if snap.Lifetime.FirstRunMs == 0 {
+		t.Error("restored lifetime has no first-run stamp")
+	}
+	var buckets int
+	for _, ts := range snap.Tiers {
+		buckets += len(ts.Buckets)
+	}
+	if buckets == 0 {
+		t.Error("no persisted-tier buckets landed at shutdown")
+	}
+
+	// Phase 8: the analytics summary op must answer over the freshly-closed
+	// store, and the run must have bracketed itself with engine up/down events.
+	if _, err := db.Summary(0, time.Now().UnixMilli()); err != nil {
+		t.Errorf("Summary after shutdown: %v", err)
+	}
+
+	raw, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(dir, "analytics.db")))
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+	defer raw.Close()
+	var ups, downs int
+	if err := raw.QueryRow(`SELECT
+		COUNT(*) FILTER (WHERE up = 1), COUNT(*) FILTER (WHERE up = 0)
+		FROM events WHERE kind = 'engine'`).Scan(&ups, &downs); err != nil {
+		t.Fatalf("count engine events: %v", err)
+	}
+	if ups != 1 || downs != 1 {
+		t.Errorf("engine events = %d up / %d down, want 1/1", ups, downs)
 	}
 }

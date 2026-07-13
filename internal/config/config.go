@@ -35,18 +35,19 @@ const (
 
 const (
 	TunnelTCP = "tcp"
-	// TunnelUDP is reserved in the protocol for Bedrock/Geyser relay; not
-	// implemented in v1.
+	// TunnelUDP relays datagrams for Bedrock/Geyser (RakNet). Requires the
+	// tunnel-udp capability on both peers.
 	TunnelUDP = "udp"
 )
 
 type Config struct {
-	Role    Role          `toml:"role"`
-	Agent   AgentConfig   `toml:"agent"`
-	Gateway GatewayConfig `toml:"gateway"`
-	Metrics MetricsConfig `toml:"metrics"`
-	Logging LoggingConfig `toml:"logging"`
-	UI      UIConfig      `toml:"ui"`
+	Role      Role            `toml:"role"`
+	Agent     AgentConfig     `toml:"agent"`
+	Gateway   GatewayConfig   `toml:"gateway"`
+	Metrics   MetricsConfig   `toml:"metrics"`
+	Logging   LoggingConfig   `toml:"logging"`
+	UI        UIConfig        `toml:"ui"`
+	Analytics AnalyticsConfig `toml:"analytics"`
 }
 
 type AgentConfig struct {
@@ -65,7 +66,7 @@ type AgentConfig struct {
 type Tunnel struct {
 	ID         string        `toml:"id"`
 	Name       string        `toml:"name"`
-	Type       string        `toml:"type"` // "tcp" ("udp" reserved)
+	Type       string        `toml:"type"` // "tcp" | "udp"
 	LocalAddr  string        `toml:"local_addr"`
 	PublicPort int           `toml:"public_port"`
 	Enabled    bool          `toml:"enabled"`
@@ -120,6 +121,21 @@ type UIConfig struct {
 	Autostart      bool   `toml:"autostart"`
 }
 
+// AnalyticsConfig governs the local analytics store (SQLite next to the
+// config) and its external enrichment sources.
+type AnalyticsConfig struct {
+	// RetentionDays bounds how long connection/session history is kept.
+	RetentionDays int `toml:"retention_days"`
+	// MojangLookups permits resolving observed player names to Mojang UUIDs
+	// (small JSON API calls from the engine process).
+	MojangLookups bool `toml:"mojang_lookups"`
+	// GeoIPCityPath / GeoIPASNPath point at MaxMind GeoLite2 .mmdb files;
+	// empty disables geo enrichment. Whether the file exists is a runtime
+	// status, not a config error, so a moved file never blocks startup.
+	GeoIPCityPath string `toml:"geoip_city_path"`
+	GeoIPASNPath  string `toml:"geoip_asn_path"`
+}
+
 const (
 	DefaultControlPort = 8474
 	DefaultPublicPort  = 25565
@@ -150,6 +166,10 @@ func Default() *Config {
 		UI: UIConfig{
 			Theme:          "dark",
 			MinimizeToTray: true,
+		},
+		Analytics: AnalyticsConfig{
+			RetentionDays: 180,
+			MojangLookups: true,
 		},
 	}
 }
@@ -265,6 +285,17 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("metrics.prometheus_addr: %w", err))
 		}
 	}
+	if r := c.Analytics.RetentionDays; r < 1 || r > 3650 {
+		errs = append(errs, fmt.Errorf("analytics.retention_days: must be 1-3650, got %d", r))
+	}
+	for _, g := range []struct{ name, path string }{
+		{"analytics.geoip_city_path", c.Analytics.GeoIPCityPath},
+		{"analytics.geoip_asn_path", c.Analytics.GeoIPASNPath},
+	} {
+		if g.path != "" && !strings.EqualFold(filepath.Ext(g.path), ".mmdb") {
+			errs = append(errs, fmt.Errorf("%s: expected a .mmdb file, got %q", g.name, g.path))
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -287,7 +318,8 @@ func (c *Config) validateAgent() []error {
 		errs = append(errs, fmt.Errorf("agent.transport: must be %q or %q, got %q", TransportMux, TransportPerConn, a.Transport))
 	}
 	seenID := map[string]bool{}
-	seenPort := map[int]bool{}
+	// Ports are per protocol: a TCP and a UDP tunnel may share a number.
+	seenPort := map[string]bool{}
 	for i := range a.Tunnels {
 		t := &a.Tunnels[i]
 		where := fmt.Sprintf("agent.tunnels[%d] (%s)", i, t.Name)
@@ -297,21 +329,33 @@ func (c *Config) validateAgent() []error {
 			errs = append(errs, fmt.Errorf("%s: duplicate tunnel id %q", where, t.ID))
 		}
 		seenID[t.ID] = true
-		if t.Type != TunnelTCP {
-			errs = append(errs, fmt.Errorf("%s: type: only %q is supported in this version, got %q", where, TunnelTCP, t.Type))
+		if t.Type != TunnelTCP && t.Type != TunnelUDP {
+			errs = append(errs, fmt.Errorf("%s: type: must be %q or %q, got %q", where, TunnelTCP, TunnelUDP, t.Type))
 		}
 		if _, portStr, err := net.SplitHostPort(t.LocalAddr); err != nil {
 			errs = append(errs, fmt.Errorf("%s: local_addr: %w", where, err))
 		} else if p, err := strconv.Atoi(portStr); err != nil || validPort(p) != nil {
 			errs = append(errs, fmt.Errorf("%s: local_addr: invalid port %q", where, portStr))
 		}
+		portKey := t.Type + "/" + strconv.Itoa(t.PublicPort)
 		if err := validPort(t.PublicPort); err != nil {
 			errs = append(errs, fmt.Errorf("%s: public_port: %w", where, err))
-		} else if t.Enabled && seenPort[t.PublicPort] {
-			errs = append(errs, fmt.Errorf("%s: public_port %d already used by another enabled tunnel", where, t.PublicPort))
+		} else if t.Enabled && seenPort[portKey] {
+			errs = append(errs, fmt.Errorf("%s: public_port %d already used by another enabled %s tunnel", where, t.PublicPort, t.Type))
 		}
 		if t.Enabled {
-			seenPort[t.PublicPort] = true
+			seenPort[portKey] = true
+		}
+		if t.Type == TunnelUDP {
+			if t.Options.MinecraftAware {
+				errs = append(errs, fmt.Errorf("%s: options.minecraft_aware: not supported on udp tunnels (the Java status protocol is TCP)", where))
+			}
+			if t.Options.ProxyProtocolV2 {
+				errs = append(errs, fmt.Errorf("%s: options.proxy_protocol_v2: not supported on udp tunnels (PP2 is a stream preamble)", where))
+			}
+			if t.Options.OfflineMOTD != "" {
+				errs = append(errs, fmt.Errorf("%s: options.offline_motd: not supported on udp tunnels (status pings are TCP)", where))
+			}
 		}
 		if t.Options.BandwidthLimitMbps < 0 {
 			errs = append(errs, fmt.Errorf("%s: bandwidth_limit_mbps: must be >= 0", where))

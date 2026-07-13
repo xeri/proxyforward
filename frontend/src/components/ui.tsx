@@ -1,4 +1,5 @@
-import {ReactNode, useEffect, useRef, useState} from 'react'
+import {ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react'
+import {createPortal} from 'react-dom'
 import {ClipboardSetText} from '../../wailsjs/runtime/runtime'
 import {IconAlert, IconCheck, IconChevronDown, IconCopy, IconEye, IconEyeOff, IconInfo, IconClose} from './icons'
 
@@ -23,7 +24,7 @@ export function PageHeader({title, subtitle, action}: {
  * accent glow dot and a slightly larger title. Every card carries the
  * near-subliminal caustic drift layer (motion.css / glass.css). */
 export function Card({title, subtitle, action, children, className = '', pad = true, dot = false}: {
-  title?: string; subtitle?: string; action?: ReactNode; children: ReactNode; className?: string; pad?: boolean
+  title?: ReactNode; subtitle?: string; action?: ReactNode; children: ReactNode; className?: string; pad?: boolean
   dot?: boolean
 }) {
   return (
@@ -76,8 +77,98 @@ export function StatTile({label, value, sub, icon, accent, tone, size = 'md'}: {
         className={`mt-1 font-semibold tabular-nums ${size === 'lg' ? 'text-[22px] leading-tight' : 'text-lg'}`}
         style={color ? {color} : undefined}
       >{value}</div>
-      {sub && <div className="mt-0.5 truncate text-[11px] tabular-nums text-[var(--text-3)]">{sub}</div>}
+      {sub && <div className="mt-0.5 truncate text-[11px] tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
     </div>
+  )
+}
+
+/** Pill: a small toggleable filter chip (tunnel/country filters, list lenses).
+ * The one shared treatment — screens must not fork their own copies. */
+export function Pill({on, onClick, children}: {on: boolean; onClick: () => void; children: ReactNode}) {
+  return (
+    <button
+      type="button" onClick={onClick} aria-pressed={on}
+      className={`pf-press rounded-full border px-2.5 py-1 text-xs transition-all duration-150 ${
+        on
+          ? 'border-[color-mix(in_srgb,var(--accent)_45%,transparent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] font-medium text-[var(--text)]'
+          : 'border-[var(--border)] text-[var(--text-3)] hover:text-[var(--text)]'
+      }`}
+    >{children}</button>
+  )
+}
+
+/** PillGroup: an exclusive Pill row where the active state is a traveling
+ * highlight that glides between chips instead of teleporting. Pills share a
+ * fixed height so mixed content (dots, flags, plain text) stays aligned.
+ * Buttons keep transparent borders for identical geometry; the indicator
+ * carries the border + tint. */
+export function PillGroup<T extends string>({value, onChange, options}: {
+  value: T
+  onChange: (v: T) => void
+  options: {value: T; label: ReactNode}[]
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [ind, setInd] = useState<{x: number; y: number; w: number; h: number} | null>(null)
+  // Transitions arm one frame after mount so the first measurement lands
+  // without the indicator flying in from the origin.
+  const [armed, setArmed] = useState(false)
+  useEffect(() => { setArmed(true) }, [])
+
+  const optionsKey = options.map(o => o.value).join(',')
+  useLayoutEffect(() => {
+    const btn = ref.current?.querySelector<HTMLElement>(`[data-pill="${CSS.escape(value)}"]`)
+    if (btn) setInd({x: btn.offsetLeft, y: btn.offsetTop, w: btn.offsetWidth, h: btn.offsetHeight})
+  }, [value, optionsKey])
+
+  return (
+    <div ref={ref} className="relative inline-flex flex-wrap items-center gap-1.5" role="radiogroup">
+      <div
+        aria-hidden
+        className={`pointer-events-none absolute left-0 top-0 rounded-full border border-[color-mix(in_srgb,var(--accent)_45%,transparent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] ${
+          armed ? 'transition-[transform,width,height] duration-[var(--dur-slow)] [transition-timing-function:var(--ease-spring)]' : ''
+        }`}
+        style={{
+          width: ind?.w ?? 0, height: ind?.h ?? 0,
+          transform: `translate(${ind?.x ?? 0}px, ${ind?.y ?? 0}px)`,
+          opacity: ind ? 1 : 0,
+        }}
+      />
+      {options.map(o => {
+        const on = o.value === value
+        return (
+          <button
+            key={o.value} type="button" role="radio" aria-checked={on} data-pill={o.value}
+            onClick={() => onChange(o.value)}
+            className={`pf-press relative z-10 inline-flex h-[26px] items-center gap-1.5 whitespace-nowrap rounded-full border border-transparent px-2.5 text-xs transition-colors duration-150 ${
+              on ? 'font-medium text-[var(--text)]' : 'text-[var(--text-3)] hover:text-[var(--text)]'
+            }`}
+          >{o.label}</button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** RoleWord: the name of a role as an outlined glass token — cyan for the
+ * agent, violet for the gateway — so role mentions read at a glance in prose,
+ * pills, and labels. */
+export function RoleWord({role, children}: {role: 'agent' | 'gateway'; children?: ReactNode}) {
+  return (
+    <span
+      className="pf-role-chip"
+      style={{['--role-c' as string]: role === 'agent' ? 'var(--role-agent)' : 'var(--role-gateway)'}}
+    >{children ?? role}</span>
+  )
+}
+
+/** LiveDot: a small breathing dot that marks a surface as live and
+ * self-updating (charts, live tables). Breathing gates on data-motion. */
+export function LiveDot() {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[var(--text-3)]">
+      <span className="inline-flex h-2 w-2 rounded-full pf-halo" style={{background: 'var(--good)', ['--halo' as string]: 'var(--good)'}} />
+      live
+    </span>
   )
 }
 
@@ -110,16 +201,16 @@ export function Button({children, onClick, variant = 'primary', size = 'md', dis
   title?: string
 }) {
   const styles = {
-    primary: 'bg-[var(--accent)] text-[var(--accent-contrast)] shadow-[0_2px_12px_-2px_color-mix(in_srgb,var(--accent)_45%,transparent)] hover:bg-[var(--accent-hover)] hover:shadow-[0_4px_20px_-2px_color-mix(in_srgb,var(--accent)_60%,transparent)] disabled:opacity-50 disabled:shadow-none',
+    primary: 'pf-btn-hot bg-[var(--btn-accent-fill)] text-[var(--accent-contrast)] shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_2px_12px_-2px_color-mix(in_srgb,var(--accent)_45%,transparent)] hover:bg-[var(--btn-accent-fill-hover)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_4px_20px_-2px_color-mix(in_srgb,var(--accent)_60%,transparent)] disabled:opacity-50 disabled:shadow-none',
     ghost: 'border border-[color-mix(in_srgb,var(--text)_14%,transparent)] bg-transparent text-[var(--text)] hover:bg-[var(--btn-bg)] hover:border-[color-mix(in_srgb,var(--text)_24%,transparent)] disabled:opacity-50',
-    subtle: 'bg-[var(--btn-bg)] text-[var(--text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-[var(--btn-bg-hover)] disabled:opacity-50',
+    subtle: 'bg-[var(--btn-bg)] text-[var(--text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] hover:bg-[var(--btn-bg-hover)] disabled:opacity-50',
     danger: 'border border-[color-mix(in_srgb,var(--bad)_55%,var(--border))] bg-transparent text-[var(--bad)] hover:bg-[var(--bad)] hover:border-[var(--bad)] hover:text-white disabled:opacity-50',
   }[variant]
   const sz = size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-2 text-sm'
   return (
     <button
       title={title}
-      className={`pf-press inline-flex items-center justify-center gap-1.5 rounded-[var(--r-md)] font-medium transition-[background-color,border-color,box-shadow,color,opacity] duration-200 ${sz} ${styles} ${className}`}
+      className={`pf-press pf-btn relative inline-flex items-center justify-center gap-1.5 rounded-[var(--r-md)] font-medium transition-[background-color,border-color,box-shadow,color,opacity] duration-200 ${sz} ${styles} ${className}`}
       onClick={onClick} disabled={disabled}
     >{children}</button>
   )
@@ -205,25 +296,65 @@ export function Checkbox({checked, onChange, label}: {
 
 /** Select: a custom dropdown (the native <select>'s popup is unstyled and
  * OS-native — this matches the app in both themes). Keyboard: Enter/Space/↓
- * opens, Esc closes, click-outside closes. */
+ * opens, Esc closes, click-outside closes.
+ *
+ * The list renders through a portal on opaque menu glass (pf-menu): every
+ * card is a stacking context (backdrop-filter), so an in-card absolute menu
+ * paints underneath the next card no matter its z-index — and floating
+ * options need a near-solid fill to stay legible over whatever they cover.
+ * It anchors to the trigger, tracks scroll/resize, and flips upward when the
+ * viewport below is tight. */
 export function Select({value, onChange, options}: {
   value: string; onChange: (v: string) => void; options: {value: string; label: string}[]
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const [anchor, setAnchor] = useState<{top: number; bottom: number; left: number; width: number; up: boolean} | null>(null)
   const current = options.find(o => o.value === value)
+
+  const place = () => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (!r) return
+    // max-h-60 ≈ 203px + margin; flip up only when below is short AND above fits better.
+    const below = window.innerHeight - r.bottom
+    const up = below < 220 && r.top > below
+    setAnchor({top: r.top, bottom: r.bottom, left: r.left, width: r.width, up})
+  }
+
+  const toggle = () => {
+    if (open) { setOpen(false); return }
+    place()
+    setOpen(true)
+  }
+
   useEffect(() => {
     if (!open) return
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (!btnRef.current?.contains(t) && !listRef.current?.contains(t)) setOpen(false)
+    }
+    // stopPropagation so an enclosing Modal (window listener, bubbles later)
+    // doesn't close alongside the menu.
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false) } }
+    const onMove = () => place()
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey) }
+    window.addEventListener('resize', onMove)
+    document.addEventListener('scroll', onMove, true)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onMove)
+      document.removeEventListener('scroll', onMove, true)
+    }
   }, [open])
+
   return (
-    <div ref={ref} className="relative">
+    <>
       <button
-        type="button" onClick={() => setOpen(o => !o)} aria-haspopup="listbox" aria-expanded={open}
+        ref={btnRef}
+        type="button" onClick={toggle} aria-haspopup="listbox" aria-expanded={open}
         className={`flex w-full items-center justify-between gap-2 rounded-[var(--r-md)] border px-3 py-2 text-left text-sm text-[var(--text)] outline-none transition-all duration-200 hover:border-[var(--border-strong)] hover:bg-[var(--input-bg-hover)] ${
           open
             ? 'border-[var(--accent)] bg-[var(--input-bg-hover)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)]'
@@ -233,10 +364,18 @@ export function Select({value, onChange, options}: {
         <span className="min-w-0 truncate">{current ? current.label : value}</span>
         <span className={`shrink-0 text-[var(--text-3)] transition-transform duration-200 ${open ? 'rotate-180' : ''}`}><IconChevronDown size={16} /></span>
       </button>
-      {open && (
+      {open && anchor && createPortal(
         <div
+          ref={listRef}
           role="listbox"
-          className="pf-fade pf-glass absolute z-30 mt-1 max-h-60 w-full overflow-auto rounded-[var(--r-md)] p-1"
+          className="pf-fade pf-menu fixed z-[60] max-h-60 overflow-auto rounded-[var(--r-md)] p-1"
+          style={{
+            left: anchor.left,
+            width: anchor.width,
+            ...(anchor.up
+              ? {bottom: window.innerHeight - anchor.top + 4}
+              : {top: anchor.bottom + 4}),
+          }}
         >
           {options.map(o => {
             const on = o.value === value
@@ -253,33 +392,85 @@ export function Select({value, onChange, options}: {
               </button>
             )
           })}
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   )
 }
+
+// Toggle knob geometry (padding-box px): the two seats and the commit line.
+const KNOB_MIN = 2
+const KNOB_MAX = 18
+const KNOB_MID = (KNOB_MIN + KNOB_MAX) / 2
 
 export function Toggle({checked, onChange, label, hint, disabled}: {
   checked: boolean; onChange: (v: boolean) => void; label: string; hint?: ReactNode; disabled?: boolean
 }) {
+  // Drag-to-flip: the pointer is captured on press and the knob follows it
+  // between its seats, committing to whichever side it lands nearest. A
+  // sub-threshold press never becomes a drag — it falls through to onClick,
+  // which also keeps keyboard (Enter/Space) activation working.
+  const [dragX, setDragX] = useState<number | null>(null)
+  const drag = useRef({startX: 0, moved: false, suppressClick: false})
+
+  const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (disabled || e.button !== 0) return
+    drag.current = {startX: e.clientX, moved: false, suppressClick: false}
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+  const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (disabled || !e.currentTarget.hasPointerCapture(e.pointerId)) return
+    const dx = e.clientX - drag.current.startX
+    if (!drag.current.moved && Math.abs(dx) < 4) return
+    drag.current.moved = true
+    setDragX(Math.min(KNOB_MAX, Math.max(KNOB_MIN, (checked ? KNOB_MAX : KNOB_MIN) + dx)))
+  }
+  const onPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
+    e.currentTarget.releasePointerCapture(e.pointerId)
+    if (!drag.current.moved) return
+    // The click that follows a drag must not re-toggle the committed state.
+    drag.current.suppressClick = true
+    const next = (dragX ?? (checked ? KNOB_MAX : KNOB_MIN)) > KNOB_MID
+    setDragX(null)
+    if (next !== checked) onChange(next)
+  }
+  const onPointerCancel = () => { setDragX(null); drag.current.moved = false }
+  const onClick = () => {
+    if (drag.current.suppressClick) { drag.current.suppressClick = false; return }
+    if (!disabled) onChange(!checked)
+  }
+
+  // Mid-drag the surface previews the side the knob would commit to.
+  const visualOn = dragX !== null ? dragX > KNOB_MID : checked
+
   return (
     <div className={`flex items-start justify-between gap-4 py-2 ${disabled ? 'opacity-50' : ''}`}>
       <div className="min-w-0">
         <div className="text-sm font-medium text-[var(--text)]">{label}</div>
         {hint && <div className="mt-0.5 text-xs leading-relaxed text-[var(--text-3)]">{hint}</div>}
       </div>
+      {/* Milled-glass switch, concentric geometry: 6px track radius − 1px
+          border − 2px knob gap = 3px knob radius, with the same 2px gap on
+          every side of the knob in both positions. */}
       <button
         role="switch" aria-checked={checked} disabled={disabled}
-        onClick={() => !disabled && onChange(!checked)}
-        className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors duration-300 ${
-          checked
-            ? 'border-transparent bg-[var(--accent)] shadow-[0_1px_8px_-1px_color-mix(in_srgb,var(--accent)_60%,transparent)]'
+        onClick={onClick}
+        onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
+        className={`relative mt-0.5 h-5 w-9 shrink-0 touch-none rounded-[var(--r-sm)] border transition-colors duration-300 ${
+          visualOn
+            ? 'border-transparent bg-[var(--accent)] shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_1px_8px_-1px_color-mix(in_srgb,var(--accent)_60%,transparent)]'
             : 'border-[var(--border-strong)] bg-[var(--btn-bg)] shadow-[inset_0_1px_2px_var(--bevel-bot)] hover:bg-[var(--btn-bg-hover)]'
         }`}
       >
-        <span className={`absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full shadow-[0_1px_2px_rgba(0,0,0,0.35)] transition-all duration-300 [transition-timing-function:var(--ease-spring)] ${
-          checked ? 'left-[19px] bg-[var(--accent-contrast)]' : 'left-[3px] bg-[var(--text-3)]'
-        }`} />
+        <span
+          className={`absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_1px_2px_rgba(0,0,0,0.35)] transition-all duration-300 [transition-timing-function:var(--ease-spring)] ${
+            visualOn ? 'bg-[var(--accent-contrast)]' : 'bg-[var(--text-3)]'
+          } ${checked ? 'left-[18px]' : 'left-[2px]'}`}
+          style={dragX !== null ? {left: dragX, transition: 'none'} : undefined}
+        />
       </button>
     </div>
   )
@@ -377,7 +568,14 @@ export function Skeleton({className = '', style}: {className?: string; style?: R
   return <div aria-hidden className={`pf-skeleton ${className}`} style={style} />
 }
 
-/** SegmentedControl: exclusive choice with a sliding thumb. */
+/** SegmentedControl: exclusive choice with a sliding thumb. Left unsized, the
+ * grid gives every segment the width of the widest label (an auto-sized grid
+ * resolves equal 1fr tracks to the largest max-content), so long labels like
+ * "System" never squeeze — avoid fixed widths from callers.
+ *
+ * The thumb is draggable: pointer capture on press, the thumb follows the
+ * pointer between segments, release commits the nearest one. A press without
+ * movement stays a click on the segment buttons. */
 export function SegmentedControl<T extends string>({value, onChange, options, className = ''}: {
   value: T
   onChange: (v: T) => void
@@ -386,24 +584,81 @@ export function SegmentedControl<T extends string>({value, onChange, options, cl
 }) {
   const idx = Math.max(0, options.findIndex(o => o.value === value))
   const n = options.length
+  const ref = useRef<HTMLDivElement>(null)
+  const [dragPx, setDragPx] = useState<number | null>(null)
+  const drag = useRef({startX: 0, moved: false, suppress: false, thumbW: 0, origin: 0})
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || !ref.current) return
+    // Border (1px) + padding (2px) each side: content = width − 6.
+    const thumbW = (ref.current.getBoundingClientRect().width - 6) / n
+    drag.current = {startX: e.clientX, moved: false, suppress: false, thumbW, origin: idx * thumbW}
+    ref.current.setPointerCapture(e.pointerId)
+  }
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!ref.current?.hasPointerCapture(e.pointerId)) return
+    const dx = e.clientX - drag.current.startX
+    if (!drag.current.moved && Math.abs(dx) < 4) return
+    drag.current.moved = true
+    const max = (n - 1) * drag.current.thumbW
+    setDragPx(Math.min(max, Math.max(0, drag.current.origin + dx)))
+  }
+  const commit = (i: number) => {
+    const opt = options[Math.max(0, Math.min(n - 1, i))]
+    if (opt && opt.value !== value) onChange(opt.value)
+  }
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!ref.current?.hasPointerCapture(e.pointerId)) return
+    ref.current.releasePointerCapture(e.pointerId)
+    // Drag or tap, the commit happens here, from the pointer position.
+    // Pointer capture retargets the compatibility mouse events, so the
+    // synthetic click that follows may land on the container or the button
+    // depending on engine — suppress it either way, briefly (keyboard clicks
+    // arrive with no pointer sequence and must keep working).
+    drag.current.suppress = true
+    window.setTimeout(() => { drag.current.suppress = false }, 0)
+    if (drag.current.moved) {
+      const px = dragPx ?? drag.current.origin
+      setDragPx(null)
+      commit(Math.round(px / drag.current.thumbW))
+    } else {
+      const r = ref.current.getBoundingClientRect()
+      commit(Math.floor((e.clientX - r.left - 3) / drag.current.thumbW))
+    }
+  }
+  const onPointerCancel = () => { setDragPx(null); drag.current.moved = false }
+  const pick = (v: T) => {
+    if (drag.current.suppress) return
+    onChange(v)
+  }
+
   return (
     <div
-      className={`relative grid rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] p-0.5 shadow-[inset_0_1px_3px_var(--bevel-bot)] ${className}`}
+      ref={ref}
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
+      className={`relative grid touch-none rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] p-0.5 shadow-[inset_0_1px_3px_var(--bevel-bot)] ${className}`}
       style={{gridTemplateColumns: `repeat(${n}, 1fr)`}}
       role="radiogroup"
     >
       <div
         aria-hidden
         className="absolute bottom-0.5 top-0.5 rounded-[calc(var(--r-md)-2px)] border border-[var(--border-strong)] bg-[var(--panel-3)] shadow-[inset_0_1px_0_rgba(255,255,255,0.1),var(--shadow-soft)] transition-transform duration-300 [transition-timing-function:var(--ease-out)]"
-        style={{left: 2, width: `calc((100% - 4px) / ${n})`, transform: `translateX(${idx * 100}%)`}}
+        style={{
+          left: 2,
+          width: `calc((100% - 4px) / ${n})`,
+          ...(dragPx !== null
+            ? {transform: `translateX(${dragPx}px)`, transition: 'none'}
+            : {transform: `translateX(${idx * 100}%)`}),
+        }}
       />
       {options.map(o => {
         const on = o.value === value
         return (
           <button
             key={o.value} type="button" role="radio" aria-checked={on} title={o.title}
-            onClick={() => onChange(o.value)}
-            className={`relative z-10 flex items-center justify-center gap-1.5 rounded-[calc(var(--r-md)-2px)] px-2.5 py-1.5 text-xs font-medium transition-colors duration-200 ${
+            onClick={() => pick(o.value)}
+            className={`relative z-10 flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[calc(var(--r-md)-2px)] px-3 py-1.5 text-xs font-medium transition-colors duration-200 ${
               on ? 'text-[var(--text)]' : 'text-[var(--text-3)] hover:text-[var(--text-2)]'
             }`}
           >{o.label}</button>

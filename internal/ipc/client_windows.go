@@ -3,6 +3,7 @@
 package ipc
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"time"
@@ -74,4 +75,21 @@ func (c *Client) Peers() ([]stats.PeerStat, error) {
 		return nil, err
 	}
 	return resp.Peers, nil
+}
+
+// Analytics runs one generic analytics op against the daemon. An old daemon
+// that predates the analytics envelope never replies, so the call fails with
+// a read timeout — the caller latches "unsupported" and stops asking. A
+// daemon that answered but reported a failure returns *OpError, which the
+// caller must treat as transient (the protocol works) — never latch on it.
+func (c *Client) Analytics(op string, body json.RawMessage) (json.RawMessage, error) {
+	resp, err := roundTrip[AnalyticsResp](c, TypeAnalyticsReq,
+		AnalyticsReq{Op: op, Body: body}, TypeAnalyticsResp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Err != "" {
+		return nil, &OpError{Op: op, Msg: resp.Err}
+	}
+	return resp.Body, nil
 }

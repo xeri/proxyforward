@@ -30,6 +30,9 @@ export const IconLogs = (p: IconProps) => (
 export const IconActivity = (p: IconProps) => (
   <Base {...p}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></Base>
 )
+export const IconAnalytics = (p: IconProps) => (
+  <Base {...p}><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6" rx="0.5"/><rect x="13" y="8" width="3" height="10" rx="0.5"/><path d="M7 8l3.5-3L14 7l4-4.5"/></Base>
+)
 export const IconSettings = (p: IconProps) => (
   <Base {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></Base>
 )
@@ -133,6 +136,10 @@ export const IconGauge = (p: IconProps) => (
 )
 export const IconUsers = (p: IconProps) => (
   <Base {...p}><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.7a3.5 3.5 0 0 1 0 6.6M17.2 13.9A6.5 6.5 0 0 1 21.5 20"/></Base>
+)
+/** Players: a Minecraft head — the pixel face reads at rail size. */
+export const IconPlayers = (p: IconProps) => (
+  <Base {...p}><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12.5h2M14 12.5h2"/><path d="M10 16h4"/></Base>
 )
 export const IconTerminal = (p: IconProps) => (
   <Base {...p}><path d="M5 7l5 5-5 5"/><path d="M12.5 17H19"/></Base>

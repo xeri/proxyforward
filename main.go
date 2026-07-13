@@ -436,8 +436,10 @@ func runGUI() error {
 		// The window is frameless: the frontend draws its own title bar and
 		// window controls. DWM decorations stay on (default) so the frameless
 		// window keeps its drop shadow, rounded corners and Snap Layouts.
-		Frameless:        true,
-		AssetServer:      &assetserver.Options{Assets: assets},
+		Frameless: true,
+		// The avatar handler serves /pf/avatar/ for paths the bundled assets
+		// don't cover (player heads are fetched and cached at runtime).
+		AssetServer:      &assetserver.Options{Assets: assets, Handler: a.AvatarHandler()},
 		BackgroundColour: startupBackground(cfg.UI.Theme),
 		Windows: &wailswin.Options{
 			Theme: wailswin.SystemDefault,
