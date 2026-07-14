@@ -157,7 +157,7 @@ The README and the Settings/Tunnels UI **oversell**. Ground truth at 4a8b0c9:
 | Prometheus `/metrics` | `MetricsConfig` stored, no server exists. |
 | MC status polling (MOTD/players) | Only login sniffing (`mcsniff/`); the health probe is a bare TCP dial (`health.go probeOnce`). |
 | Tray / minimize-to-tray / autostart | Hidden `tray_spike.go` command only; `MinimizeToTray` / `Autostart` stored, unused. |
-| CI "enforced" (README) | `.github/workflows/ci.yml` now exists but **no run has executed yet** — verify green on first push, then delete this row. |
+| Linux / macOS binaries | CI **builds** them (`.github/workflows/ci.yml`) so the `*_other.go` stubs can't rot, but they **cannot run**: `ipc.Serve` returns `ErrUnsupported` off Windows and every engine must serve the pipe (`engine.go Run`), so the window opens and the engine dies. Unpublished artifacts, never release assets. Fixing this means a real unix-socket IPC port. |
 
 Rules: don't document these as working; don't build UI atop them; trust code over the
 README everywhere. When you implement one, delete its row **in the same commit** (the
@@ -165,13 +165,25 @@ tunnel-editor/Settings hints promising them are polish-backlog item #1).
 
 ## Enforcement — what is a gate, not advice
 
-Blocks a merge → CI (`.github/workflows/ci.yml`: gofmt, vet, full test suite incl.
-burst floor). Must-never-happen at edit time → hook (`.claude/settings.json`:
-`frontend/wailsjs` write-block, per-edit gofmt check). Doc accuracy → the
-`internal/doccheck` citation test, which asserts every file, symbol, and test name
-cited by CLAUDE.md, `docs/agent/`, `.claude/rules/`, and `.claude/skills/` exists.
-Needs judgment → this file and `docs/agent/reasoning.md`. Before adding a rule here,
-ask which of those four homes it belongs in.
+Blocks a merge → CI. `.github/workflows/ci.yml`: gofmt, vet, `go test -short` (unit +
+e2e + goleak + doccheck), `-race` (CI is the **only** place it runs — it needs cgo),
+the burst floor (own job, best-of-3 — never lower the floor to go green),
+`golangci-lint` (`.golangci.yml`), a TODO/FIXME ban, `actionlint`, and a
+stale-`frontend/wailsjs` check. `.github/workflows/security.yml`: CodeQL, govulncheck,
+gitleaks, dependency-review, npm audit (gosec/zizmor/Scorecard are advisory → Security
+tab). `.github/workflows/fuzz.yml` fuzzes the parsers nightly;
+`.github/workflows/release.yml` builds a tag into a **draft** release.
+Must-never-happen at edit time → hook (`.claude/settings.json`: `frontend/wailsjs`
+write-block, per-edit gofmt check). Doc accuracy → the `internal/doccheck` citation
+test, which asserts every file, symbol, and test name cited by CLAUDE.md,
+`docs/agent/`, `.claude/rules/`, and `.claude/skills/` exists. Needs judgment → this
+file and `docs/agent/reasoning.md`. Before adding a rule here, ask which of those four
+homes it belongs in.
+
+Two CI facts that are load-bearing and non-obvious: `.gitattributes` pins `eol=lf`
+(Windows runners check out CRLF, which makes gofmt reject **every** file), and every Go
+job must materialize `frontend/dist` first — `main.go` embeds it, and a `go:embed`
+matching zero files is a compile error.
 
 ## Maintaining this file
 
