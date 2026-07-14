@@ -202,7 +202,7 @@ func TestSaveRefusesInvalid(t *testing.T) {
 }
 
 func TestIDsAreUnique(t *testing.T) {
-	if NewID() == NewID() {
+	if a, b := NewID(), NewID(); a == b {
 		t.Error("NewID returned duplicates")
 	}
 	if len(NewToken()) != 64 {

@@ -202,10 +202,9 @@ func TestSnifferFailsOpenOnGarbage(t *testing.T) {
 		[]byte("GET / HTTP/1.1\r\n\r\n"),     // an HTTP scanner
 	} {
 		sn := NewSniffer()
-		if done := sn.Feed(in); !done {
-			// Not necessarily done on the first chunk, but must never yield a
-			// bogus login.
-		}
+		// Feed may or may not report "done" on the first chunk; either is fine.
+		// What must never happen is a bogus login outcome.
+		sn.Feed(in)
 		if out, ok := sn.Outcome(); ok && out.Login != nil {
 			t.Fatalf("garbage %x produced a login outcome: %+v", in, out.Login)
 		}
