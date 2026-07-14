@@ -384,9 +384,6 @@ type session struct {
 	// probe, when non-nil, is an in-flight on-demand latency measurement that
 	// steals matching pongs; see probe.go.
 	probe atomic.Pointer[linkquality.ProbeCollector]
-
-	loopWG sync.WaitGroup // control reader + stream acceptor
-	dataWG sync.WaitGroup // active data-stream splices
 }
 
 // Has reports whether the session negotiated a capability.

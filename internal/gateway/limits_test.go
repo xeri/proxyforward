@@ -44,7 +44,10 @@ func TestAuthLimiterSuccessesDoNotCount(t *testing.T) {
 func TestConnGateCaps(t *testing.T) {
 	g := newConnGate(3, 2)
 
-	if !g.admit("a") || !g.admit("a") {
+	// Both calls must run (no short-circuit): the point is that two conns from
+	// the same IP fit under the per-IP cap of 2.
+	first, second := g.admit("a"), g.admit("a")
+	if !first || !second {
 		t.Fatal("first two conns from a rejected")
 	}
 	if g.admit("a") {

@@ -240,19 +240,6 @@ func (r *Recorder) SampleLive(snaps []conntrack.Snapshot) {
 	}
 }
 
-// sessionID exposes the local session row id for an entry, for pipelines that
-// write session-scoped rows (e.g. per-connection RTT). Returns 0 when the
-// connection is not tracked.
-func (r *Recorder) sessionID(entryID uint64) int64 {
-	if r == nil {
-		return 0
-	}
-	if v, ok := r.live.Load(entryID); ok {
-		return v.(*liveSession).id
-	}
-	return 0
-}
-
 // splitAddr splits "ip:port" into its parts; a bare or malformed address
 // keeps the whole string as the ip with port 0.
 func splitAddr(addr string) (ip string, port int) {
