@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    # Both of these are special cases in .claude/skills/dep-bump/SKILL.md and are
+    # bumped by hand, with the playbook:
+    #   yamux - the mux config (transport/yamux.go muxConfig) must be re-verified
+    #           against the burst floor; a silent window-size change is a
+    #           throughput regression that only the perf job would catch.
+    #   wails - the CLI version is pinned in ci.yml/release.yml, so a library bump
+    #           here desyncs it, and regenerated frontend/wailsjs must be diffed.
+    ignore:
+      - dependency-name: github.com/hashicorp/yamux
+      - dependency-name: github.com/wailsapp/wails/v2
+
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

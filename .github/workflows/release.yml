@@ -1,0 +1,159 @@
+# Cut a release from a v* tag. Replaces steps 2-4 of .claude/skills/release/SKILL.md.
+#
+# The release is published as a DRAFT on purpose. The release playbook makes
+# releases an escalation trigger, and the smoke test it prescribes - launch the
+# exe, pair a loopback gateway+agent, watch bytes move - cannot be automated.
+# The draft exists so a human does that, then presses Publish.
+#
+# Only Windows binaries ship. Linux/macOS build in ci.yml but cannot run: off
+# Windows, ipc.Serve returns ErrUnsupported and the engine never starts.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  WAILS_VERSION: v2.13.0
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # create the release
+      id-token: write # sign the provenance attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: version from tag
+        id: v
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"          # v1.2.3
+          $num = $tag -replace '^v', ''            # 1.2.3
+          "tag=$tag"   >> $env:GITHUB_OUTPUT
+          "num=$num"   >> $env:GITHUB_OUTPUT
+
+      # NSIS is NOT preinstalled on windows-latest. This matters more than it
+      # looks: `wails build -nsis` exits 0 and SILENTLY SKIPS the installer when
+      # makensis is missing, so without this the release would quietly ship
+      # without one. The explicit GITHUB_PATH append + version check is the guard.
+      - name: install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+      - name: verify makensis is on PATH
+        shell: pwsh
+        run: makensis /VERSION
+
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      # wails.json has no info.productVersion, so Wails defaults it to 1.0.0 and
+      # stamps the exe's Windows file-properties (and the installer) 1.0.0.0 for
+      # every release forever. The CLI has no -DINFO_PRODUCTVERSION pass-through;
+      # patching wails.json is the only route.
+      - name: stamp productVersion into wails.json
+        shell: pwsh
+        run: |
+          $j = Get-Content wails.json -Raw | ConvertFrom-Json
+          $j.info | Add-Member -NotePropertyName productVersion -NotePropertyValue "${{ steps.v.outputs.num }}" -Force
+          $j | ConvertTo-Json -Depth 10 | Set-Content wails.json -Encoding utf8
+
+      - name: wails build (exe + NSIS installer)
+        run: >
+          wails build -platform windows/amd64 -clean -s -skipbindings -trimpath -nsis
+          -ldflags "-X proxyforward/internal/version.Version=${{ steps.v.outputs.tag }} -X proxyforward/internal/version.Commit=${{ github.sha }}"
+
+      - name: assert the installer actually exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path build/bin/proxyforward-amd64-installer.exe)) {
+            throw "NSIS installer missing - wails exits 0 when makensis is absent, so this means the toolchain broke"
+          }
+
+      # Release playbook step 3, automated: the binary must report the tag it was
+      # built from. Catches a broken -ldflags path silently shipping "0.1.0-dev".
+      - name: smoke - version stamp
+        shell: pwsh
+        run: |
+          $out = ./build/bin/proxyforward.exe --version | Out-String
+          Write-Output $out
+          if ($out -notmatch [regex]::Escape("${{ steps.v.outputs.tag }}")) {
+            throw "binary does not report ${{ steps.v.outputs.tag }} - ldflags stamping is broken"
+          }
+
+      - name: name the artifacts
+        shell: pwsh
+        run: |
+          $n = "${{ steps.v.outputs.num }}"
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item build/bin/proxyforward.exe                   "dist/proxyforward-$n-windows-amd64.exe"
+          Copy-Item build/bin/proxyforward-amd64-installer.exe   "dist/proxyforward-$n-windows-amd64-installer.exe"
+          # Checksums are the only integrity signal an unsigned download has.
+          Get-FileHash dist/*.exe -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content dist/SHA256SUMS.txt -Encoding ascii
+          Get-Content dist/SHA256SUMS.txt
+
+      - name: SBOM
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: proxyforward-${{ steps.v.outputs.num }}-sbom.spdx.json
+          output-file: dist/proxyforward-${{ steps.v.outputs.num }}-sbom.spdx.json
+
+      # There is no code signing (no certificate), so SmartScreen will warn on
+      # first download. Provenance is the honest substitute: cryptographic proof
+      # these exact bytes came from this workflow, at this commit. Verify with:
+      #   gh attestation verify proxyforward-<v>-windows-amd64.exe -R xeri/proxyforward
+      # This is free ONLY because the repo is public.
+      - name: attest build provenance
+        uses: actions/attest-build-provenance@v4.1.1
+        with:
+          subject-path: "dist/*.exe"
+
+      - name: draft release
+        uses: softprops/action-gh-release@v3.0.2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/proxyforward-${{ steps.v.outputs.num }}-windows-amd64.exe
+            dist/proxyforward-${{ steps.v.outputs.num }}-windows-amd64-installer.exe
+            dist/SHA256SUMS.txt
+            dist/proxyforward-${{ steps.v.outputs.num }}-sbom.spdx.json
+          body: |
+            ## Install
+
+            Download `proxyforward-${{ steps.v.outputs.num }}-windows-amd64-installer.exe`,
+            or grab the portable `proxyforward-${{ steps.v.outputs.num }}-windows-amd64.exe`
+            and run it anywhere. Windows 10/11 x64.
+
+            The binaries are **not code-signed**, so SmartScreen will warn on first
+            run ("unknown publisher"). Verify what you downloaded instead:
+
+            ```
+            gh attestation verify proxyforward-${{ steps.v.outputs.num }}-windows-amd64.exe -R ${{ github.repository }}
+            ```
+
+            Checksums are in `SHA256SUMS.txt`.

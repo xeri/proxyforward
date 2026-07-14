@@ -1,0 +1,195 @@
+# Security scanning. Everything here is free because the repo is PUBLIC and owned
+# by a user account (not an org) - CodeQL, Scorecard, gitleaks and dependency
+# review all change licensing terms if either of those facts changes.
+#
+# Note the recurring constraint from ci.yml: anything that TYPE-CHECKS Go code
+# (CodeQL's manual build, govulncheck's package loader) must materialise
+# frontend/dist first, or the root package fails to compile on `all:frontend/dist`.
+name: security
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Mondays 06:00 UTC - catches newly-disclosed CVEs in unchanged code.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Go must use build-mode: manual. `none` is unsupported for Go, and
+          # autobuild runs `go build ./...`, which dies on the go:embed.
+          - language: go
+            build-mode: manual
+            os: windows-latest
+          - language: javascript-typescript
+            build-mode: none
+            os: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # setup-go MUST precede codeql init: the action asserts `which go` is
+      # unchanged between init and analyze, and errors if Go appears afterwards.
+      - if: matrix.language == 'go'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - if: matrix.build-mode == 'manual'
+        name: build (frontend first - go:embed)
+        shell: bash
+        run: |
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+          go build ./...
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # govulncheck's source mode loads packages with full type info, so the
+      # embed target has to exist or every package fails to load.
+      - run: npm ci --prefix frontend && npm run build --prefix frontend
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      # Reports only vulnerabilities actually reachable from our call graph.
+      - run: govulncheck ./...
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # gitleaks scans history, not just the tip
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No GITLEAKS_LICENSE needed: free for user-account repos. If this repo
+          # ever moves into an organisation, this job starts failing without one.
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high
+
+  npm-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm audit --audit-level=high
+        working-directory: frontend
+
+  # Advisory, NOT a merge gate. gosec overlaps CodeQL heavily and false-positives
+  # on math/rand and unchecked Close() - findings land in the Security tab where
+  # they can be triaged, instead of blocking merges and training everyone to
+  # ignore CI.
+  gosec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: stub frontend/dist for go:embed
+        run: mkdir -p frontend/dist && touch frontend/dist/index.html
+      - run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+  # Static analysis of the workflows themselves: template injection, excessive
+  # permissions, unpinned actions. Advisory like gosec - it flags our version-tag
+  # `uses:` as unpinned, which is a deliberate trade (Dependabot keeps tags fresh)
+  # and shouldn't block merges. actionlint (correctness) IS blocking, in ci.yml.
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@v0.5.7
+        with:
+          advanced-security: true
+
+  # Supply-chain posture (branch protection, pinned deps, token permissions).
+  # Never runs on pull_request: the Branch-Protection check needs default-branch
+  # context and would always fail from a fork.
+  scorecard:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@v2.4.3
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard
