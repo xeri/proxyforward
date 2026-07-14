@@ -2,7 +2,10 @@
 
 package svc
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 // TestFirewallRulePresent exercises the netsh plumbing (hidden window,
 // exit-code detection) without needing elevation — querying rules is free.
@@ -19,6 +22,14 @@ func TestFirewallRulePresent(t *testing.T) {
 func TestAddRemoveFirewallRule(t *testing.T) {
 	if !IsElevated() {
 		t.Skip("not elevated")
+	}
+	// GitHub runners ARE elevated, so the guard above doesn't cover them. There
+	// the test binary lives in a temp build dir, and netsh rejects it with "The
+	// application name could not be resolved" — AddFirewallRule registers
+	// os.Executable(), which in production is an installed exe, never a
+	// throwaway. The netsh plumbing itself is covered by TestFirewallRulePresent.
+	if os.Getenv("CI") != "" {
+		t.Skip("CI: netsh will not accept a temp-dir test binary as program=")
 	}
 	before, err := FirewallRulePresent()
 	if err != nil {

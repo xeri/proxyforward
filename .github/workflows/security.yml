@@ -128,8 +128,11 @@ jobs:
   # on math/rand and unchecked Close() - findings land in the Security tab where
   # they can be triaged, instead of blocking merges and training everyone to
   # ignore CI.
+  # Windows, for the same reason as ci.yml's lint job: on linux the !windows build
+  # hides the code most worth scanning (the pipe ACL, the service/elevation paths,
+  # netsh).
   gosec:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 15
     continue-on-error: true
     permissions:
@@ -142,6 +145,7 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
       - name: stub frontend/dist for go:embed
+        shell: bash
         run: mkdir -p frontend/dist && touch frontend/dist/index.html
       - run: go install github.com/securego/gosec/v2/cmd/gosec@latest
       - run: gosec -no-fail -fmt sarif -out gosec.sarif ./...

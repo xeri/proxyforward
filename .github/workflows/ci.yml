@@ -154,8 +154,13 @@ jobs:
             throw "burst floor missed on all 3 attempts - treat as a hot-path regression, do not lower the floor"
           }
 
+  # Runs on WINDOWS, not ubuntu: build tags make linting GOOS-sensitive. On linux
+  # the linter sees the !windows build, where Windows-only symbols look dead
+  # (`unused` flags ipc.go's maxIPCEntries, which server_windows.go uses). Lint
+  # the platform that ships.
   lint:
-    runs-on: ubuntu-latest
+    needs: frontend
+    runs-on: windows-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -163,13 +168,20 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      # golangci-lint type-checks, so it needs the embed target to exist. It is
-      # never used for anything but satisfying go:embed here.
-      - name: stub frontend/dist for go:embed
-        run: mkdir -p frontend/dist && touch frontend/dist/index.html
+      # golangci-lint type-checks, so the embed target must exist.
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
+
+  workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
       # .claude/rules/go.md: "Zero TODO/FIXME markers in code - debt is recorded
       # in docs/agent/polish-backlog.md". Nothing enforced that until now.
       # Scoped to tracked files so it can't trip over node_modules or generated
