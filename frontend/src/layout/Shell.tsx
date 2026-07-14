@@ -24,40 +24,50 @@ export function Shell({sidebar, titlebar, children}: {
   const rootRef = useRef<HTMLDivElement>(null)
   const {reduced} = useMotion()
 
-  // The pointer is a lamp: one delegated, rAF-throttled listener writes local
-  // coordinates onto every card within the lamp's reach — not just the hovered
-  // one — so the rim glow spills continuously across card gaps instead of
-  // cutting off at each edge. The glow layers live inside .pf-card, so the
-  // background between cards never lights up. Dormant under reduced motion;
-  // re-arms live when the Animations preference flips (Shell never remounts).
+  // The pointer is a lamp, and Signal Glass answers it: one delegated,
+  // rAF-throttled listener writes local coordinates onto each .pf-signal
+  // surface within reach (the identity surface — at most one or two per
+  // screen) and stamps data-awake so the caustic drift runs. The light rests
+  // ~5s after the pointer stops or leaves: idle UI is still UI. Dormant under
+  // reduced motion; re-arms live when the Animations preference flips (Shell
+  // never remounts).
   useEffect(() => {
     if (reduced) return
     const root = rootRef.current
     if (!root) return
-    // Slightly past the widest glow gradient (240px) so cards dim just after
-    // the light has visually left them.
+    // Slightly past the widest glow gradient (240px) so surfaces dim just
+    // after the light has visually left them.
     const REACH = 280
+    const AWAKE_MS = 5000
     let raf = 0
+    let doze: number | undefined
     let x = 0
     let y = 0
     const lit = new Set<HTMLElement>()
     const drop = (el: HTMLElement) => {
       el.style.removeProperty('--mx')
       el.style.removeProperty('--my')
+      delete el.dataset.awake
       lit.delete(el)
+    }
+    const rest = () => {
+      for (const el of [...lit]) delete el.dataset.awake
     }
     const apply = () => {
       raf = 0
-      for (const el of root.querySelectorAll<HTMLElement>('.pf-card')) {
+      for (const el of root.querySelectorAll<HTMLElement>('.pf-signal')) {
         const r = el.getBoundingClientRect()
         if (x > r.left - REACH && x < r.right + REACH && y > r.top - REACH && y < r.bottom + REACH) {
           el.style.setProperty('--mx', `${x - r.left}px`)
           el.style.setProperty('--my', `${y - r.top}px`)
+          el.dataset.awake = '1'
           lit.add(el)
         } else if (lit.has(el)) {
           drop(el)
         }
       }
+      window.clearTimeout(doze)
+      doze = window.setTimeout(rest, AWAKE_MS)
     }
     const onMove = (e: PointerEvent) => {
       x = e.clientX
@@ -73,6 +83,7 @@ export function Shell({sidebar, titlebar, children}: {
       root.removeEventListener('pointermove', onMove)
       root.removeEventListener('pointerleave', onLeave)
       if (raf) cancelAnimationFrame(raf)
+      window.clearTimeout(doze)
       onLeave()
     }
   }, [reduced])
@@ -87,7 +98,7 @@ export function Shell({sidebar, titlebar, children}: {
       }}
     >
       {sidebar && (
-        <aside className="pf-sheet relative z-10 row-span-2 min-h-0 border-r border-[var(--border)]">
+        <aside className="pf-sheet relative z-10 row-span-2 min-h-0">
           {sidebar}
         </aside>
       )}

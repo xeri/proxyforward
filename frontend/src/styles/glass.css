@@ -1,16 +1,23 @@
 /* ---------------------------------------------------------------------------
-   Glass surfaces. TRUE backdrop-filter everywhere, tiered by blur radius so
-   depth reads physically: cards are the thinnest glass (--blur-card), the
-   sidebar chrome is heavier (--blur-chrome), the floating titlebar island
-   heavier still (--blur-island), and floats — modals, the save bar, the
-   command palette — are the thickest (--blur-float / --blur-pop).
-   `data-fx="low"` on <html> restores the old solid-card budget for weak GPUs.
+   Surface materials. See frontend/DESIGN.md — the Visual Charter.
+
+   "Glass is a reward, not a default." Two content materials:
+
+   .pf-card    — the quiet tier-2 panel: near-solid, one subtle border, one
+                 soft shadow. The default. It recedes.
+   .pf-signal  — SIGNAL GLASS, the product's own material: true backdrop
+                 blur, directional reflection streak, curved-acrylic arc,
+                 chromatic edge, and light that answers the pointer (rim +
+                 caustics wake on approach). Only on surfaces representing
+                 live network activity — one identity surface per screen.
+
+   Chrome and floats (.pf-sheet / .pf-island / .pf-glass / .pf-menu) keep
+   true backdrop-filter, tiered by blur radius (--blur-chrome → --blur-pop).
+   `data-fx="low"` on <html> strips signal/button/menu blur for weak GPUs.
 
    One light source for everything: top-left, along --light-angle. Rims are
    bright where they face it, dark where they don't; the glare layers are
-   frozen reflections that move only on events (motion.css). Each major card
-   also carries the app's signature: a faint curved-acrylic highlight arc
-   sweeping its upper third (the Aero softbox), plus a 120° reflection streak.
+   frozen reflections that move only on events (motion.css).
 --------------------------------------------------------------------------- */
 
 /* The sidebar chrome: a full-height pane of heavy smoked glass. Sheen pools
@@ -23,14 +30,15 @@
     linear-gradient(var(--light-angle), color-mix(in oklab, var(--glass) 100%, white 3%), var(--glass) 45%);
   backdrop-filter: blur(var(--blur-chrome)) saturate(170%) brightness(1.08);
   -webkit-backdrop-filter: blur(var(--blur-chrome)) saturate(170%) brightness(1.08);
-  box-shadow: inset 0 1px 0 var(--bevel-top), 8px 0 32px -16px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 1px 0 var(--bevel-top), 8px 0 32px -16px rgba(0, 0, 0, 0.3);
 }
 
-/* The pane's inner edge carries the light model: bright near the top corner,
-   decaying downward. */
+/* The pane's inner edge carries the light model: a catch of light near the
+   top corner that lets go well before mid-height, so the sidebar reads as a
+   tint shift against the canvas, not a walled-off column. */
 aside.pf-sheet {
   border-right: 1px solid transparent;
-  border-image: linear-gradient(180deg, var(--edge-hi), var(--edge-mid) 30%, var(--edge-lo)) 1;
+  border-image: linear-gradient(180deg, var(--edge-mid), var(--edge-lo) 40%, transparent) 1;
 }
 
 /* Frozen glare on the sheet; motion.css sweeps it on theme swaps. */
@@ -147,14 +155,36 @@ aside.pf-sheet {
   -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(170%) url(#pf-refract);
 }
 
-/* True glass card: the workhorse surface. A translucent tint over real
-   backdrop blur, so the atmosphere diffuses through every card; the light
-   model (specular rim, bevel pair, layered shadows), the signature arc, and
-   the reflection streak make it read as curved acrylic. --card-* hooks let
-   variants heat the surface up. */
+/* Quiet panel: the workhorse tier-2 card. Near-solid so the atmosphere only
+   whispers through; a single subtle border and one soft shadow. No blur, no
+   reflections, no rim — it recedes so the identity surface can matter.
+   position:relative is the documented exception to "material only":
+   consumers anchor headers/overlays to it. */
 .pf-card {
-  --card-rim-opacity: 0.75;
-  --card-bevel-top: var(--bevel-top);
+  position: relative;
+  background: var(--card-2-bg);
+  border: 1px solid var(--card-2-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card-2);
+  /* No contain:paint here — Select dropdowns escape card bounds. */
+}
+
+/* Material hover response; .pf-lift still owns the timing. */
+.pf-card.pf-lift:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-card-2), var(--shadow-soft);
+}
+
+/* SIGNAL GLASS — the product's own material, and a reward: reserved for the
+   one surface per screen that represents live network activity. A
+   translucent tint over real backdrop blur; the light model (specular rim,
+   bevel pair, layered shadows), the signature arc, the 120° reflection
+   streak, and a faint chromatic edge (cool light entering one side, warm
+   leaving the other) make it read as curved acrylic over live electronics. */
+.pf-signal {
+  --card-rim-opacity: 0.85;
+  --card-bevel-top: color-mix(in srgb, var(--bevel-top) 55%, white);
   position: relative;
   background:
     var(--noise-glass),
@@ -165,17 +195,19 @@ aside.pf-sheet {
   -webkit-backdrop-filter: blur(var(--blur-card)) saturate(160%) brightness(1.05);
   border-radius: var(--r-lg);
   box-shadow:
+    inset 1px 0 0 rgba(140, 190, 255, 0.04),
+    inset -1px 0 0 rgba(255, 130, 160, 0.04),
     inset 0 1px 0 var(--card-bevel-top),
     inset 0 -1px 0 var(--bevel-bot),
     var(--shadow-contact),
     var(--shadow-key),
     var(--shadow-ambient-card);
-  /* No contain:paint here — Select dropdowns escape card bounds. */
 }
 
-/* Card rim: the same specular ring as true glass at reduced strength, so the
-   chrome outranks content surfaces. Hover brightens via opacity only. */
-.pf-card::before {
+/* Signal rim: specular ring + pointer-tracked accent glow. The static ring
+   is always present (it is the material's edge); the accent layer parks
+   offscreen until the Shell lamp writes --mx/--my on approach. */
+.pf-signal::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -185,8 +217,6 @@ aside.pf-sheet {
   z-index: 1;
   opacity: var(--card-rim-opacity);
   transition: opacity 0.25s ease;
-  /* Layer 1: pointer-tracked rim glow (parked offscreen until the shell's
-     lamp listener writes --mx/--my). Layer 2: the static specular rim. */
   background:
     radial-gradient(
       220px circle at var(--mx, -999px) var(--my, -999px),
@@ -208,7 +238,7 @@ aside.pf-sheet {
 
 /* Surface bloom: the pointer shines faintly INTO the glass (dark theme only —
    screen blend whites out over ice). Offscreen at rest, like the rim glow. */
-.pf-card::after {
+.pf-signal::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -221,29 +251,26 @@ aside.pf-sheet {
   );
   mix-blend-mode: screen;
 }
-:root[data-theme="light"] .pf-card::after {
+:root[data-theme="light"] .pf-signal::after {
   display: none;
 }
 
-/* Material hover response; .pf-lift still owns the timing. */
-.pf-card.pf-lift:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    inset 0 1px 0 var(--card-bevel-top),
-    inset 0 -1px 0 var(--bevel-bot),
-    var(--shadow-contact),
-    var(--shadow-key),
-    var(--shadow-ambient);
+/* Hidden magic: Signal Glass rests when untouched. The Shell lamp stamps
+   data-awake on pointer approach and clears it ~5s after the last move, so
+   the caustic drift exists only while someone is there — the light catches
+   the glass, then stops. */
+.pf-signal .pf-caustic {
+  opacity: 0;
+  transition: opacity 0.6s ease;
 }
-.pf-card.pf-lift:hover::before {
+.pf-signal .pf-caustic::before {
+  animation-play-state: paused;
+}
+.pf-signal[data-awake] .pf-caustic {
   opacity: 1;
 }
-
-/* Hot variant: the Overview's headline numbers and verdicts sit on the
-   shiniest surfaces — brighter rim, hotter top catch-light. */
-.pf-hot {
-  --card-rim-opacity: 0.85;
-  --card-bevel-top: color-mix(in srgb, var(--bevel-top) 55%, white);
+.pf-signal[data-awake] .pf-caustic::before {
+  animation-play-state: running;
 }
 
 /* Inset well inside a card (code boxes, terminals, checklists): pressed INTO
@@ -308,15 +335,6 @@ aside.pf-sheet {
   box-shadow:
     inset 0 0 14px 1px color-mix(in srgb, var(--accent) 16%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-/* Nav hover: a soft back-lit bloom blooming up through the sheet. */
-.pf-nav-bloom:hover {
-  background: radial-gradient(
-    85% 130% at 50% 50%,
-    color-mix(in srgb, var(--accent) 9%, transparent),
-    transparent
-  );
 }
 
 /* Caustic drift: near-subliminal reflection bands crossing the card over
@@ -519,7 +537,7 @@ aside.pf-sheet {
   backdrop-filter: blur(var(--blur-pop)) saturate(120%) brightness(1.04);
   -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(120%) brightness(1.04);
 }
-:root[data-theme="light"] .pf-card {
+:root[data-theme="light"] .pf-signal {
   backdrop-filter: blur(var(--blur-card)) saturate(120%) brightness(1.02);
   -webkit-backdrop-filter: blur(var(--blur-card)) saturate(120%) brightness(1.02);
 }
@@ -568,11 +586,11 @@ aside.pf-sheet {
 
 /* ---------------------------------------------------------------------------
    Low-fx (Settings → Appearance → "Reduce glass effects", or &fx=low in dev):
-   cards fall back to the old solid-glass look — zero blur, light model only —
+   Signal Glass falls back to a solid look — zero blur, light model only —
    and the moving/filtered garnishes switch off. Chrome keeps its blur (the
-   old four-surface budget).
+   old four-surface budget). Quiet .pf-card panels are already blur-free.
 --------------------------------------------------------------------------- */
-:root[data-fx="low"] .pf-card {
+:root[data-fx="low"] .pf-signal {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   background: linear-gradient(

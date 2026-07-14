@@ -6,7 +6,7 @@ import {Column, DataTable} from '../components/DataTable'
 import {GeoRank} from '../components/GeoRank'
 import {IconChevronRight, IconClose, IconPlayers, IconSearch} from '../components/icons'
 import {
-  Badge, Button, Card, CopyIcon, EmptyState, LiveDot, MonoChip, PageHeader, Pill, PillGroup, SegmentedControl, Skeleton,
+  Badge, Button, Card, CopyIcon, EmptyState, LiveDot, MonoChip, Overline, PageHeader, Pill, PillGroup, SegmentedControl, Skeleton,
 } from '../components/ui'
 import {useDebounced} from '../hooks'
 import {
@@ -226,7 +226,7 @@ function LatencyByCountry({cc, onSelect}: {cc: string; onSelect: (cc: string) =>
   }, [rows])
   if (!rows || rows.length === 0 || (geoStatus && !geoStatus.cityLoaded)) return null
   return (
-    <Card title="Latency by country" subtitle="Average ping over the last 30 days — click to filter the wall">
+    <Card label="Latency by country" subtitle="Average ping over the last 30 days — click to filter the wall">
       <GeoRank rows={sorted} metric="latency" compact selectedCc={cc || null} onSelect={onSelect} />
     </Card>
   )
@@ -234,7 +234,7 @@ function LatencyByCountry({cc, onSelect}: {cc: string; onSelect: (cc: string) =>
 
 function TileGrid({children}: {children: React.ReactNode}) {
   return (
-    <div className="pf-stagger-grid grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-3">
+    <div className="pf-stagger-grid grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3">
       {children}
     </div>
   )
@@ -247,14 +247,14 @@ function PlayerTile({p, live, showData, onClick}: {p: PlayerCard; live: boolean;
     <button
       type="button"
       onClick={onClick}
-      className="pf-card pf-lift pf-hot pf-press group flex flex-col items-center gap-2 p-3.5 text-center"
+      className="pf-card pf-lift pf-press group flex flex-col items-center gap-2 p-3.5 text-center"
     >
       <span className="relative">
         <AvatarImg
           id={p.uuid}
-          size={96}
-          px={64}
-          className="h-16 w-16 rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)]"
+          size={128}
+          px={84}
+          className="h-[84px] w-[84px] rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)]"
         />
         {live && (
           <span
@@ -282,7 +282,7 @@ function PlayerTile({p, live, showData, onClick}: {p: PlayerCard; live: boolean;
 function TileSkeleton() {
   return (
     <div className="pf-card flex flex-col items-center gap-2 p-3.5">
-      <Skeleton className="h-16 w-16 rounded-[var(--r-md)]" />
+      <Skeleton className="h-[84px] w-[84px] rounded-[var(--r-md)]" />
       <Skeleton className="h-3.5 w-20 rounded" />
       <Skeleton className="h-2.5 w-14 rounded" />
     </div>
@@ -400,8 +400,8 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
           />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-mono text-xl font-bold tracking-tight text-[var(--text)]">
-                {card ? card.name : <Skeleton className="h-6 w-36 rounded" />}
+              <h2 className="font-mono text-[length:var(--fs-metric)] font-bold leading-tight tracking-tight text-[var(--text)]">
+                {card ? card.name : <Skeleton className="h-7 w-44 rounded" />}
               </h2>
               {live && <Badge tone="good">online</Badge>}
               {card?.offline && <Badge tone="warn">cracked / offline-mode</Badge>}
@@ -432,7 +432,7 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
 
       {/* history — one range picker drives both charts below */}
       <div className="flex items-center justify-between gap-3 px-1">
-        <h3 className="text-sm font-semibold tracking-tight text-[var(--text)]">History</h3>
+        <h3 className="text-[length:var(--fs-title)] font-semibold tracking-tight text-[var(--text)]">History</h3>
         <SegmentedControl<HistRange>
           value={range}
           onChange={setRange}
@@ -443,7 +443,7 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
         />
       </div>
 
-      <Card title="Traffic" subtitle="Bytes moved per interval while this player was connected">
+      <Card label="Traffic" subtitle="Bytes moved per interval while this player was connected">
         <LineChart
           series={traffic}
           height={200}
@@ -454,7 +454,7 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
         />
       </Card>
 
-      <Card title="Latency" subtitle="Round-trip time measured at the gateway while this player was connected">
+      <Card label="Latency" subtitle="Round-trip time measured at the gateway while this player was connected">
         <LineChart
           series={ping}
           height={160}
@@ -467,7 +467,7 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
 
       <div className="grid grid-cols-1 gap-4 @min-[88rem]:grid-cols-2">
         {/* sessions */}
-        <Card title="Sessions" subtitle="Most recent connections" pad={false}
+        <Card label="Sessions" subtitle="Most recent connections" pad={false}
           action={<div className="pr-4"><Badge tone="neutral">{det?.recent?.length ?? 0}</Badge></div>}>
           <DataTable
             columns={sessionCols}
@@ -481,7 +481,7 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
         <div className="space-y-4">
           {/* username history — locally observed only (Mojang removed the
               public name-history API in 2022). */}
-          <Card title="Names seen on this proxy" subtitle="Local observations — not Mojang's full history" pad={false}>
+          <Card label="Names seen on this proxy" subtitle="Local observations — not Mojang's full history" pad={false}>
             {det && det.names?.length ? (
               <ul className="divide-y divide-[var(--border)]">
                 {det.names.map(n => (
@@ -499,7 +499,7 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
           </Card>
 
           {/* IPs */}
-          <Card title="Addresses" subtitle="Where this player connects from" pad={false}>
+          <Card label="Addresses" subtitle="Where this player connects from" pad={false}>
             {det && det.ips?.length ? (
               <ul className="divide-y divide-[var(--border)]">
                 {det.ips.map(ip => (
@@ -528,8 +528,8 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
 function DossierStat({label, value, sub}: {label: string; value: string; sub?: string}) {
   return (
     <div className="min-w-0">
-      <div className="text-[11px] text-[var(--text-3)]">{label}</div>
-      <div className="mt-0.5 truncate text-base font-semibold tabular-nums" title={value}>{value}</div>
+      <Overline>{label}</Overline>
+      <div className="mt-0.5 truncate text-[length:var(--fs-metric)] font-semibold leading-tight tabular-nums" title={value}>{value}</div>
       {sub && <div className="truncate text-[11px] tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
     </div>
   )

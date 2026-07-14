@@ -88,9 +88,9 @@ func skipSignatureData(rd *bodyReader) {
 	if !rd.boolean() {
 		return
 	}
-	rd.skip(8)                     // expiry timestamp (Long)
-	rd.skipByteArray(maxSigField)  // public key
-	rd.skipByteArray(maxSigField)  // signature
+	rd.skip(8)                    // expiry timestamp (Long)
+	rd.skipByteArray(maxSigField) // public key
+	rd.skipByteArray(maxSigField) // signature
 }
 
 // maxSigField caps the signed-chat public key / signature byte arrays. Real

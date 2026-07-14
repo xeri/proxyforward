@@ -184,8 +184,8 @@ export function LineChart({series, height = 180, scale = 'linear', formatY, empt
           ))}
         </defs>
 
-        {/* fine grid */}
-        <g stroke="var(--border)" strokeWidth="1" opacity="0.55">
+        {/* fine grid — recessive; the data is the artwork */}
+        <g stroke="var(--border)" strokeWidth="1" opacity="0.35">
           {view.sc.ticks.map((v, i) => (
             <line key={`h${i}`} x1={PAD.l} x2={w - PAD.r} y1={view.y(v)} y2={view.y(v)} />
           ))}

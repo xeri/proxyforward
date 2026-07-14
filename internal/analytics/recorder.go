@@ -37,16 +37,16 @@ type liveSession struct {
 	// goroutine) and SessionClosed (the splice goroutine) both flush them.
 	// bucket* accumulate the current minute; all* is the session-lifetime
 	// running aggregate written to sessions.rtt_*.
-	rttMu             sync.Mutex
-	bucketMinute      int64 // minute-truncated ms of the open bucket; 0 = none
-	bucketSum         float64
-	bucketMin         float64
-	bucketMax         float64
-	bucketN           int
-	allSum            float64
-	allMin            float64
-	allMax            float64
-	allN              int
+	rttMu        sync.Mutex
+	bucketMinute int64 // minute-truncated ms of the open bucket; 0 = none
+	bucketSum    float64
+	bucketMin    float64
+	bucketMax    float64
+	bucketN      int
+	allSum       float64
+	allMin       float64
+	allMax       float64
+	allN         int
 }
 
 // NewRecorder seeds the session-id counter from the database's high-water

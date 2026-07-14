@@ -87,13 +87,13 @@ func TestParseLoginStartWithSignatureData(t *testing.T) {
 	// 1.19.1 client sending chat-signing data before the (optional) UUID.
 	uuid := sampleUUID()
 	body := AppendString(nil, "SignedPlayer")
-	body = append(body, 1)                              // has signature data
-	body = binary.BigEndian.AppendUint64(body, 1<<40)   // expiry
-	body = AppendVarInt(body, 4)                         // pubkey len
-	body = append(body, 0xDE, 0xAD, 0xBE, 0xEF)          // pubkey
-	body = AppendVarInt(body, 3)                         // sig len
-	body = append(body, 0x01, 0x02, 0x03)                // signature
-	body = append(body, 1)                               // has UUID
+	body = append(body, 1)                            // has signature data
+	body = binary.BigEndian.AppendUint64(body, 1<<40) // expiry
+	body = AppendVarInt(body, 4)                      // pubkey len
+	body = append(body, 0xDE, 0xAD, 0xBE, 0xEF)       // pubkey
+	body = AppendVarInt(body, 3)                      // sig len
+	body = append(body, 0x01, 0x02, 0x03)             // signature
+	body = append(body, 1)                            // has UUID
 	body = append(body, uuid[:]...)
 
 	ls, err := ParseLoginStart(760, body)
@@ -199,7 +199,7 @@ func TestSnifferFailsOpenOnGarbage(t *testing.T) {
 	for _, in := range [][]byte{
 		{0xFE, 0x01},                         // legacy 1.6 ping
 		{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, // invalid VarInt length
-		[]byte("GET / HTTP/1.1\r\n\r\n"),      // an HTTP scanner
+		[]byte("GET / HTTP/1.1\r\n\r\n"),     // an HTTP scanner
 	} {
 		sn := NewSniffer()
 		if done := sn.Feed(in); !done {

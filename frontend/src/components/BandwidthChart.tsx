@@ -20,7 +20,8 @@ const H = 260
 // Each enabled outboard axis (connections, then RTT) claims one column to the
 // right of the upload axis. Both the viewBox width and the right pad grow by
 // the same amount so the plot area — and download/upload — stay the same size.
-const RIGHT_COL = 46
+// Wide enough for the spelled-out axis names ("conns" / "RTT ms").
+const RIGHT_COL = 54
 
 // ---------------------------------------------------------------------------
 // BandwidthPanel: range selector + mode toggle + legend/series toggles + stats
@@ -33,7 +34,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
   historyUnsupported?: boolean
   /** Compact teaser: live-rate headline + a 1h sparkline, no controls, optional jump-off. */
   compact?: boolean
-  /** Hero: the Traffic centerpiece — a taller plot, same controls. */
+  /** Hero: Traffic's identity surface — bare, no card. The graph is the artwork. */
   hero?: boolean
   onExpand?: () => void
 }) {
@@ -61,24 +62,8 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
     </div>
   ) : undefined
 
-  return (
-    // The panel names itself a shared element: navigating Overview ⇄ Traffic
-    // morphs the teaser into the hero (each screen mounts exactly one).
-    <div style={{viewTransitionName: 'pf-bw'} as React.CSSProperties}>
-    <Card
-      title="Bandwidth"
-      subtitle={compact ? 'Last hour' : subtitleFor(range, data)}
-      action={compact ? (
-        <div className="flex items-center gap-3">
-          {last && <LiveDot />}
-          {onExpand && (
-            <Button variant="ghost" size="sm" onClick={onExpand}>
-              Open Traffic <IconArrowRight size={13} />
-            </Button>
-          )}
-        </div>
-      ) : liveReadout}
-    >
+  const body = (
+    <>
       {compact && (
         <>
           <div className="mb-3 grid grid-cols-2 gap-3">
@@ -146,13 +131,51 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
           bucketMs={data?.bucketMs ?? 1000}
           mode={mode}
           vis={vis}
-          height={hero ? 320 : H}
+          height={hero ? 360 : H}
           emptyHint={historyUnsupported
             ? 'History is unavailable — the background service is an older version.'
             : 'Collecting data — history builds while the app runs.'}
         />
       )}
-    </Card>
+    </>
+  )
+
+  return (
+    // The panel names itself a shared element: navigating Overview ⇄ Traffic
+    // morphs the teaser into the hero (each screen mounts exactly one). The
+    // view-transition group animates the box, so the teaser's quiet card can
+    // morph into the bare hero.
+    <div style={{viewTransitionName: 'pf-bw'} as React.CSSProperties}>
+      {hero ? (
+        <section>
+          <div className="mb-4 flex items-end justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-[length:var(--fs-title)] font-semibold tracking-tight text-[var(--text)]">Bandwidth</h2>
+              <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitleFor(range, data)}</p>
+            </div>
+            {liveReadout}
+          </div>
+          {body}
+        </section>
+      ) : (
+        <Card
+          title={compact ? undefined : 'Bandwidth'}
+          label={compact ? 'Bandwidth' : undefined}
+          subtitle={compact ? 'Last hour' : subtitleFor(range, data)}
+          action={compact ? (
+            <div className="flex items-center gap-3">
+              {last && <LiveDot />}
+              {onExpand && (
+                <Button variant="ghost" size="sm" onClick={onExpand}>
+                  Open Traffic <IconArrowRight size={13} />
+                </Button>
+              )}
+            </div>
+          ) : liveReadout}
+        >
+          {body}
+        </Card>
+      )}
     </div>
   )
 }
@@ -168,7 +191,7 @@ function RateHeadline({color, glyph, label, value}: {
       <div className="text-[11px] text-[var(--text-3)]">
         <span style={{color}}>{glyph}</span> {label}
       </div>
-      <div className="mt-0.5 font-mono text-[20px] font-semibold leading-tight tabular-nums" style={{color}}>
+      <div className="mt-0.5 font-mono text-[length:var(--fs-metric)] font-semibold leading-tight tabular-nums" style={{color}}>
         {value !== null ? <NumberTicker value={value} format={fmtRate} /> : <span className="text-[var(--text-3)]">—</span>}
       </div>
     </div>
@@ -344,7 +367,7 @@ function useTweenedPlots(target: Plot[]): Plot[] {
 // the old teaser feel cramped). Series use independent scales, mirroring the
 // hero's left/right axes, so the small upload series keeps its shape.
 // ---------------------------------------------------------------------------
-const SPARK_H = 128
+const SPARK_H = 160
 const SPARK_PAD = {t: 14, r: 2, b: 4, l: 2}
 
 function SparkChart({buckets, bucketMs, emptyHint}: {
@@ -623,8 +646,9 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
         }}
         onMouseLeave={() => setHoverX(null)}
       >
-        {/* fine grid: horizontal at value ticks, vertical at time ticks */}
-        <g stroke="var(--border)" strokeWidth="1" opacity="0.55">
+        {/* fine grid: horizontal at value ticks, vertical at time ticks —
+            recessive; the data is the artwork */}
+        <g stroke="var(--border)" strokeWidth="1" opacity="0.35">
           {left.ticks.map((v, i) => (
             <line key={`h${i}`} x1={PAD.l} x2={plotRight} y1={yL(v)} y2={yL(v)} />
           ))}
@@ -655,7 +679,7 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
           {/* time labels — opacity ramps to zero toward the plot edges, so a
               tick drifting left (live data slides the axis) fades away instead
               of popping, new ticks fade in from the right, and no label ever
-              reaches the corner direction glyphs (↓ / ↑ / # / ms). */}
+              reaches the corner axis markers (↓ / ↑ / conns / RTT ms). */}
           {timeTicks.map((t, i) => {
             const fade = Math.min(1, (t.x - (PAD.l + 16)) / 26, (plotRight - 16 - t.x) / 26)
             if (fade <= 0.02) return null
@@ -666,12 +690,14 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
             )
           })}
         </g>
-        {/* axis direction / unit markers, in the time-label row's empty corners */}
+        {/* axis names, in the time-label row's empty corners — spelled out and
+            wearing their exact series color, so the outboard tick columns
+            never read as mystery numbers */}
         <g fontSize="9" fontFamily={MONO}>
           {showDn && <text x={PAD.l - 6} y={height - 8} textAnchor="end" fill="var(--dl)">↓</text>}
           {showUp && <text x={plotRight + 6} y={height - 8} textAnchor="start" fill="var(--ul)">↑</text>}
-          {view.connScale && <text x={axisX(connIdx)} y={height - 8} textAnchor="start" fill="var(--conn)">#</text>}
-          {view.rttScale && <text x={axisX(rttIdx)} y={height - 8} textAnchor="start" fill="var(--rtt)">ms</text>}
+          {view.connScale && <text x={axisX(connIdx)} y={height - 8} textAnchor="start" fill="var(--conn)">conns</text>}
+          {view.rttScale && <text x={axisX(rttIdx)} y={height - 8} textAnchor="start" fill="var(--rtt)">RTT ms</text>}
         </g>
 
         {mode === 'line' && (
@@ -749,11 +775,11 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
 
         {/* Connections step-line overlay (gauge: constant within a bucket). */}
         {showConn && view.yConn && stepSegments(buckets, x, bucketMs, view.yConn, b => b.cc).map((d, i) => (
-          <path key={`cs${i}`} d={d} fill="none" stroke="var(--conn)" strokeWidth="1.25" opacity="0.7" strokeLinejoin="round" />
+          <path key={`cs${i}`} d={d} fill="none" stroke="var(--conn)" strokeWidth="1.25" opacity="0.9" strokeLinejoin="round" />
         ))}
         {/* RTT overlay: thin line, broken at unknown gaps. */}
         {showRtt && view.yRtt && gappedSegments(plots, cx, view.yRtt, p => p.rtt).map((d, i) => (
-          <path key={`rl${i}`} d={d} fill="none" stroke="var(--rtt)" strokeWidth="1.25" opacity="0.75" strokeLinejoin="round" />
+          <path key={`rl${i}`} d={d} fill="none" stroke="var(--rtt)" strokeWidth="1.25" opacity="0.9" strokeLinejoin="round" />
         ))}
 
         {mode === 'bars' && buckets.map((b, i) => {

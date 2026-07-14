@@ -74,7 +74,6 @@ export function Activity({attached}: {attached: boolean}) {
       {exportMsg && <div className="pf-fade mb-3 select-text text-xs text-[var(--text-3)]">{exportMsg}</div>}
 
       <div className="pf-card flex min-h-0 flex-1 flex-col overflow-hidden">
-        <span aria-hidden className="pf-caustic" />
         {/* Console toolbar: every filter and control on one band. */}
         <div className="pf-toolbar relative flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3 py-2">
           <div className="w-36"><Select value={level} onChange={setLevel} options={[

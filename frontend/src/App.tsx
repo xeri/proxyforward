@@ -138,7 +138,7 @@ export default function App() {
   return (
     <Shell
       sidebar={<Sidebar status={s} nav={nav} onNav={go} />}
-      titlebar={<TitleBar status={s} onPalette={() => setPalette(true)} />}
+      titlebar={<TitleBar status={s} nav={nav} onPalette={() => setPalette(true)} />}
     >
       {/* The wide adaptive canvas: screens lay out against this container's
           real width (@container queries), not the viewport, so the sidebar

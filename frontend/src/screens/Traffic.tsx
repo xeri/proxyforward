@@ -1,7 +1,7 @@
 import {useEffect, useState} from 'react'
 import {BandwidthPanel} from '../components/BandwidthChart'
 import {Column, DataTable} from '../components/DataTable'
-import {Badge, Card, CopyIcon, MonoChip, PageHeader} from '../components/ui'
+import {Badge, Card, CopyIcon, MonoChip, Overline, PageHeader, StatTile} from '../components/ui'
 import {IconConnections, IconLink, IconUsers} from '../components/icons'
 import {usePeers} from '../history'
 import {NavId} from '../nav'
@@ -145,15 +145,18 @@ export function Traffic({status, onNavigate}: {status: UIStatus; onNavigate: (id
   ]
 
   return (
-    <div className="pf-stagger space-y-4">
-      <PageHeader title="Traffic" subtitle="Every byte, session, and client through the tunnel." />
+    <div className="pf-stagger space-y-12">
+      <div>
+        <PageHeader title="Traffic" subtitle="Every byte, session, and client through the tunnel." />
+        <LinkStrip status={status} />
+      </div>
 
-      <LinkStrip status={status} />
-
+      {/* The identity surface: the graph itself, bare on the page with quiet
+          space around it. No card, no glass — the neon strokes are the luxury. */}
       <BandwidthPanel hero historyUnsupported={status.historyUnsupported} />
 
       <div className="grid grid-cols-1 gap-4 @min-[88rem]:grid-cols-2">
-        <Card title="Live sessions" pad={false}
+        <Card label="Live sessions" pad={false}
           action={<div className="pr-4"><Badge tone={conns.length ? 'good' : 'neutral'}>{status.connectionsTotal || conns.length} live</Badge></div>}>
           <DataTable
             columns={sessionCols} rows={conns} rowKey={c => c.id}
@@ -170,7 +173,7 @@ export function Traffic({status, onNavigate}: {status: UIStatus; onNavigate: (id
           )}
         </Card>
 
-        <Card title="Every client" subtitle="Lifetime totals for every IP that has ever connected" pad={false}
+        <Card label="Every client" subtitle="Lifetime totals for every IP that has ever connected" pad={false}
           action={<div className="pr-4"><Badge tone="neutral">{clients.length}</Badge></div>}>
           <DataTable
             columns={clientCols} rows={clients} rowKey={cl => cl.ip}
@@ -186,8 +189,9 @@ export function Traffic({status, onNavigate}: {status: UIStatus; onNavigate: (id
   )
 }
 
-/** LinkStrip: the tunnel link compressed to one slim band — verdict on the
- * left, the link's numbers on the right. */
+/** LinkStrip: the tunnel link as one bare band — tier-3, no card. The
+ * state-lit chip is an indicator light; the numbers are plain type on
+ * whitespace. */
 function LinkStrip({status}: {status: UIStatus}) {
   const isAgent = status.role === 'agent'
   const up = isAgent ? status.linkUp : status.agentConnected
@@ -198,70 +202,58 @@ function LinkStrip({status}: {status: UIStatus}) {
     : (up ? 'Agent connected' : 'Waiting for agent')
 
   return (
-    <Card pad={false}>
-      <div className="flex flex-col gap-4 p-4 @4xl:flex-row @4xl:items-center @4xl:justify-between">
-        <div className="flex min-w-0 items-center gap-3.5">
-          <div
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--r-md)] border transition-all duration-500"
-            style={{
-              color: c,
-              borderColor: `color-mix(in srgb, ${c} 40%, var(--border))`,
-              background: `color-mix(in srgb, ${c} 9%, transparent)`,
-              boxShadow: `0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)`,
-            }}
-          >
-            <IconLink size={19} />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">{title}</div>
-            <div className="mt-0.5 flex items-center gap-2 text-base font-semibold leading-tight">
-              <span className={`inline-flex h-2 w-2 rounded-full ${up ? 'pf-halo' : ''}`} style={{background: c, ['--halo' as string]: c}} />
-              <span className="truncate">{headline}</span>
-              {status.peerAddr && (
-                <span className="ml-1 hidden min-w-0 items-center gap-1.5 text-[12.5px] font-normal text-[var(--text-3)] @2xl:inline-flex">
-                  <span className="min-w-0 select-text truncate font-mono" title={status.peerAddr}>{status.peerAddr}</span>
-                  <CopyIcon text={status.peerAddr} title="Copy peer address" />
-                </span>
-              )}
-            </div>
-          </div>
+    <div className="flex flex-col gap-5 @4xl:flex-row @4xl:items-center @4xl:justify-between">
+      <div className="flex min-w-0 items-center gap-3.5">
+        <div
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--r-md)] border transition-all duration-500"
+          style={{
+            color: c,
+            borderColor: `color-mix(in srgb, ${c} 40%, var(--border))`,
+            background: `color-mix(in srgb, ${c} 9%, transparent)`,
+            boxShadow: `0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)`,
+          }}
+        >
+          <IconLink size={19} />
         </div>
-
-        <div className="grid min-w-0 shrink-0 grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4">
-          <MiniStat label="Link uptime" value={status.linkUpSinceMs ? fmtElapsed(Date.now() - status.linkUpSinceMs) : '—'} />
-          {isAgent
-            ? <MiniStat label="Round trip" value={up ? `${status.rttMillis} ms` : '—'} />
-            : <MiniStat label="Sessions" value={String(status.linkSessions || 0)} />}
-          {/* Link counters are read/write on the conn. "Download" is the
-              server→player direction: the agent WRITES it to the gateway
-              (out), the gateway READS it from the agent (in). */}
-          <MiniStat
-            label="Session traffic"
-            value={fmtBytes(status.linkBytesIn + status.linkBytesOut)}
-            sub={`↓ ${fmtBytes(isAgent ? status.linkBytesOut : status.linkBytesIn)} · ↑ ${fmtBytes(isAgent ? status.linkBytesIn : status.linkBytesOut)}`}
-          />
-          {isAgent
-            ? <MiniStat label="Sessions" value={String(status.linkSessions || 0)} sub={allTimeSub(status)} />
-            : <MiniStat label="All-time link" value={allTimeSub(status) ?? '—'} />}
+        <div className="min-w-0">
+          <Overline>{title}</Overline>
+          <div className="mt-0.5 flex items-center gap-2 text-[length:var(--fs-title)] font-semibold leading-tight">
+            <span className={`inline-flex h-2 w-2 rounded-full ${up ? 'pf-halo' : ''}`} style={{background: c, ['--halo' as string]: c}} />
+            <span className="truncate">{headline}</span>
+            {status.peerAddr && (
+              <span className="ml-1 hidden min-w-0 items-center gap-1.5 text-[12.5px] font-normal text-[var(--text-3)] @2xl:inline-flex">
+                <span className="min-w-0 select-text truncate font-mono" title={status.peerAddr}>{status.peerAddr}</span>
+                <CopyIcon text={status.peerAddr} title="Copy peer address" />
+              </span>
+            )}
+          </div>
         </div>
       </div>
-    </Card>
+
+      <div className="grid min-w-0 shrink-0 grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+        <StatTile label="Link uptime" value={status.linkUpSinceMs ? fmtElapsed(Date.now() - status.linkUpSinceMs) : '—'} />
+        {isAgent
+          ? <StatTile label="Round trip" value={up ? `${status.rttMillis} ms` : '—'} />
+          : <StatTile label="Sessions" value={String(status.linkSessions || 0)} />}
+        {/* Link counters are read/write on the conn. "Download" is the
+            server→player direction: the agent WRITES it to the gateway
+            (out), the gateway READS it from the agent (in). */}
+        <StatTile
+          label="Session traffic"
+          value={fmtBytes(status.linkBytesIn + status.linkBytesOut)}
+          sub={`↓ ${fmtBytes(isAgent ? status.linkBytesOut : status.linkBytesIn)} · ↑ ${fmtBytes(isAgent ? status.linkBytesIn : status.linkBytesOut)}`}
+        />
+        {isAgent
+          ? <StatTile label="Sessions" value={String(status.linkSessions || 0)} sub={allTimeSub(status)} />
+          : <StatTile label="All-time link" value={allTimeSub(status) ?? '—'} />}
+      </div>
+    </div>
   )
 }
 
 function allTimeSub(status: UIStatus): string | undefined {
   const total = status.allTimeBytesIn + status.allTimeBytesOut
   return total > 0 ? `all-time ${fmtBytes(total)}` : undefined
-}
-
-function MiniStat({label, value, sub}: {label: string; value: string; sub?: string}) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[11px] text-[var(--text-3)]">{label}</div>
-      <div className="mt-0.5 truncate text-base font-semibold tabular-nums" title={value}>{value}</div>
-      {sub && <div className="truncate text-[11px] tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
-    </div>
-  )
 }
 
 // ---- client merge ----------------------------------------------------------
@@ -340,7 +332,7 @@ function isPrivateIP(ip: string): boolean {
 function LanTag({ip, selfIP}: {ip: string; selfIP: string}) {
   if (!(isPrivateIP(ip) || (selfIP && ip === selfIP))) return null
   return (
-    <span className="rounded-[var(--r-sm)] border border-[color-mix(in_srgb,var(--accent)_35%,transparent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+    <span className="rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--input-bg)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-2)]">
       LAN
     </span>
   )

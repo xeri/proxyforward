@@ -320,7 +320,7 @@ function RoleCard({role, title, sub, onClick, onHover}: {
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
       style={{['--hue' as string]: `var(--role-${role})`}}
-      className="group pf-card p-5 text-left transition-all duration-300 [transition-timing-function:var(--ease-out)] hover:-translate-y-1 hover:shadow-[inset_0_1px_0_var(--bevel-top),inset_0_-1px_0_var(--bevel-bot),0_16px_40px_-16px_color-mix(in_srgb,var(--hue)_40%,transparent)] active:translate-y-0 active:scale-[0.99]"
+      className="group pf-signal p-5 text-left transition-all duration-300 [transition-timing-function:var(--ease-out)] hover:-translate-y-1 hover:shadow-[inset_0_1px_0_var(--bevel-top),inset_0_-1px_0_var(--bevel-bot),0_16px_40px_-16px_color-mix(in_srgb,var(--hue)_40%,transparent)] active:translate-y-0 active:scale-[0.99]"
     >
       <div className="mb-3 inline-flex transition-transform duration-300 group-hover:scale-110">
         <Emblem role={role} fixed size={40} />

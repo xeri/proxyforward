@@ -11,8 +11,9 @@ import (
 
 // Fixtures are MaxMind's published test databases (test-data/ in
 // github.com/maxmind/MaxMind-DB). Known contents used below:
-//   City: 2.125.160.216 → GB (Boxford)
-//   ASN:  1.128.0.0/11  → AS1221 "Telstra Pty Ltd"
+//
+//	City: 2.125.160.216 → GB (Boxford)
+//	ASN:  1.128.0.0/11  → AS1221 "Telstra Pty Ltd"
 func testResolver(t *testing.T, city, asn bool) *Resolver {
 	t.Helper()
 	r := NewResolver(slog.New(slog.NewTextHandler(io.Discard, nil)))

@@ -1,0 +1,46 @@
+# CI gates for proxyforward (root CLAUDE.md "Enforcement"). The Go job runs on
+# Windows because the engine is Windows-only in practice (named pipes, service,
+# firewall integration); it includes the e2e suite, the 64 MiB burst perf floor,
+# and the doc-citation check (internal/doccheck). The gofmt step fails on any
+# formatting drift — run `gofmt -w .` locally before pushing.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  go:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        shell: pwsh
+        run: |
+          $files = gofmt -l .
+          if ($files) {
+            Write-Output "not gofmt-clean:"
+            Write-Output $files
+            exit 1
+          }
+      - run: go vet ./...
+      - run: go test ./...
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build

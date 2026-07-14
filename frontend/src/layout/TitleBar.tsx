@@ -3,19 +3,36 @@ import {toggleTheme, useTheme} from '../theme'
 import {ConnectionPill} from '../components/ConnectionPill'
 import {IconButton, Kbd} from '../components/ui'
 import {IconCommand, IconMoon, IconServer, IconSun} from '../components/icons'
+import {NAV_MAIN, NAV_SETTINGS, NavId} from '../nav'
+import {useTitleContext} from '../pagecontext'
 import {WindowControls} from './WindowControls'
+
+/** Default context when the screen hasn't set its own: who we're linked to.
+ * Understated — the ConnectionPill already owns the verdict. */
+function defaultContext(s: UIStatus): string | null {
+  const peer = s.peerHostname || s.peerPublicIp || s.peerAddr
+  if (!peer) return null
+  const peerRole = s.role === 'agent' ? 'gateway' : 'agent'
+  return `${peerRole} · ${peer}`
+}
 
 /**
  * Frameless-window title bar. The bar is one continuous drag region; every
  * interactive child opts out with pf-no-drag. It fills the floating glass
- * island (Shell); in the wizard it carries the brand on its own.
+ * island (Shell); in the wizard it carries the brand on its own. In the
+ * console the left strip carries quiet page context — plain text, still
+ * draggable.
  */
-export function TitleBar({status, brand = false, onPalette}: {
+export function TitleBar({status, nav, brand = false, onPalette}: {
   status?: UIStatus | null
+  nav?: NavId
   brand?: boolean
   onPalette?: () => void
 }) {
   const {resolved} = useTheme()
+  const screenCtx = useTitleContext()
+  const navLabel = nav ? [...NAV_MAIN, NAV_SETTINGS].find(n => n.id === nav)?.label : undefined
+  const ctx = screenCtx ?? (status ? defaultContext(status) : null)
   return (
     <div className="pf-drag flex h-full items-stretch" onContextMenu={e => e.preventDefault()}>
       <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-4">
@@ -26,6 +43,14 @@ export function TitleBar({status, brand = false, onPalette}: {
             </div>
             <span className="truncate text-[13px] font-semibold tracking-tight">proxyforward</span>
           </>
+        )}
+        {!brand && navLabel && (
+          <div className="flex min-w-0 items-baseline gap-2.5">
+            <span className="shrink-0 text-[12.5px] font-medium text-[var(--text-2)]">{navLabel}</span>
+            {ctx && (
+              <span className="min-w-0 truncate font-mono text-[11px] tabular-nums text-[var(--text-3)]">{ctx}</span>
+            )}
+          </div>
         )}
       </div>
 
