@@ -17,6 +17,10 @@ accept inbound connections, and that machine relays player traffic back through 
 
 <img src="preview.png" alt="proxyforward dashboard" width="820">
 
+**📖 [Read the wiki](https://github.com/xeri/proxyforward/wiki)** — installation, the pairing
+walkthrough, firewall and DNS setup, config and CLI reference, troubleshooting, and an honest
+list of [what isn't built yet](https://github.com/xeri/proxyforward/wiki/Not-Yet-Implemented).
+
 </div>
 
 ---
