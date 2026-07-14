@@ -10,12 +10,12 @@ func TestHealthScore(t *testing.T) {
 	fresh := time.Now().Add(-5 * time.Second).UnixMilli() // just came up
 
 	cases := []struct {
-		name    string
-		up      bool
-		jitter  float64
-		loss    float64
-		since   int64
-		want    string
+		name   string
+		up     bool
+		jitter float64
+		loss   float64
+		since  int64
+		want   string
 	}{
 		{"link down", false, 5, 0, old, "bad"},
 		{"healthy", true, 5, 0, old, "good"},

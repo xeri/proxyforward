@@ -77,72 +77,32 @@ export function Sidebar({status, nav, onNav}: {
   )
 }
 
-/** HostPair: this machine over its peer, each a role-tinted glass chip —
- * cyan agent, violet gateway — joined by a one-way arrow that always points
- * the way the connection is made: the agent dials the gateway. */
+/** HostPair: this machine over its peer — two quiet rows, each led by a
+ * small role-hued status dot (cyan agent, violet gateway). Tier-3: type on
+ * whitespace; the dots are the only color the footer carries. */
 function HostPair({isAgent, self, peer}: {isAgent: boolean; self: string; peer: string}) {
   return (
-    <div
-      className="rounded-[var(--r-md)] border border-[var(--hairline)] px-2 py-2"
-      style={{background: 'linear-gradient(var(--light-angle), rgba(255,255,255,0.04), rgba(255,255,255,0.01) 60%)'}}
-      title="The agent connects to the gateway"
-    >
-      <HostChip role={isAgent ? 'agent' : 'gateway'} name={self} sub="this machine" />
-      <FlowArrow dir={isAgent ? 'down' : 'up'} />
-      {peer
-        ? <HostChip role={isAgent ? 'gateway' : 'agent'} name={peer} />
-        : <HostChip role={isAgent ? 'gateway' : 'agent'} name={isAgent ? 'gateway offline' : 'no agent yet'} dim />}
+    <div className="space-y-1.5 px-1" title="The agent connects to the gateway">
+      <HostRow role={isAgent ? 'agent' : 'gateway'} name={self} sub="this machine" />
+      <HostRow
+        role={isAgent ? 'gateway' : 'agent'}
+        name={peer || (isAgent ? 'gateway offline' : 'no agent yet')}
+        dim={!peer}
+      />
     </div>
   )
 }
 
-function HostChip({role, name, sub, dim}: {role: 'agent' | 'gateway'; name: string; sub?: string; dim?: boolean}) {
+function HostRow({role, name, sub, dim}: {role: 'agent' | 'gateway'; name: string; sub?: string; dim?: boolean}) {
   const c = role === 'agent' ? 'var(--role-agent)' : 'var(--role-gateway)'
   return (
-    <div
-      className={`flex items-center gap-1.5 rounded-[var(--r-sm)] border px-2 py-1 ${dim ? 'opacity-55' : ''}`}
-      style={{
-        borderColor: `color-mix(in srgb, ${c} 36%, transparent)`,
-        background: `linear-gradient(var(--light-angle), color-mix(in srgb, ${c} 16%, transparent), color-mix(in srgb, ${c} 6%, transparent) 60%)`,
-        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 8px -3px color-mix(in srgb, ${c} 45%, transparent)`,
-      }}
-    >
-      <span
-        aria-hidden
-        className="h-1.5 w-1.5 shrink-0 rounded-full"
-        style={{background: c, boxShadow: `0 0 6px color-mix(in srgb, ${c} 70%, transparent)`}}
-      />
-      <span
-        className={`min-w-0 truncate font-medium ${dim ? 'italic' : ''}`}
-        style={{color: `color-mix(in srgb, ${c} 60%, var(--text))`}}
-        title={name}
-      >{name}</span>
+    <div className={`flex items-center gap-2 ${dim ? 'opacity-55' : ''}`}>
+      <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{background: c}} />
+      <span className={`min-w-0 truncate font-medium text-[var(--text-2)] ${dim ? 'italic' : ''}`} title={name}>
+        {name}
+      </span>
       {sub && <span className="ml-auto shrink-0 text-[9.5px] uppercase tracking-wide text-[var(--text-3)]">{sub}</span>}
     </div>
-  )
-}
-
-/** FlowArrow: the connector between the host chips — a short line that fades
- * cyan (agent end) into violet (gateway end) with a chevron at the head. */
-function FlowArrow({dir}: {dir: 'down' | 'up'}) {
-  // Gradient runs top→bottom in SVG space; put cyan at the tail (agent) and
-  // violet at the head (gateway) for either orientation.
-  const top = dir === 'down' ? 'var(--role-agent)' : 'var(--role-gateway)'
-  const bot = dir === 'down' ? 'var(--role-gateway)' : 'var(--role-agent)'
-  return (
-    <svg width="12" height="14" viewBox="0 0 12 14" aria-hidden className="mx-auto my-0.5 block opacity-80">
-      <defs>
-        <linearGradient id="pf-hostflow" x1="0" y1="0" x2="0" y2="14" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor={top} />
-          <stop offset="1" stopColor={bot} />
-        </linearGradient>
-      </defs>
-      {dir === 'down' ? (
-        <path d="M6 1.5 V9 M2.5 8 L6 12 L9.5 8" fill="none" stroke="url(#pf-hostflow)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      ) : (
-        <path d="M6 12.5 V5 M2.5 6 L6 2 L9.5 6" fill="none" stroke="url(#pf-hostflow)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      )}
-    </svg>
   )
 }
 
@@ -161,7 +121,7 @@ function NavButton({item, on, onNav, standalone = false}: {
       className={`group pf-press flex w-full items-center gap-2.5 rounded-[var(--r-md)] px-3 text-sm transition-colors duration-200 ${
         on
           ? `font-medium text-[var(--text)] ${standalone ? 'pf-nav-glow' : ''}`
-          : 'pf-nav-bloom text-[var(--text-2)] hover:text-[var(--text)]'
+          : 'text-[var(--text-2)] hover:bg-[color-mix(in_srgb,var(--text)_5%,transparent)] hover:text-[var(--text)]'
       }`}
     >
       <span className={`transition-all duration-200 ${on ? 'scale-110 text-[var(--accent)]' : 'group-hover:scale-105'}`}>

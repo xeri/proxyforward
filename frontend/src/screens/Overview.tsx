@@ -1,14 +1,15 @@
-import {ReactNode, useEffect, useState} from 'react'
+import {ReactNode, useEffect, useRef, useState} from 'react'
 import {MeasureLatency, PairingCode, RestartEngine} from '../../wailsjs/go/app/App'
+import {prefersReduced} from '../motion'
 import {app} from '../../wailsjs/go/models'
 import {BandwidthPanel} from '../components/BandwidthChart'
 import {NumberTicker} from '../components/NumberTicker'
 import {
   Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, ErrorBanner,
-  PageHeader, RoleWord, StatTile, StatusDot,
+  Overline, PageHeader, RoleWord, SignalCard, StatTile, StatusDot,
 } from '../components/ui'
 import {Emblem} from '../components/Emblem'
-import {IconActivity, IconClock, IconGauge, IconGlobe, IconLink, IconServer, IconUsers} from '../components/icons'
+import {IconActivity, IconGlobe, IconLink, IconServer} from '../components/icons'
 import {NavId} from '../nav'
 import {fmtBytes, fmtUptime, UIStatus} from '../state'
 
@@ -49,6 +50,21 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
     : (tunnels.length > 0 || status.agentConnected ? 'good' : 'unknown')
   const flowing = linkState === 'good'
 
+  // Moment: first-connect ignite. When the link transitions up, stamp
+  // .pf-ignite on the pipeline for one left-to-right cascade (motion.css).
+  // A mount with the link already up doesn't fire.
+  const [ignite, setIgnite] = useState(false)
+  const wasFlowing = useRef<boolean | null>(null)
+  useEffect(() => {
+    const was = wasFlowing.current
+    wasFlowing.current = flowing
+    if (was === false && flowing && !prefersReduced()) {
+      setIgnite(true)
+      const t = setTimeout(() => setIgnite(false), 1400)
+      return () => clearTimeout(t)
+    }
+  }, [flowing])
+
   // Per-hop byte counters. Each role annotates the hops it can see:
   // agent  — local↔agent = its conntrack totals, agent↔gateway = raw link
   // gateway — agent↔gateway = raw link, gateway↔clients = its conntrack
@@ -58,41 +74,42 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
   const rightHop = isAgent ? linkBytes : appBytes
 
   return (
-    <div className="pf-stagger-grid grid grid-cols-12 gap-[var(--grid-gap)]">
-      <div className="col-span-12">
+    <div className="pf-stagger space-y-12">
+      <div>
         <PageHeader
           title="Overview"
           subtitle={isAgent ? 'The path from your server to your players.' : 'The public front door for your agent.'}
         />
-      </div>
 
-      {status.engineFatal && (
-        <div className="col-span-12">
-          <Banner
-            tone="bad"
-            action={status.mode !== 'attached' ? (
-              <Button variant="ghost" size="sm" onClick={() => RestartEngine().catch(() => {})}>Restart</Button>
-            ) : undefined}
-          >
-            Engine stopped: {status.engineFatal}
-          </Banner>
-        </div>
-      )}
-      {status.mode === 'attached' && (
-        <div className="col-span-12">
-          <Banner tone="info">Running as a Windows service — this window is a viewer.</Banner>
-        </div>
-      )}
+        {status.engineFatal && (
+          <div className="mb-4">
+            <Banner
+              tone="bad"
+              action={status.mode !== 'attached' ? (
+                <Button variant="ghost" size="sm" onClick={() => RestartEngine().catch(() => {})}>Restart</Button>
+              ) : undefined}
+            >
+              Engine stopped: {status.engineFatal}
+            </Banner>
+          </div>
+        )}
+        {status.mode === 'attached' && (
+          <div className="mb-4">
+            <Banner tone="info">Running as a Windows service — this window is a viewer.</Banner>
+          </div>
+        )}
 
-      {/* Pipeline hero: the traffic path as three machined stations, flow
-          streaming between them when live. A warn/bad link leaks tone-colored
-          light from behind the glass. */}
-      <div className="col-span-12">
-      <Bleed
-        color={linkState === 'bad' ? 'var(--bad)' : linkState === 'warn' ? 'var(--warn)' : null}
-        strength="20%"
-      >
-      <Card pad={false}>
+        {/* The identity surface: the traffic path as three machined stations
+            on Signal Glass, flow streaming between them when live. It breaks
+            the content grid once — running past the column edges — so the
+            pipeline reads as the page's sculpture. A warn/bad link leaks
+            tone-colored light from behind the glass. */}
+        <div className="-mx-[calc(var(--page-pad)-8px)]">
+        <Bleed
+          color={linkState === 'bad' ? 'var(--bad)' : linkState === 'warn' ? 'var(--warn)' : null}
+          strength="20%"
+        >
+        <SignalCard pad={false} className={ignite ? 'pf-ignite' : ''}>
         <div className="grid grid-cols-1 gap-3 p-5 @3xl:grid-cols-[1fr_3rem_1fr_3rem_1fr] @3xl:gap-0">
           <PipeNode
             icon={<IconServer size={20} />}
@@ -142,58 +159,60 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
             )}
           />
         </div>
-      </Card>
+      </SignalCard>
       </Bleed>
       </div>
-
-      {/* Link health beside the headline stats: verdict + signals left, the
-          2×2 numbers right; both collapse to full width in a narrow window. */}
-      <div className="col-span-12 @5xl:col-span-7">
-        <HealthPanel status={status} />
-      </div>
-      <div className="col-span-12 grid grid-cols-2 content-start gap-[var(--grid-gap)] @5xl:col-span-5">
-        <StatTile size="lg" icon={<IconClock size={15} />} label="Link uptime" value={linkUptime} sub={uptimeSub || undefined} />
-        <StatTile size="lg" icon={<IconGauge size={15} />} label="Round trip" value={(isAgent ? status.linkUp : status.agentConnected) ? `${status.rttMillis} ms` : '—'} />
-        <StatTile
-          size="lg" icon={<IconUsers size={15} />} label="Live sessions" accent={conns.length > 0}
-          value={<NumberTicker value={conns.length} format={n => String(Math.round(n))} />}
-        />
-        <StatTile
-          size="lg" icon={<IconActivity size={15} />} label="Data moved"
-          value={<NumberTicker value={appBytes} format={n => fmtBytes(Math.round(n))} />}
-          sub={status.allTimeBytesIn + status.allTimeBytesOut > 0
-            ? `all-time ${fmtBytes(status.allTimeBytesIn + status.allTimeBytesOut)}`
-            : undefined}
-        />
       </div>
 
-      {/* Identity: who's on each end, wearing its role emblem. */}
-      <div className="col-span-12 @3xl:col-span-6">
-        <IdentityCard
-          role={isAgent ? 'agent' : 'gateway'} self
-          sideLabel={<>This machine · <RoleWord role={isAgent ? 'agent' : 'gateway'}>{isAgent ? 'Agent' : 'Gateway'}</RoleWord></>}
-          host={status.hostname} publicIp={status.publicIp} lanIps={status.localLanIps} online
-        />
-      </div>
-      <div className="col-span-12 @3xl:col-span-6">
-        <IdentityCard
-          role={isAgent ? 'gateway' : 'agent'}
-          sideLabel={<>Peer · <RoleWord role={isAgent ? 'gateway' : 'agent'}>{isAgent ? 'Gateway' : 'Agent'}</RoleWord></>}
-          host={status.peerHostname} publicIp={status.peerPublicIp} lanIps={status.peerLanIps}
-          online={isAgent ? status.linkUp : status.agentConnected}
-        />
+      {/* The data group: bandwidth teaser promoted beside link health and the
+          headline numbers — all quiet, the pipeline keeps the stage. */}
+      <div className="grid grid-cols-12 gap-[var(--grid-gap)]">
+        <div className="col-span-12 @5xl:col-span-7">
+          <BandwidthPanel compact historyUnsupported={status.historyUnsupported} onExpand={() => onNavigate('traffic')} />
+        </div>
+        <div className="col-span-12 space-y-[var(--grid-gap)] @5xl:col-span-5">
+          <HealthPanel status={status} />
+          <div className="grid grid-cols-2 gap-x-[var(--grid-gap)] gap-y-6 pt-2">
+            <StatTile label="Link uptime" value={linkUptime} sub={uptimeSub || undefined} />
+            <StatTile label="Round trip" value={(isAgent ? status.linkUp : status.agentConnected) ? `${status.rttMillis} ms` : '—'} />
+            <StatTile
+              label="Live sessions" accent={conns.length > 0}
+              value={<NumberTicker value={conns.length} format={n => String(Math.round(n))} />}
+            />
+            <StatTile
+              label="Data moved"
+              value={<NumberTicker value={appBytes} format={n => fmtBytes(Math.round(n))} />}
+              sub={status.allTimeBytesIn + status.allTimeBytesOut > 0
+                ? `all-time ${fmtBytes(status.allTimeBytesIn + status.allTimeBytesOut)}`
+                : undefined}
+            />
+          </div>
+        </div>
       </div>
 
-      {/* Role tool beside the bandwidth teaser. */}
-      <div className="col-span-12 @5xl:col-span-7">
-        <Bleed color="var(--accent)" strength="8%">
+      {/* Identity: who's on each end, wearing its role emblem, with the role
+          tool — the one string the user actually hands out — as a strip. */}
+      <div className="grid grid-cols-12 gap-[var(--grid-gap)]">
+        <div className="col-span-12 @3xl:col-span-6">
+          <IdentityCard
+            role={isAgent ? 'agent' : 'gateway'} self
+            sideLabel={<>This machine · <RoleWord role={isAgent ? 'agent' : 'gateway'}>{isAgent ? 'Agent' : 'Gateway'}</RoleWord></>}
+            host={status.hostname} publicIp={status.publicIp} lanIps={status.localLanIps} online
+          />
+        </div>
+        <div className="col-span-12 @3xl:col-span-6">
+          <IdentityCard
+            role={isAgent ? 'gateway' : 'agent'}
+            sideLabel={<>Peer · <RoleWord role={isAgent ? 'gateway' : 'agent'}>{isAgent ? 'Gateway' : 'Agent'}</RoleWord></>}
+            host={status.peerHostname} publicIp={status.peerPublicIp} lanIps={status.peerLanIps}
+            online={isAgent ? status.linkUp : status.agentConnected}
+          />
+        </div>
+        <div className="col-span-12">
           {isAgent
-            ? <PlayerAddressCard status={status} onNavigate={onNavigate} />
-            : <GatewayPairingCard />}
-        </Bleed>
-      </div>
-      <div className="col-span-12 @5xl:col-span-5">
-        <BandwidthPanel compact historyUnsupported={status.historyUnsupported} onExpand={() => onNavigate('traffic')} />
+            ? <PlayerAddressStrip status={status} onNavigate={onNavigate} />
+            : <GatewayPairingStrip />}
+        </div>
       </div>
     </div>
   )
@@ -215,13 +234,10 @@ function HealthPanel({status}: {status: UIStatus}) {
   const c = segColor[score]
 
   return (
-    // `grid h-full` stretches the card to its grid row (the neighboring 2×2
-    // stat column sets the height); the probe row then anchors to the card
-    // bottom so no dead band opens above the identity cards.
-    <Card pad={false} className="grid h-full">
-      <div className="flex h-full flex-col">
-        <div className="grid flex-1 grid-cols-1 content-center gap-4 p-5 sm:grid-cols-[auto_1px_1fr] sm:items-center">
-          <div className="flex items-center gap-3 sm:pr-1">
+    <Card pad={false}>
+      <div className="flex flex-col">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-4 p-5">
+          <div className="flex items-center gap-3">
             <span
               className="grid h-12 w-12 place-items-center rounded-[var(--r-lg)] border transition-all duration-500"
               style={{
@@ -236,12 +252,11 @@ function HealthPanel({status}: {status: UIStatus}) {
               <IconActivity size={22} />
             </span>
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">Link health</div>
+              <Overline>Link health</Overline>
               <div className="mt-0.5"><Badge tone={HEALTH_TONE[score]}>{HEALTH_LABEL[score]}</Badge></div>
             </div>
           </div>
-          <div className="pf-sep-v hidden self-stretch sm:block" aria-hidden />
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid min-w-0 flex-1 grid-cols-3 gap-3">
             <HealthMetric label="Jitter" value={fmtMs(status.jitterMillis)} tone={status.jitterMillis < 0 ? 'unknown' : status.jitterMillis > 100 ? 'bad' : status.jitterMillis > 30 ? 'warn' : 'good'} />
             <HealthMetric label="Packet loss" value={fmtPct(status.packetLossPct)} tone={status.packetLossPct < 0 ? 'unknown' : status.packetLossPct > 5 ? 'bad' : status.packetLossPct > 1 ? 'warn' : 'good'} />
             <HealthMetric label="Round trip" value={linked ? `${status.rttMillis} ms` : '—'} tone="neutral" />
@@ -253,12 +268,14 @@ function HealthPanel({status}: {status: UIStatus}) {
   )
 }
 
+/** HealthMetric: tier-3 — type on whitespace with a hairline lead, no box.
+ * Status tones stay on the numerals: the color IS the signal. */
 function HealthMetric({label, value, tone}: {label: string; value: string; tone: Seg | 'neutral'}) {
   const c = tone === 'neutral' ? 'var(--text)' : segColor[tone]
   return (
-    <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] p-3">
-      <div className="text-[11px] text-[var(--text-3)]">{label}</div>
-      <div className="mt-1 text-xl font-semibold tabular-nums" style={{color: c}}>{value}</div>
+    <div className="min-w-0 border-l border-[var(--hairline)] pl-3">
+      <Overline>{label}</Overline>
+      <div className="mt-1 truncate text-[length:var(--fs-metric)] font-semibold leading-tight tabular-nums" style={{color: c}} title={value}>{value}</div>
     </div>
   )
 }
@@ -299,8 +316,8 @@ function LatencyProbe({linked, peer}: {linked: boolean; peer: 'gateway' | 'agent
               <div className="pf-fade mt-4">
                 <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
                   <div>
-                    <div className="text-[11px] text-[var(--text-3)]">One-way (estimated)</div>
-                    <div className="text-2xl font-semibold tabular-nums text-[var(--accent)]">{res.oneWayEstimateMs.toFixed(1)} ms</div>
+                    <Overline>One-way (estimated)</Overline>
+                    <div className="text-[length:var(--fs-metric)] font-semibold leading-tight tabular-nums text-[var(--text)]">{res.oneWayEstimateMs.toFixed(1)} ms</div>
                   </div>
                   <div className="text-xs tabular-nums text-[var(--text-3)]">
                     round trip {res.rttAvgMs.toFixed(1)} ms ({res.rttMinMs.toFixed(1)}–{res.rttMaxMs.toFixed(1)}) · jitter {res.jitterMs.toFixed(1)} ms · {res.samples} probes
@@ -343,13 +360,12 @@ function IdentityCard({role, self = false, sideLabel, host, publicIp, lanIps, on
       <div className="flex items-start gap-3.5 p-4">
         <Emblem role={role} size={38} fixed={!self} glow={online} />
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">{sideLabel}</div>
-          <div className="mt-1 flex items-center gap-2">
-            <Badge tone="neutral"><IconServer size={12} /> {host || '—'}</Badge>
+          <div className="flex items-baseline gap-2">
+            <Overline>{sideLabel}</Overline>
+            <span className="truncate text-[11px] text-[var(--text-3)]">{host || '—'}</span>
           </div>
           <div className="mt-2 flex items-center gap-1.5">
-            <IconGlobe size={13} className="shrink-0 text-[var(--text-3)]" />
-            <span className="select-text truncate font-mono text-sm font-semibold text-[var(--text)]">{publicIp || '—'}</span>
+            <span className="select-text truncate font-mono text-[14px] font-semibold text-[var(--text)]">{publicIp || '—'}</span>
             {publicIp && <CopyIcon text={publicIp} title="Copy public address" />}
           </div>
           {lan.length > 0 && (
@@ -371,7 +387,7 @@ function PipeNode({icon, title, state, headline, detail, extra, pulse}: {
 }) {
   const c = segColor[state]
   return (
-    <div className="flex min-w-0 items-start gap-3 rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--input-bg)] p-3.5 shadow-[inset_0_1px_0_var(--hairline)]">
+    <div className="pf-pipenode flex min-w-0 items-start gap-3 rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--input-bg)] p-3.5 shadow-[inset_0_1px_0_var(--hairline)]">
       <div
         className="grid h-11 w-11 shrink-0 place-items-center rounded-[var(--r-md)] border transition-all duration-500"
         style={{
@@ -384,9 +400,9 @@ function PipeNode({icon, title, state, headline, detail, extra, pulse}: {
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">{title}</div>
-        <div className="mt-0.5 truncate text-base font-semibold leading-tight">{headline}</div>
-        <div className="mt-1"><StatusDot state={state} label={detail} pulse={pulse} /></div>
+        <Overline>{title}</Overline>
+        <div className="mt-0.5 truncate text-[length:var(--fs-metric)] font-semibold leading-tight tracking-tight">{headline}</div>
+        <div className="mt-1.5"><StatusDot state={state} label={detail} pulse={pulse} /></div>
         {extra && <div className="mt-1 flex max-w-full">{extra}</div>}
       </div>
     </div>
@@ -426,9 +442,10 @@ function Conduit({on, label}: {on: boolean; label?: string}) {
   )
 }
 
-/** PlayerAddressCard (agent): the address to hand to players, front and
- * center. Reachability testing lives on each tunnel card. */
-function PlayerAddressCard({status, onNavigate}: {status: UIStatus; onNavigate: (id: NavId) => void}) {
+/** PlayerAddressStrip (agent): the address to hand to players — one compact
+ * row, not a titled card around one string. Reachability testing lives on
+ * each tunnel card. */
+function PlayerAddressStrip({status, onNavigate}: {status: UIStatus; onNavigate: (id: NavId) => void}) {
   const first = (status.tunnels ?? [])[0]
   const host = (status.peerAddr || '').split(':')[0] || status.peerPublicIp || ''
   const bound = !!(first && first.publicPort > 0)
@@ -436,27 +453,30 @@ function PlayerAddressCard({status, onNavigate}: {status: UIStatus; onNavigate: 
     ? (first.publicPort === 25565 ? host : `${host}:${first.publicPort}`)
     : ''
   return (
-    <Card
-      title="Player address" subtitle="What your players type into Minecraft"
-      action={addr ? <CopyButton text={addr} label="Copy address" /> : undefined}
-    >
-      {addr ? (
-        <div className="pf-fade"><Codebox text={addr} /></div>
-      ) : (
-        <div className="text-sm text-[var(--text-3)]">Not bound yet — the address appears when the gateway opens your port.</div>
-      )}
-      <p className="mt-3 text-xs text-[var(--text-3)]">
-        Not sure it works from the internet?{' '}
-        <button className="font-medium text-[var(--accent)] hover:underline" onClick={() => onNavigate('tunnels')}>
-          Test the player path
-        </button>{' '}
-        from the tunnel card.
-      </p>
+    <Card pad={false}>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-5 py-3.5">
+        <div className="w-44 shrink-0">
+          <Overline>Player address</Overline>
+          <div className="mt-0.5 text-[11px] text-[var(--text-3)]">
+            <button className="font-medium hover:text-[var(--text)] hover:underline" onClick={() => onNavigate('tunnels')}>
+              Test the player path →
+            </button>
+          </div>
+        </div>
+        <div className="min-w-56 flex-1">
+          {addr ? (
+            <div className="pf-fade"><Codebox text={addr} action={<CopyButton text={addr} label="Copy" />} /></div>
+          ) : (
+            <span className="text-sm text-[var(--text-3)]">Not bound yet — the address appears when the gateway opens your port.</span>
+          )}
+        </div>
+      </div>
     </Card>
   )
 }
 
-function GatewayPairingCard() {
+/** GatewayPairingStrip: the pairing code as a compact row. */
+function GatewayPairingStrip() {
   const [code, setCode] = useState('')
   const [err, setErr] = useState('')
   useEffect(() => {
@@ -469,16 +489,20 @@ function GatewayPairingCard() {
     return () => { cancelled = true }
   }, [])
   return (
-    <Card title="Pairing code" subtitle="Paste this into the agent on your Minecraft machine"
-      action={code ? <CopyButton text={code} /> : undefined}>
-      {code
-        ? <div className="pf-fade"><Codebox text={code} /></div>
-        : err
-          ? <ErrorBanner message={err} />
-          : <div className="text-sm text-[var(--text-3)]">Generating…</div>}
-      <p className="mt-3 text-xs text-[var(--text-3)]">
-        Anyone with this code can connect an agent. Rotate it in Settings if it leaks.
-      </p>
+    <Card pad={false}>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-5 py-3.5">
+        <div className="w-44 shrink-0">
+          <Overline>Pairing code</Overline>
+          <div className="mt-0.5 text-[11px] text-[var(--text-3)]">Paste into the agent — rotate in Settings if it leaks</div>
+        </div>
+        <div className="min-w-56 flex-1">
+          {code
+            ? <div className="pf-fade"><Codebox text={code} action={<CopyButton text={code} label="Copy" />} /></div>
+            : err
+              ? <ErrorBanner message={err} />
+              : <span className="text-sm text-[var(--text-3)]">Generating…</span>}
+        </div>
+      </div>
     </Card>
   )
 }

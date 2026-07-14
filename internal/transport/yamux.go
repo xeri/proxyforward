@@ -66,9 +66,9 @@ func (m *muxSession) AcceptStream() (Stream, error) {
 	return &muxStream{st}, nil
 }
 
-func (m *muxSession) Close() error                { return m.s.Close() }
-func (m *muxSession) CloseChan() <-chan struct{}  { return m.s.CloseChan() }
-func (m *muxSession) RemoteAddr() net.Addr        { return m.s.RemoteAddr() }
+func (m *muxSession) Close() error               { return m.s.Close() }
+func (m *muxSession) CloseChan() <-chan struct{} { return m.s.CloseChan() }
+func (m *muxSession) RemoteAddr() net.Addr       { return m.s.RemoteAddr() }
 
 type muxStream struct {
 	*yamux.Stream

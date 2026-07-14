@@ -20,8 +20,8 @@ import (
 
 const (
 	rollupEvery = 5 * time.Minute
-	hourMillis      = int64(time.Hour / time.Millisecond)
-	dayMillis       = int64(24 * time.Hour / time.Millisecond)
+	hourMillis  = int64(time.Hour / time.Millisecond)
+	dayMillis   = int64(24 * time.Hour / time.Millisecond)
 )
 
 // runRollup refreshes the hourly/daily rollups and the peaks table up to now.

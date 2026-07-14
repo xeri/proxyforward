@@ -130,6 +130,34 @@
 }
 @keyframes pf-flow { to { background-position: 22px 0; } }
 
+/* Moments — motion is network state (frontend/DESIGN.md). */
+
+/* First-connect ignite: when the link comes up, the pipeline lights left to
+   right — each station brightens in turn, overshooting briefly like a lamp
+   striking. Overview stamps .pf-ignite on the Signal Glass hero for ~1.4s;
+   the stations sit at grid children 1 / 3 / 5 (conduits between). */
+@keyframes pf-ignite-node {
+  0% { opacity: 0.35; filter: brightness(0.7); }
+  55% { opacity: 1; filter: brightness(1.3); }
+  100% { opacity: 1; filter: brightness(1); }
+}
+.pf-ignite .pf-pipenode { animation: pf-ignite-node 0.8s var(--ease-out) both; }
+.pf-ignite .pf-pipenode:nth-child(3) { animation-delay: 0.12s; }
+.pf-ignite .pf-pipenode:nth-child(5) { animation-delay: 0.24s; }
+
+/* Player-join country flash: a country lights once on the world map when a
+   new session arrives from it (WorldMap `flash`). Fades from and to nothing,
+   so a zeroed duration (reduced motion) renders invisible. */
+@keyframes pf-geo-flash {
+  0% { opacity: 0; }
+  18% { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+.pf-geo-flash {
+  animation: pf-geo-flash 1.3s var(--ease-out) both;
+  pointer-events: none;
+}
+
 /* Breathing halo for live status dots. */
 @keyframes pf-halo {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--halo, var(--good)) 45%, transparent); }

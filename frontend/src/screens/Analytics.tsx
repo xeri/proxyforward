@@ -1,14 +1,13 @@
-import {Fragment, ReactNode, useEffect, useMemo, useState} from 'react'
+import {Fragment, ReactNode, useEffect, useMemo, useRef, useState} from 'react'
 import {AvatarImg} from '../components/AvatarImg'
+import {prefersReduced} from '../motion'
 import {LineChart, LineSeries} from '../components/charts/LineChart'
 import {fmtTickTime} from '../components/charts/util'
 import {GeoMetric, WorldMap} from '../components/charts/WorldMap'
 import {Column, DataTable} from '../components/DataTable'
 import {GeoRank} from '../components/GeoRank'
 import {NumberTicker} from '../components/NumberTicker'
-import {
-  IconActivity, IconClock, IconConnections, IconGauge, IconGlobe, IconPlayers, IconUsers,
-} from '../components/icons'
+import {IconActivity, IconClock, IconConnections, IconGlobe} from '../components/icons'
 import {
   Badge, Button, Card, CopyIcon, EmptyState, LiveDot, Modal, PageHeader, Pill, SegmentedControl, Skeleton, StatTile,
 } from '../components/ui'
@@ -46,49 +45,53 @@ export function Analytics({status}: {status: UIStatus}) {
   }
 
   return (
-    <div className="pf-stagger space-y-4">
-      <PageHeader
-        title="Analytics"
-        subtitle="Traffic, players, and uptime over time."
-        action={
-          <SegmentedControl<Range>
-            value={range}
-            onChange={setRange}
-            options={[
-              {value: '24h', label: '24h'}, {value: '7d', label: '7d'},
-              {value: '30d', label: '30d'}, {value: 'all', label: 'All'},
-            ]}
-          />
-        }
-      />
-
-      {/* Range-scoped cards remount under a range key so a 24h→7d switch
-          replays each card's entrance cascade — the range change reads as
+    <div className="pf-stagger space-y-12">
+      {/* Range-scoped groups remount under a range key so a 24h→7d switch
+          replays each group's entrance cascade — the range change reads as
           the dashboard rebuilding itself, not numbers silently mutating.
           Peak hours sits outside: it is intrinsically multi-week. */}
-      <div key={`sum-${range}`} className="pf-stagger space-y-4">
-        <SummaryTiles s={summary} />
-        <RecordsStrip s={summary} />
-
-        <Geography rangeMs={rangeMs} selectedCc={ccFilter}
-          onSelectCc={cc => setCcFilter(prev => (prev === cc ? '' : cc))} />
+      <div>
+        <PageHeader
+          title="Analytics"
+          subtitle="Traffic, players, and uptime over time."
+          action={
+            <SegmentedControl<Range>
+              value={range}
+              onChange={setRange}
+              options={[
+                {value: '24h', label: '24h'}, {value: '7d', label: '7d'},
+                {value: '30d', label: '30d'}, {value: 'all', label: 'All'},
+              ]}
+            />
+          }
+        />
+        <div key={`sum-${range}`} className="pf-stagger space-y-4">
+          <SummaryTiles s={summary} />
+          <RecordsStrip s={summary} />
+        </div>
       </div>
 
-      <Card title="Peak hours" subtitle={`Identified players by weekday and hour — last ${PEAK_WEEKS} weeks, your local time`}>
-        <PeakHours />
-      </Card>
+      {/* The identity surface: the world, bare and huge on the page. */}
+      <Geography key={`geo-${range}`} rangeMs={rangeMs} selectedCc={ccFilter}
+        onSelectCc={cc => setCcFilter(prev => (prev === cc ? '' : cc))} />
 
-      <div key={`range-${range}`} className="pf-stagger space-y-4">
-        <div className="grid grid-cols-1 gap-4 @min-[80rem]:grid-cols-2">
-          <Card title="Uptime" subtitle="Control link and per-tunnel availability across the range">
-            <UptimeBands windowMs={rangeMs} />
-          </Card>
-          <Card title="Packet loss" subtitle="Peak loss on the control link per interval">
-            <LossChart range={range} />
-          </Card>
+      <div className="space-y-4">
+        <Card label="Peak hours" subtitle={`Identified players by weekday and hour — last ${PEAK_WEEKS} weeks, your local time`}>
+          <PeakHours />
+        </Card>
+
+        <div key={`range-${range}`} className="pf-stagger space-y-4">
+          <div className="grid grid-cols-1 gap-4 @min-[80rem]:grid-cols-2">
+            <Card label="Uptime" subtitle="Control link and per-tunnel availability across the range">
+              <UptimeBands windowMs={rangeMs} />
+            </Card>
+            <Card label="Packet loss" subtitle="Peak loss on the control link per interval">
+              <LossChart range={range} />
+            </Card>
+          </div>
+
+          <ConnectionHistory tunnels={tunnels} rangeMs={rangeMs} cc={ccFilter} onClearCc={() => setCcFilter('')} />
         </div>
-
-        <ConnectionHistory tunnels={tunnels} rangeMs={rangeMs} cc={ccFilter} onClearCc={() => setCcFilter('')} />
       </div>
     </div>
   )
@@ -104,9 +107,12 @@ const rttTone = (ms: number): 'good' | 'warn' | 'bad' => (ms < 60 ? 'good' : ms 
 function SummaryTiles({s}: {s: ReturnType<typeof useSummary>}) {
   if (!s) {
     return (
-      <div className="pf-stagger-grid grid grid-cols-2 gap-3 @xl:grid-cols-3 @5xl:grid-cols-6">
+      <div className="pf-stagger-grid grid grid-cols-2 gap-x-3 gap-y-6 @xl:grid-cols-3 @5xl:grid-cols-6">
         {Array.from({length: 6}, (_, i) => (
-          <div key={i} className="pf-card p-4"><Skeleton className="h-3 w-16 rounded" /><Skeleton className="mt-2 h-6 w-24 rounded" /></div>
+          <div key={i} className="border-l border-[var(--hairline)] py-0.5 pl-4">
+            <Skeleton className="h-3 w-16 rounded" />
+            <Skeleton className="mt-2 h-7 w-24 rounded" />
+          </div>
         ))}
       </div>
     )
@@ -115,32 +121,32 @@ function SummaryTiles({s}: {s: ReturnType<typeof useSummary>}) {
   const peakBps = Math.max(s.peakInBps, s.peakOutBps)
   const peakBpsAt = s.peakOutBps >= s.peakInBps ? s.peakOutAt : s.peakInAt
   return (
-    <div className="pf-stagger-grid grid grid-cols-2 gap-3 @xl:grid-cols-3 @5xl:grid-cols-6">
+    <div className="pf-stagger-grid grid grid-cols-2 gap-x-3 gap-y-6 @xl:grid-cols-3 @5xl:grid-cols-6">
       <StatTile
-        size="lg" icon={<IconActivity size={15} />} label="Data moved"
+        label="Data moved"
         value={<NumberTicker value={s.bytesIn + s.bytesOut} format={n => fmtBytes(Math.round(n))} />}
         sub={`↓ ${fmtBytes(s.bytesOut)} · ↑ ${fmtBytes(s.bytesIn)}`}
       />
       <StatTile
-        size="lg" icon={<IconConnections size={15} />} label="Sessions"
+        label="Sessions"
         value={<NumberTicker value={s.sessions} format={fmtInt} />}
       />
       <StatTile
-        size="lg" icon={<IconPlayers size={15} />} label="Unique players"
+        label="Unique players"
         value={<NumberTicker value={s.uniquePlayers} format={fmtInt} />}
       />
       <StatTile
-        size="lg" icon={<IconUsers size={15} />} label="Peak players"
+        label="Peak players"
         value={s.peakPlayers >= 0 ? String(Math.round(s.peakPlayers)) : '—'}
         sub={s.peakPlayers >= 0 && s.peakPlayersAt ? fmtWhen(s.peakPlayersAt) : undefined}
       />
       <StatTile
-        size="lg" icon={<IconActivity size={15} />} label="Peak throughput"
+        label="Peak throughput"
         value={peakBps > 0 ? fmtRate(peakBps) : '—'}
         sub={peakBps > 0 && peakBpsAt ? fmtWhen(peakBpsAt) : undefined}
       />
       <StatTile
-        size="lg" icon={<IconGauge size={15} />} label="Avg latency"
+        label="Avg latency"
         value={rtt >= 0 ? fmtRtt(rtt) : '—'}
         tone={rtt >= 0 ? rttTone(rtt) : undefined}
       />
@@ -189,6 +195,25 @@ function Geography({rangeMs, selectedCc, onSelectCc}: {
   const [metric, setMetric] = useState<GeoMetric>('activity')
   const [hoverCc, setHoverCc] = useState<string | null>(null)
 
+  // Moment: player-join country flash. When a country's session count grows
+  // between snapshots, it pulses once on the map. The first snapshot only
+  // seeds the baseline; reduced motion never flashes.
+  const [flash, setFlash] = useState<string[]>([])
+  const prevSessions = useRef<Map<string, number> | null>(null)
+  useEffect(() => {
+    if (!snap) return
+    const cur = new Map(snap.map(a => [a.cc.toUpperCase(), a.sessions]))
+    const prev = prevSessions.current
+    prevSessions.current = cur
+    if (!prev || prefersReduced()) return
+    const grown = [...cur].filter(([cc, n]) => n > (prev.get(cc) ?? 0)).map(([cc]) => cc)
+    if (grown.length) {
+      setFlash(grown)
+      const t = setTimeout(() => setFlash([]), 1400)
+      return () => clearTimeout(t)
+    }
+  }, [snap])
+
   const rows = useMemo(() => {
     const r = snap ? [...snap] : []
     // Rank to match the map's coloring: busiest first, or slowest first. No-RTT
@@ -201,7 +226,7 @@ function Geography({rangeMs, selectedCc, onSelectCc}: {
   const body = () => {
     if (snap === null) {
       return (
-        <div className="grid grid-cols-1 gap-4 @min-[72rem]:grid-cols-[1.6fr_1fr]">
+        <div className="grid grid-cols-1 gap-6 @min-[72rem]:grid-cols-[2fr_1fr]">
           <Skeleton className="aspect-[2/1] w-full rounded-[var(--r-md)]" />
           <div className="space-y-2">
             {Array.from({length: 7}, (_, i) => <Skeleton key={i} className="h-9 w-full rounded" />)}
@@ -219,29 +244,34 @@ function Geography({rangeMs, selectedCc, onSelectCc}: {
       )
     }
     return (
-      <div className="grid grid-cols-1 gap-4 @min-[72rem]:grid-cols-[1.6fr_1fr]">
+      <div className="grid grid-cols-1 gap-6 @min-[72rem]:grid-cols-[2fr_1fr]">
         <WorldMap data={rows} metric={metric} hoverCc={hoverCc} onHover={setHoverCc}
-          onSelect={onSelectCc} selectedCc={selectedCc || null} />
+          onSelect={onSelectCc} selectedCc={selectedCc || null} flash={flash} />
         <GeoRank rows={rows} metric={metric} hoverCc={hoverCc} onHover={setHoverCc}
           onSelect={onSelectCc} selectedCc={selectedCc || null} />
       </div>
     )
   }
 
+  // Bare — no card. The map dominates the page; the ranking rides beside it
+  // as plain type.
   return (
-    <Card
-      title="Geography"
-      subtitle="Where players connect from across the range — click a country to filter the history below"
-      action={
+    <section>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-[length:var(--fs-title)] font-semibold tracking-tight text-[var(--text)]">Geography</h2>
+          <p className="mt-0.5 text-xs text-[var(--text-2)]">
+            Where players connect from across the range — click a country to filter the history below
+          </p>
+        </div>
         <SegmentedControl<GeoMetric>
           value={metric}
           onChange={setMetric}
           options={[{value: 'activity', label: 'Activity'}, {value: 'latency', label: 'Latency'}]}
         />
-      }
-    >
+      </div>
       {body()}
-    </Card>
+    </section>
   )
 }
 
@@ -511,7 +541,7 @@ function ConnectionHistory({tunnels, rangeMs, cc, onClearCc}: {
 
   return (
     <Card
-      title={<span className="inline-flex items-center gap-2.5">Connection history <LiveDot /></span>}
+      label={<span className="inline-flex items-center gap-2.5">Connection history <LiveDot /></span>}
       subtitle="Every session in this range — click a row to replay it"
       pad={false}
       action={

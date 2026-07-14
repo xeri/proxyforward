@@ -33,7 +33,7 @@ function latencyFill(ms: number): string {
 
 const LAND = 'color-mix(in srgb, var(--text-3) 14%, transparent)'
 
-export function WorldMap({data, metric, hoverCc, onHover, onSelect, selectedCc}: {
+export function WorldMap({data, metric, hoverCc, onHover, onSelect, selectedCc, flash}: {
   data: CountryAgg[]
   metric: GeoMetric
   hoverCc: string | null
@@ -42,6 +42,8 @@ export function WorldMap({data, metric, hoverCc, onHover, onSelect, selectedCc}:
   onSelect?: (cc: string) => void
   /** The active country filter; outlined on the map. */
   selectedCc?: string | null
+  /** Moment: countries that just gained a session pulse once (pf-geo-flash). */
+  flash?: string[]
 }) {
   const {byCc, maxSessions} = useMemo(() => {
     const m = new Map<string, CountryAgg>()
@@ -104,6 +106,25 @@ export function WorldMap({data, metric, hoverCc, onHover, onSelect, selectedCc}:
             />
           ))}
         </g>
+        {/* Moment: a country that just gained a session lights once. */}
+        {flash && flash.length > 0 && (
+          <g style={{pointerEvents: 'none'}}>
+            {flash.map(cc => {
+              const g = WORLD.find(x => x.cc === cc.toUpperCase())
+              return g ? (
+                <path
+                  key={g.cc}
+                  d={g.d}
+                  className="pf-geo-flash"
+                  fill="color-mix(in srgb, var(--accent) 50%, transparent)"
+                  stroke="var(--accent-2)"
+                  strokeWidth={1.2}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ) : null
+            })}
+          </g>
+        )}
         {/* Active filter outlined persistently under the hover pass. */}
         {selectedCc && (() => {
           const g = WORLD.find(x => x.cc === selectedCc)

@@ -5,46 +5,48 @@ import {IconAlert, IconCheck, IconChevronDown, IconCopy, IconEye, IconEyeOff, Ic
 
 type State = 'good' | 'warn' | 'bad' | 'unknown'
 
-/** PageHeader: one display-size title per screen, with an optional tool slot. */
+/** PageHeader: one display-size title per screen, with an optional tool slot.
+ * The generous bottom margin is deliberate — silence before the content. */
 export function PageHeader({title, subtitle, action}: {
   title: string; subtitle?: ReactNode; action?: ReactNode
 }) {
   return (
-    <div className="mb-5 flex items-end justify-between gap-4">
+    <div className="mb-8 flex items-end justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="text-[22px] font-semibold leading-tight tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-1 text-[13px] text-[var(--text-3)]">{subtitle}</p>}
+        <h1 className="text-[length:var(--fs-hero)] font-semibold leading-tight tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-1 text-[13px] text-[var(--text-2)]">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>
   )
 }
 
-/** Card: the workhorse true-glass surface. `dot` marks section cards with an
- * accent glow dot and a slightly larger title. Every card carries the
- * near-subliminal caustic drift layer (motion.css / glass.css). */
-export function Card({title, subtitle, action, children, className = '', pad = true, dot = false}: {
-  title?: ReactNode; subtitle?: string; action?: ReactNode; children: ReactNode; className?: string; pad?: boolean
-  dot?: boolean
+/** Overline: the shared label recipe — 11px uppercase, tracked, muted.
+ * Labels recede; values dominate. */
+export function Overline({children, className = ''}: {children: ReactNode; className?: string}) {
+  return (
+    <div className={`text-[length:var(--fs-caption)] font-semibold uppercase tracking-[var(--tracking-label)] text-[var(--text-3)] ${className}`}>
+      {children}
+    </div>
+  )
+}
+
+/** Card: the quiet tier-2 panel (glass.css .pf-card). It recedes. `title` is
+ * a real 18px section heading — most quiet cards should carry `label`
+ * instead, an uppercase overline that lets the content dominate. */
+export function Card({title, label, subtitle, action, children, className = '', pad = true}: {
+  title?: ReactNode; label?: ReactNode; subtitle?: string; action?: ReactNode; children: ReactNode; className?: string; pad?: boolean
 }) {
   return (
     <div className={`pf-card ${className}`}>
-      <span aria-hidden className="pf-caustic" />
-      {(title || action) && (
+      {(title || label || action) && (
         <div className={`relative flex items-center justify-between gap-3 ${pad ? 'px-5 pt-4' : 'p-5 pb-4'}`}>
           <div className="min-w-0">
             {title && (
-              <h2 className={`flex items-center gap-2 font-semibold tracking-tight text-[var(--text)] ${dot ? 'text-[16px]' : 'text-[15px]'}`}>
-                {dot && (
-                  <span
-                    aria-hidden
-                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)] shadow-[0_0_10px_color-mix(in_srgb,var(--accent)_70%,transparent)]"
-                  />
-                )}
-                {title}
-              </h2>
+              <h2 className="text-[length:var(--fs-title)] font-semibold tracking-tight text-[var(--text)]">{title}</h2>
             )}
-            {subtitle && <p className="mt-0.5 text-xs text-[var(--text-3)]">{subtitle}</p>}
+            {!title && label && <Overline>{label}</Overline>}
+            {subtitle && <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitle}</p>}
           </div>
           {action}
         </div>
@@ -54,30 +56,51 @@ export function Card({title, subtitle, action, children, className = '', pad = t
   )
 }
 
-/** StatTile: a headline metric on a hot glass tile. `value` takes a ReactNode
- * so callers pass a NumberTicker when the numeral should glide. `tone` tints
- * the numeral with a status color; `accent` with the mode accent. */
-export function StatTile({label, value, sub, icon, accent, tone, size = 'md'}: {
+/** SignalCard: the identity surface — Signal Glass (glass.css .pf-signal).
+ * One per screen, only on surfaces that represent live network activity.
+ * Carries the caustic layer quiet cards gave up; the Shell lamp wakes it. */
+export function SignalCard({title, subtitle, action, children, className = '', pad = true}: {
+  title?: ReactNode; subtitle?: string; action?: ReactNode; children: ReactNode; className?: string; pad?: boolean
+}) {
+  return (
+    <div className={`pf-signal ${className}`}>
+      <span aria-hidden className="pf-caustic" />
+      {(title || action) && (
+        <div className={`relative flex items-center justify-between gap-3 ${pad ? 'px-5 pt-4' : 'p-5 pb-4'}`}>
+          <div className="min-w-0">
+            {title && <h2 className="text-[length:var(--fs-title)] font-semibold tracking-tight text-[var(--text)]">{title}</h2>}
+            {subtitle && <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitle}</p>}
+          </div>
+          {action}
+        </div>
+      )}
+      <div className={`relative ${pad ? 'p-5 pt-4' : ''}`}>{children}</div>
+    </div>
+  )
+}
+
+/** StatTile: a tier-3 headline metric — type on whitespace, no container.
+ * The hairline left rule gives metric groups a rhythm without boxes.
+ * `value` takes a ReactNode so callers pass a NumberTicker when the numeral
+ * should glide. `tone` tints the numeral with a status color; `accent` with
+ * the mode accent. `hero` is the one 36px figure a page may carry. */
+export function StatTile({label, value, sub, accent, tone, size = 'md'}: {
   label: string
   value: ReactNode
   sub?: string
-  icon?: ReactNode
   accent?: boolean
   tone?: 'good' | 'warn' | 'bad'
-  size?: 'md' | 'lg'
+  size?: 'md' | 'hero'
 }) {
   const color = tone ? `var(--${tone})` : accent ? 'var(--accent)' : undefined
   return (
-    <div className={`pf-card pf-lift pf-hot ${size === 'lg' ? 'p-4' : 'p-3.5'}`}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-xs text-[var(--text-3)]">{label}</div>
-        {icon && <span className="shrink-0 text-[var(--text-3)]">{icon}</span>}
-      </div>
+    <div className="border-l border-[var(--hairline)] py-0.5 pl-4">
+      <Overline>{label}</Overline>
       <div
-        className={`mt-1 font-semibold tabular-nums ${size === 'lg' ? 'text-[22px] leading-tight' : 'text-lg'}`}
+        className={`mt-1 font-semibold leading-tight tabular-nums ${size === 'hero' ? 'text-[length:var(--fs-metric-hero)]' : 'text-[length:var(--fs-metric)]'}`}
         style={color ? {color} : undefined}
       >{value}</div>
-      {sub && <div className="mt-0.5 truncate text-[11px] tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
+      {sub && <div className="mt-1 truncate text-[length:var(--fs-caption)] tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
     </div>
   )
 }
@@ -861,7 +884,7 @@ export function Modal({title, onClose, children, footer, wide}: {
 export function Codebox({text, action}: {text: string; action?: ReactNode}) {
   return (
     <div className="flex items-stretch gap-2">
-      <code className="pf-well min-w-0 flex-1 select-text break-all px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-[var(--text)]">
+      <code className="pf-well min-w-0 flex-1 select-text break-all px-3 py-2.5 font-mono text-[14px] leading-relaxed text-[var(--text)]">
         {text}
       </code>
       {action}

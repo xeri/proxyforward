@@ -6,9 +6,11 @@
      agent    → cyan    (the machine room)
      unset    → violet  (wizard / not yet configured)
 
-   Every interactive surface consumes var(--accent); the ambient background
-   consumes var(--mode-glow). Chart series tokens (--dl/--ul/--conn/--rtt) are
-   load-bearing for BandwidthChart — names must not change.
+   Accent is signal, not branding (see frontend/DESIGN.md): active nav,
+   primary buttons, live status, and each screen's identity surface consume
+   var(--accent); the ambient background consumes var(--mode-glow). Chart
+   series tokens (--dl/--ul/--conn/--rtt) are load-bearing for BandwidthChart
+   — names must not change.
 --------------------------------------------------------------------------- */
 
 /* Accent colors are registered so gradients and glows that consume them can
@@ -68,7 +70,7 @@
 
   --text: #edeff7;
   --text-2: #9aa3ba;
-  --text-3: #646d85;
+  --text-3: #7e88a5;
 
   /* Accent ramp (violet by default; role selectors below re-map it). */
   --accent: #8b5cf6;
@@ -111,6 +113,13 @@
   --sep: rgba(255, 255, 255, 0.08);
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.55);
   --shadow-pop: 0 24px 64px -16px rgba(0, 0, 0, 0.65);
+
+  /* Tier-2 "quiet panel": the standard card material. Near-solid, one subtle
+     border, one soft shadow — no blur, no reflections, no rim. Signal Glass
+     (.pf-signal) is the reward; this is the default that recedes around it. */
+  --card-2-bg: color-mix(in srgb, var(--panel) 88%, transparent);
+  --card-2-border: rgba(255, 255, 255, 0.07);
+  --shadow-card-2: 0 1px 2px rgba(0, 0, 0, 0.25), 0 6px 20px -12px rgba(0, 0, 0, 0.4);
 
   /* Blur ladder: physical hierarchy through backdrop depth — cards are the
      thinnest glass, chrome is heavier, floats are the thickest. */
@@ -169,18 +178,24 @@
   --r-xl: 18px; /* modals, command palette */
 
   /* Type scale. Root stays 13.5px (base.css); these are the only sizes new
-     UI should use, so hierarchy stays consistent across screens. */
-  --fs-hero: 24px;    /* page titles */
-  --fs-title: 18px;   /* card headlines, wizard acts */
-  --fs-section: 15px; /* in-card section headers */
-  --fs-body: 13.5px;  /* default */
-  --fs-sub: 12.5px;   /* secondary rows, hints */
-  --fs-caption: 11px; /* labels, table headers */
-  --fs-micro: 10px;   /* kbd chips, overlines */
+     UI should use. Contrast BETWEEN levels is the point — metrics dominate,
+     labels recede. The label recipe: --fs-caption + uppercase +
+     --tracking-label + weight 600 + --text-3. */
+  --fs-hero: 26px;        /* page titles */
+  --fs-title: 18px;       /* section titles, card headlines that ARE sections */
+  --fs-metric-hero: 36px; /* the one hero figure per page */
+  --fs-metric: 26px;      /* standard headline metrics */
+  --fs-body: 13.5px;      /* default */
+  --fs-sub: 12.5px;       /* secondary rows, hints */
+  --fs-caption: 11px;     /* labels, metadata, table headers */
+  --fs-micro: 10px;       /* kbd chips, overlines */
+  --tracking-label: 0.08em;
   --lh-tight: 1.15;
   --lh-body: 1.45;
 
-  /* 4px spatial rhythm + shared layout geometry. */
+  /* 4px spatial rhythm + shared layout geometry. Page rhythm: --sp-12
+     between major page groups, --sp-6 within a group, --grid-gap inside
+     grids, --sp-2 label-to-value. Whitespace is an active design element. */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -189,6 +204,7 @@
   --sp-6: 24px;
   --sp-8: 32px;
   --sp-10: 40px;
+  --sp-12: 48px;
   --content-max: 1400px;
   --page-pad: 28px;
   --grid-gap: 16px;
@@ -245,7 +261,7 @@
 
   --text: #191c26;
   --text-2: #4b5266;
-  --text-3: #7e879e;
+  --text-3: #5f6880;
 
   --accent: #7048e8;
   --accent-2: #9775fa;
@@ -276,6 +292,10 @@
   --btn-accent-fill: color-mix(in srgb, var(--accent) 92%, transparent);
   --btn-accent-fill-hover: color-mix(in srgb, var(--accent-hover) 96%, transparent);
   --sep: rgba(25, 28, 38, 0.12);
+  /* Tier-2 quiet panel, ice edition. */
+  --card-2-bg: rgba(247, 248, 252, 0.85);
+  --card-2-border: #dde1ec;
+  --shadow-card-2: 0 1px 2px rgba(30, 34, 58, 0.05), 0 6px 20px -12px rgba(30, 34, 58, 0.12);
   /* Ice catches hotter whites: the arc/streak/caustics need far more strength
      to read over a bright backdrop. */
   --arc: rgba(255, 255, 255, 0.5);

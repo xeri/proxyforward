@@ -56,9 +56,9 @@ export function Settings({status}: {status: UIStatus}) {
   // crossfades into place without a layout shift.
   if (!cfg) {
     return (
-      <div className="mx-auto max-w-[74rem]">
+      <div className="mx-auto max-w-[62rem]">
         <PageHeader title="Settings" subtitle="Appearance, behavior, connection, and system integration." />
-        <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-[150px_minmax(0,1fr)]">
+        <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-[150px_minmax(0,44rem)]">
           <div className="hidden flex-col gap-1.5 md:flex" aria-hidden>
             {sections.map(s => <Skeleton key={s.id} className="h-7 w-full" />)}
           </div>
@@ -92,8 +92,9 @@ export function Settings({status}: {status: UIStatus}) {
 
   return (
     // Forms read best in a measured column — Settings caps its own width
-    // instead of stretching across the full canvas.
-    <div className="mx-auto max-w-[74rem]">
+    // instead of stretching across the full canvas, and the content column
+    // is capped again so a label and its control never drift a monitor apart.
+    <div className="mx-auto max-w-[62rem]">
       <PageHeader title="Settings" subtitle="Appearance, behavior, connection, and system integration." />
       {err && <div className="mb-4"><ErrorBanner message={err} onDismiss={() => setErr('')} /></div>}
       {attached && (
@@ -104,7 +105,7 @@ export function Settings({status}: {status: UIStatus}) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-[150px_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-[150px_minmax(0,44rem)]">
         <SectionRail sections={sections} />
 
         <div className="min-w-0">
@@ -611,7 +612,7 @@ function Section({id, title, subtitle, action, children}: {
 }) {
   return (
     <div id={`s-${id}`} className="scroll-mt-6">
-      <Card dot title={title} subtitle={subtitle} action={action}>{children}</Card>
+      <Card title={title} subtitle={subtitle} action={action}>{children}</Card>
     </div>
   )
 }
