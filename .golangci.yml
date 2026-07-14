@@ -1,0 +1,32 @@
+# Curated on purpose. A linter that fails on day one teaches everyone to ignore
+# CI, so this enables only checks the tree is clean against, and each exclusion
+# below says why rather than hiding behind a default.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet # already a CI gate; keep it inside the linter run too
+    - staticcheck # real bug classes (SA*)
+    - ineffassign # dead stores
+    - unused # dead code
+    - misspell # typos in comments, which are this repo's spec
+
+  settings:
+    staticcheck:
+      # SA* = correctness. QF*/ST* = quickfix + style opinions: De Morgan's law,
+      # tagged switches, dropping embedded-field selectors. This codebase's
+      # comments are the spec and its explicitness is deliberate; those checks
+      # would fight it for no correctness gain.
+      checks: ["all", "-QF*", "-ST*"]
+
+  exclusions:
+    presets:
+      - std-error-handling
+
+# errcheck is deliberately OFF. It reports 50 findings, and the large majority are
+# intentional - windows.SetStdHandle, deferred Close() on read paths, netsh calls
+# whose exit code is the signal. Turning it on means auditing all 50 and writing
+# explicit _ = assignments; that is a real change with real review value, and it
+# belongs in its own commit, not smuggled in with the CI suite.
+# Tracked in docs/agent/polish-backlog.md.

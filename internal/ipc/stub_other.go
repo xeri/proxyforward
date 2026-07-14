@@ -4,6 +4,7 @@ package ipc
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"time"
 
@@ -25,3 +26,6 @@ func (c *Client) History(windowMs int64, maxBuckets int) (*stats.HistoryResult, 
 	return nil, ErrUnsupported
 }
 func (c *Client) Peers() ([]stats.PeerStat, error) { return nil, ErrUnsupported }
+func (c *Client) Analytics(op string, body json.RawMessage) (json.RawMessage, error) {
+	return nil, ErrUnsupported
+}

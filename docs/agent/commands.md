@@ -44,12 +44,21 @@ Private configs keep your real setup untouched (`docs/agent/reasoning.md` step 0
 
 ## Gotchas
 
-- **Broken**: `GOOS=linux go build ./...` fails — the `ipc` non-Windows stub lacks
-  `Analytics` (`app/analytics.go`). Windows-only in practice; fix the stub if
-  cross-compilation ever matters.
-- `go test -race` needs cgo (a C toolchain); unavailable on machines without one.
-- gofmt cleanliness is enforced (edit hook + CI); don't mass-reformat in an
-  unrelated change. No other lint config exists beyond `go vet`.
+- **Fresh clone**: every Go command fails until the frontend has been built once —
+  `main.go` embeds `all:frontend/dist`, which is gitignored, and a `go:embed` matching
+  zero files is a compile error. Run `cd frontend && npm ci && npm run build` first.
+  CI does this in one job and shares `frontend/dist` with every Go job.
+- `GOOS=linux go build ./...` and `GOOS=darwin` now **compile** (CI builds both). They
+  do not *run*: `ipc.Serve` returns `ErrUnsupported` off Windows, so the engine never
+  starts. Cross-compiling darwin from Windows still fails on `energye/systray`, which
+  needs cgo — that's the cross-compile, not the code; the native macOS runner is fine.
+- `go test -race` needs cgo (a C toolchain); unavailable on machines without one — the
+  `race` job in CI is the only place it actually runs.
+- gofmt cleanliness is enforced (edit hook + CI) and depends on `.gitattributes`
+  (`eol=lf`) — without it a Windows checkout is CRLF and gofmt rejects every file.
+  Don't mass-reformat in an unrelated change.
+- `golangci-lint run ./...` (`.golangci.yml`, curated: govet/staticcheck/ineffassign/
+  unused/misspell) is a CI gate. `errcheck` is deliberately off — see the config header.
 - **windowsgui has no stderr**: startup failures land in
   `%APPDATA%\proxyforward\logs\crash.log` and `wails.log` (`main.go installCrashLog`);
   a silent non-appearing window means *look there*, not "add prints".

@@ -75,7 +75,11 @@ type Gateway struct {
 	fingerprint string
 	controlLn   net.Listener
 
-	actor   *actor
+	// actor is published by Start while status surfaces (the engine's stats
+	// sampler, the GUI) may already be polling: the reads below genuinely race
+	// the write, so the pointer is atomic. Plain-pointer publication also let a
+	// reader observe a half-constructed actor.
+	actor   atomic.Pointer[actor]
 	authLim *authLimiter
 	gate    *connGate
 
@@ -141,11 +145,12 @@ func (g *Gateway) Start(ctx context.Context) error {
 	g.cancel = cancel
 	g.authLim = newAuthLimiter(g.cfg.Gateway.AuthAttemptsPerMin)
 	g.gate = newConnGate(g.cfg.Gateway.MaxConnsGlobal, g.cfg.Gateway.MaxConnsPerIP)
-	g.actor = newActor(g.logger)
+	a := newActor(g.logger)
+	g.actor.Store(a)
 	g.wg.Add(2)
 	go func() {
 		defer g.wg.Done()
-		g.actor.run(runCtx)
+		a.run(runCtx)
 	}()
 	go func() {
 		defer g.wg.Done()
@@ -174,23 +179,26 @@ func (g *Gateway) Fingerprint() string { return g.fingerprint }
 // TunnelPort reports the actual bound public port of a tunnel (0, false if
 // not currently bound). Used by status surfaces and tests.
 func (g *Gateway) TunnelPort(tunnelID string) (int, bool) {
-	if g.actor == nil {
+	a := g.act()
+	if a == nil {
 		return 0, false // Start not called yet (status polled early)
 	}
-	return g.actor.tunnelPort(tunnelID)
+	return a.tunnelPort(tunnelID)
 }
 
 // Tunnels enumerates the currently registered tunnels and their bound ports.
 func (g *Gateway) Tunnels() []TunnelSnapshot {
-	if g.actor == nil {
+	a := g.act()
+	if a == nil {
 		return nil // Start not called yet (status polled early)
 	}
-	return g.actor.tunnels()
+	return a.tunnels()
 }
 
 // AgentConnected reports whether an agent session is currently admitted.
 func (g *Gateway) AgentConnected() bool {
-	return g.actor != nil && g.actor.currentSession() != nil
+	a := g.act()
+	return a != nil && a.currentSession() != nil
 }
 
 // AgentLinkUpSinceMs reports when the current agent session was admitted
@@ -318,21 +326,22 @@ func (g *Gateway) LinkSessionBytes() (in, out int64) {
 // process.
 func (g *Gateway) LinkTotalBytes() (in, out int64) { return g.linkTotals.Bytes() }
 
+// act returns the running actor, or nil before Start has published it.
+func (g *Gateway) act() *actor { return g.actor.Load() }
+
 // session returns the current agent session, nil-safe before Start.
 func (g *Gateway) session() *agentSession {
-	if g.actor == nil {
+	a := g.act()
+	if a == nil {
 		return nil
 	}
-	return g.actor.currentSession()
+	return a.currentSession()
 }
 
 // TunnelLocalUp reports the agent's last word on a tunnel's local backend;
 // known is false when no agent is connected or it has not reported yet.
 func (g *Gateway) TunnelLocalUp(tunnelID string) (up, known bool) {
-	if g.actor == nil {
-		return false, false
-	}
-	sess := g.actor.currentSession()
+	sess := g.session()
 	if sess == nil {
 		return false, false
 	}
@@ -445,7 +454,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		caps:        control.NewCapSet(negotiated),
 		quality:     linkquality.New(lossWindow),
 	}
-	gen, err := g.actor.admit(sess)
+	gen, err := g.act().admit(sess)
 	if err != nil {
 		logger.Warn("agent rejected", "agent", hello.AgentID, "err", err)
 		control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
@@ -456,7 +465,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 	sess.gen = gen
-	defer g.actor.disconnected(sess)
+	defer g.act().disconnected(sess)
 
 	gwHost, _ := os.Hostname()
 	if err := control.WriteMsg(conn, control.TypeHelloOK, control.HelloOK{
@@ -663,7 +672,7 @@ func (g *Gateway) handleControlMsg(sess *agentSession, ctrl transport.Stream, en
 		if err != nil {
 			return err
 		}
-		g.actor.unbindTunnel(sess, unreg.TunnelID)
+		g.act().unbindTunnel(sess, unreg.TunnelID)
 		sess.logger.Info("tunnel unregistered", "tunnel_id", unreg.TunnelID)
 		return nil
 
@@ -730,7 +739,7 @@ func (g *Gateway) bindTunnel(sess *agentSession, spec control.TunnelSpec) (int, 
 	if berr := g.validateSpec(spec); berr != nil {
 		return 0, berr
 	}
-	port, err := g.actor.bindTunnel(sess, spec, g.cfg.Gateway.BindAddr, g.handleClient)
+	port, err := g.act().bindTunnel(sess, spec, g.cfg.Gateway.BindAddr, g.handleClient)
 	if err != nil {
 		return 0, &bindError{control.ErrCodePortInUse, err.Error()}
 	}
@@ -751,7 +760,7 @@ func (g *Gateway) syncTunnels(sess *agentSession, sync *control.SyncTunnels) con
 		}
 		valid = append(valid, spec)
 	}
-	outcomes, ran := g.actor.reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.handleClient)
+	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.handleClient)
 	if !ran {
 		for _, spec := range valid {
 			results = append(results, control.SyncTunnelResult{TunnelID: spec.ID, Code: control.ErrCodePortInUse, Message: "gateway is shutting down"})
