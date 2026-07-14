@@ -43,10 +43,17 @@ jobs:
         id: v
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"          # v1.2.3
-          $num = $tag -replace '^v', ''            # 1.2.3
+          $tag = "${{ github.ref_name }}"          # v1.2.3 or v1.2.3-rc1
+          $num = $tag -replace '^v', ''            # 1.2.3   / 1.2.3-rc1
+          # The Windows version resource is numeric-only: a pre-release suffix
+          # would make Wails emit an invalid FileVersion/ProductVersion. Strip it
+          # for the resource; the exe still reports the full tag via -ldflags.
+          $prod = ($num -split '-')[0]             # 1.2.3
           "tag=$tag"   >> $env:GITHUB_OUTPUT
           "num=$num"   >> $env:GITHUB_OUTPUT
+          "prod=$prod" >> $env:GITHUB_OUTPUT
+          # A pre-release tag ships as a GitHub pre-release.
+          "prerelease=$(if ($num -match '-') { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
 
       # NSIS is NOT preinstalled on windows-latest. This matters more than it
       # looks: `wails build -nsis` exits 0 and SILENTLY SKIPS the installer when
@@ -75,7 +82,7 @@ jobs:
         shell: pwsh
         run: |
           $j = Get-Content wails.json -Raw | ConvertFrom-Json
-          $j.info | Add-Member -NotePropertyName productVersion -NotePropertyValue "${{ steps.v.outputs.num }}" -Force
+          $j.info | Add-Member -NotePropertyName productVersion -NotePropertyValue "${{ steps.v.outputs.prod }}" -Force
           $j | ConvertTo-Json -Depth 10 | Set-Content wails.json -Encoding utf8
 
       - name: wails build (exe + NSIS installer)
@@ -136,6 +143,7 @@ jobs:
         uses: softprops/action-gh-release@v3.0.2
         with:
           draft: true
+          prerelease: ${{ steps.v.outputs.prerelease == 'true' }}
           generate_release_notes: true
           files: |
             dist/proxyforward-${{ steps.v.outputs.num }}-windows-amd64.exe
