@@ -41,6 +41,9 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+          # setup-node v7 caches by default; empty disables it. Same reasoning as
+          # setup-go above.
+          cache: ""
 
       # The tag is attacker-shaped input (anyone who can push a tag chooses the
       # string), so it goes through env into the script, never interpolated into
@@ -158,29 +161,41 @@ jobs:
         with:
           subject-path: "dist/*.exe"
 
+      # `gh` ships on the runner, so a third-party action holding contents:write is
+      # avoidable surface (zizmor/superfluous-actions). The draft is deliberate:
+      # .claude/skills/release/SKILL.md makes releases an escalation trigger, and
+      # the smoke it prescribes — launch the exe, pair a loopback gateway+agent,
+      # move bytes — cannot be automated. A human runs that, then presses Publish.
       - name: draft release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
-          draft: true
-          prerelease: ${{ steps.v.outputs.prerelease == 'true' }}
-          generate_release_notes: true
-          files: |
-            dist/proxyforward-${{ steps.v.outputs.num }}-windows-amd64.exe
-            dist/proxyforward-${{ steps.v.outputs.num }}-windows-amd64-installer.exe
-            dist/SHA256SUMS.txt
-            dist/proxyforward-${{ steps.v.outputs.num }}-sbom.spdx.json
-          body: |
-            ## Install
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.v.outputs.tag }}
+          NUM: ${{ steps.v.outputs.num }}
+          REPO: ${{ github.repository }}
+          PRERELEASE: ${{ steps.v.outputs.prerelease }}
+        run: |
+          cat > notes.md <<EOF
+          ## Install
 
-            Download `proxyforward-${{ steps.v.outputs.num }}-windows-amd64-installer.exe`,
-            or grab the portable `proxyforward-${{ steps.v.outputs.num }}-windows-amd64.exe`
-            and run it anywhere. Windows 10/11 x64.
+          Download \`proxyforward-$NUM-windows-amd64-installer.exe\`, or grab the
+          portable \`proxyforward-$NUM-windows-amd64.exe\` and run it anywhere.
+          Windows 10/11 x64.
 
-            The binaries are **not code-signed**, so SmartScreen will warn on first
-            run ("unknown publisher"). Verify what you downloaded instead:
+          The binaries are **not code-signed**, so SmartScreen will warn on first
+          run ("unknown publisher"). Verify what you downloaded instead:
 
-            ```
-            gh attestation verify proxyforward-${{ steps.v.outputs.num }}-windows-amd64.exe -R ${{ github.repository }}
-            ```
+          \`\`\`
+          gh attestation verify proxyforward-$NUM-windows-amd64.exe -R $REPO
+          \`\`\`
 
-            Checksums are in `SHA256SUMS.txt`.
+          Checksums are in \`SHA256SUMS.txt\`.
+          EOF
+
+          flags=(--draft --notes-file notes.md --title "$TAG")
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" "${flags[@]}" \
+            "dist/proxyforward-$NUM-windows-amd64.exe" \
+            "dist/proxyforward-$NUM-windows-amd64-installer.exe" \
+            "dist/SHA256SUMS.txt" \
+            "dist/proxyforward-$NUM-sbom.spdx.json"
