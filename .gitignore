@@ -1,3 +1,5 @@
 build/bin
 node_modules
 frontend/dist
+# `wails build -nsis` downloads the WebView2 bootstrapper here.
+build/windows/installer/tmp
