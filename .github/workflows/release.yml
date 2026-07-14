@@ -41,9 +41,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-          # setup-node v7 caches by default; empty disables it. Same reasoning as
-          # setup-go above.
-          cache: ""
+          # setup-node v7 added package-manager-cache, defaulting to TRUE — the
+          # `cache:` input is not the switch. Same reasoning as setup-go above:
+          # nothing restores a cache into a binary we sign provenance for.
+          package-manager-cache: false
 
       # The tag is attacker-shaped input (anyone who can push a tag chooses the
       # string), so it goes through env into the script, never interpolated into
