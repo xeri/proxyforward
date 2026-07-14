@@ -39,11 +39,16 @@ jobs:
           - { pkg: ./internal/mc, target: FuzzServeOffline }
           - { pkg: ./internal/relay, target: FuzzTapChunked }
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+          # We manage the corpus cache below; setup-go's cache covers GOCACHE too
+          # and the two would fight over the same directory.
+          cache: false
 
       # Go writes generated corpus entries under $GOCACHE/fuzz. Restoring them
       # is what turns 8 nightly 5-minute runs into a corpus that grows, rather
@@ -51,20 +56,27 @@ jobs:
       - name: resolve GOCACHE
         id: gocache
         run: echo "dir=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.gocache.outputs.dir }}/fuzz
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: |
             fuzz-corpus-${{ matrix.target }}-
 
+      # FUZZTIME comes from workflow_dispatch, i.e. from a human typing into a
+      # form: it goes through env, never interpolated into the shell command, or
+      # it would be a template-injection vector.
       - name: fuzz ${{ matrix.target }}
-        run: go test -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime ${{ inputs.fuzztime || '5m' }} ${{ matrix.pkg }}
+        env:
+          TARGET: ${{ matrix.target }}
+          PKG: ${{ matrix.pkg }}
+          FUZZTIME: ${{ inputs.fuzztime || '5m' }}
+        run: go test -run '^$' -fuzz "^${TARGET}$" -fuzztime "$FUZZTIME" "$PKG"
 
       # A crasher is written to <pkg>/testdata/fuzz/<Target>/. It is a real bug
       # and a permanent regression seed: commit it with the fix.
       - if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: crasher-${{ matrix.target }}
           path: ${{ matrix.pkg }}/testdata/fuzz/**

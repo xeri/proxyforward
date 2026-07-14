@@ -1,9 +1,14 @@
+# Every ecosystem sets a cooldown: a compromised release is usually yanked within
+# days, and Dependabot opening a PR for it hours after publication is how that
+# reaches you. Waiting a week costs nothing here.
 version: 2
 updates:
   - package-ecosystem: gomod
     directory: "/"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     # Both of these are special cases in .claude/skills/dep-bump/SKILL.md and are
     # bumped by hand, with the playbook:
     #   yamux - the mux config (transport/yamux.go muxConfig) must be re-verified
@@ -19,8 +24,14 @@ updates:
     directory: "/frontend"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
 
+  # Actions are pinned to commit SHAs (zizmor's unpinned-uses), so this is what
+  # keeps them current: Dependabot rewrites the SHA and the trailing # vX.Y.Z.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
