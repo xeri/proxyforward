@@ -1,0 +1,71 @@
+# Nightly fuzzing of the internet-facing parsers.
+#
+# `go test ./...` only ever runs the SEED corpora of these targets - nothing in
+# the repo actually fuzzes. This does, one target per job (Go permits only one
+# -fuzz target per invocation), and caches the generated corpus so coverage
+# compounds night over night instead of restarting from the seeds each time.
+#
+# None of these packages import the root package, so - unlike every job in
+# ci.yml - this workflow needs no frontend/dist.
+name: fuzz
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "Duration per target (e.g. 5m, 30m)"
+        required: false
+        default: "5m"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pkg: ./internal/control, target: FuzzReadMsg }
+          - { pkg: ./internal/mc, target: FuzzReadVarInt }
+          - { pkg: ./internal/mc, target: FuzzParseHandshake }
+          - { pkg: ./internal/mc, target: FuzzReadPacket }
+          - { pkg: ./internal/mc, target: FuzzParseLoginStart }
+          - { pkg: ./internal/mc, target: FuzzSnifferChunked }
+          - { pkg: ./internal/mc, target: FuzzServeOffline }
+          - { pkg: ./internal/relay, target: FuzzTapChunked }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # Go writes generated corpus entries under $GOCACHE/fuzz. Restoring them
+      # is what turns 8 nightly 5-minute runs into a corpus that grows, rather
+      # than 8 cold starts.
+      - name: resolve GOCACHE
+        id: gocache
+        run: echo "dir=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.gocache.outputs.dir }}/fuzz
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
+      - name: fuzz ${{ matrix.target }}
+        run: go test -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime ${{ inputs.fuzztime || '5m' }} ${{ matrix.pkg }}
+
+      # A crasher is written to <pkg>/testdata/fuzz/<Target>/. It is a real bug
+      # and a permanent regression seed: commit it with the fix.
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crasher-${{ matrix.target }}
+          path: ${{ matrix.pkg }}/testdata/fuzz/**
+          if-no-files-found: ignore

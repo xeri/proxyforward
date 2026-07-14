@@ -1,8 +1,18 @@
-# CI gates for proxyforward (root CLAUDE.md "Enforcement"). The Go job runs on
-# Windows because the engine is Windows-only in practice (named pipes, service,
-# firewall integration); it includes the e2e suite, the 64 MiB burst perf floor,
-# and the doc-citation check (internal/doccheck). The gofmt step fails on any
-# formatting drift — run `gofmt -w .` locally before pushing.
+# CI gates for proxyforward (root CLAUDE.md "Enforcement").
+#
+# Two things are load-bearing here and easy to break:
+#
+#  1. main.go embeds `all:frontend/dist`, which is .gitignore'd. A go:embed that
+#     matches zero files is a COMPILE ERROR, so `go vet`/`go test`/`go build` all
+#     fail on a fresh clone. Every Go job therefore downloads the `frontend-dist`
+#     artifact built once by the `frontend` job. Never add a Go job without it.
+#  2. gofmt only means anything because of .gitattributes (eol=lf). Windows
+#     runners check out CRLF by default, which makes gofmt reject every file.
+#
+# The Go jobs run on Windows because the engine is Windows-only in practice
+# (named pipes, service, firewall). The linux/macos build jobs prove the tree
+# still compiles elsewhere; their binaries are NOT shippable — see the Reality
+# check in CLAUDE.md.
 name: ci
 
 on:
@@ -10,14 +20,55 @@ on:
     branches: [master]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WAILS_VERSION: v2.13.0
+
 jobs:
-  go:
-    runs-on: windows-latest
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      # `npm run build` is tsc + vite: the only frontend checker this repo has.
+      - run: npm run build
+        working-directory: frontend
+      - uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+          if-no-files-found: error
+
+  test:
+    needs: frontend
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          # v6 keys the cache on go.mod by default, which misses transitive
+          # resolution changes. go.sum is the honest key.
+          cache-dependency-path: go.sum
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
       - name: gofmt
         shell: pwsh
         run: |
@@ -28,19 +79,210 @@ jobs:
             exit 1
           }
       - run: go vet ./...
-      - run: go test ./...
+      # -short skips only the 64 MiB burst, which the `perf` job owns so runner
+      # noise can't block a merge. Everything else runs: unit, e2e (goleak),
+      # fuzz seed corpora, and the internal/doccheck citation test.
+      - run: go test -short ./...
 
-  frontend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
+  race:
+    needs: frontend
+    runs-on: windows-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm run build
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      # -race needs cgo. windows-latest ships MinGW gcc on PATH, so this needs
+      # no toolchain setup — and CI is the only place the race detector ever
+      # runs, since the dev machine has no C compiler.
+      - run: go test -short -race ./...
+        env:
+          CGO_ENABLED: 1
+
+  perf:
+    needs: frontend
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      # The floor (>=20 MiB/s, worst cross-stream RTT <=500 ms over a 64 MiB
+      # loopback burst) is a wall-clock assertion on a shared 4-vCPU runner: the
+      # RTT bound is a TAIL metric that one GC pause can trip. Best-of-3 mirrors
+      # what .claude/skills/hot-path/SKILL.md tells a human to do.
+      #
+      # If this job fails three times, that is a real regression. Fix the code.
+      # Never lower the floor to make CI green.
+      - name: burst floor (best of 3)
+        shell: pwsh
+        run: |
+          "### burst floor (>=20 MiB/s, worst cross-stream RTT <=500 ms)" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "| attempt | result | measurement |" >> $env:GITHUB_STEP_SUMMARY
+          "| --- | --- | --- |" >> $env:GITHUB_STEP_SUMMARY
+          $passed = $false
+          for ($i = 1; $i -le 3; $i++) {
+            Write-Output "::group::burst attempt $i"
+            $out = go test -run TestBurstThroughputAndCrossStreamLatency -v -count=1 ./internal/e2e/ 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            Write-Output $out
+            Write-Output "::endgroup::"
+
+            $line = ($out -split "`n" | Select-String -Pattern 'burst: 64 MiB' | Select-Object -First 1)
+            $summary = if ($line) { $line.ToString().Trim() } else { "no burst line emitted" }
+            if ($code -eq 0) {
+              "| $i | pass | $summary |" >> $env:GITHUB_STEP_SUMMARY
+              $passed = $true
+              break
+            }
+            "| $i | FAIL | $summary |" >> $env:GITHUB_STEP_SUMMARY
+          }
+          if (-not $passed) {
+            throw "burst floor missed on all 3 attempts - treat as a hot-path regression, do not lower the floor"
+          }
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      # golangci-lint type-checks, so it needs the embed target to exist. It is
+      # never used for anything but satisfying go:embed here.
+      - name: stub frontend/dist for go:embed
+        run: mkdir -p frontend/dist && touch frontend/dist/index.html
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+      # .claude/rules/go.md: "Zero TODO/FIXME markers in code - debt is recorded
+      # in docs/agent/polish-backlog.md". Nothing enforced that until now.
+      # Scoped to tracked files so it can't trip over node_modules or generated
+      # output.
+      - name: no TODO/FIXME markers
+        run: |
+          if git ls-files -z '*.go' '*.ts' '*.tsx' | xargs -0 grep -nE '(TODO|FIXME)'; then
+            echo "::error::TODO/FIXME markers are banned - record debt in docs/agent/polish-backlog.md"
+            exit 1
+          fi
+      - name: actionlint
+        run: |
+          bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+
+  build-windows:
+    needs: frontend
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      # -s skips the frontend build so the exe embeds exactly the dist that was
+      # type-checked. Bindings are deliberately NOT skipped: regenerating them is
+      # what makes the drift check below meaningful.
+      - name: wails build
+        run: >
+          wails build -platform windows/amd64 -clean -s -trimpath
+          -ldflags "-X proxyforward/internal/version.Version=0.0.0-dev+${{ github.sha }} -X proxyforward/internal/version.Commit=${{ github.sha }}"
+      # frontend/wailsjs is generated and committed; a PreToolUse hook blocks
+      # hand-edits. This promotes that hook into a merge gate: bindings that have
+      # drifted from the bound Go types fail here.
+      - name: bindings are not stale
+        shell: pwsh
+        run: |
+          git diff --exit-code -- frontend/wailsjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "frontend/wailsjs is stale - run 'wails build' and commit the regenerated bindings"
+          }
+      - name: smoke - version stamp
+        run: ./build/bin/proxyforward.exe --version
+      - uses: actions/upload-artifact@v7
+        with:
+          name: proxyforward-windows-amd64-${{ github.sha }}
+          path: build/bin/proxyforward.exe
+          retention-days: 14
+          if-no-files-found: error
+
+  # Linux and macOS binaries are built to keep the *_other.go stubs honest and to
+  # make the eventual port a small step. They are NOT shipped: ipc.Serve returns
+  # ErrUnsupported off Windows, so the engine cannot start. See CLAUDE.md.
+  build-linux:
+    needs: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      # Ubuntu 24.04 dropped libwebkit2gtk-4.0-dev. Wails v2.13 does NOT
+      # auto-detect this: -tags webkit2_41 is a compile-time cgo switch that
+      # selects the 4.1 pkg-config file.
+      - name: gtk/webkit deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - run: wails build -platform linux/amd64 -clean -s -skipbindings -tags webkit2_41
+      - uses: actions/upload-artifact@v7
+        with:
+          name: EXPERIMENTAL-linux-amd64-${{ github.sha }}
+          path: build/bin/proxyforward
+          retention-days: 7
+          if-no-files-found: error
+
+  build-macos:
+    needs: frontend
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - run: wails build -platform darwin/universal -clean -s -skipbindings
+      # build/bin/proxyforward.app is a DIRECTORY. upload-artifact re-zips without
+      # preserving the executable bit or symlinks, which breaks the bundle - so
+      # zip it with ditto and upload the single file.
+      - name: package .app
+        run: ditto -c -k --sequesterRsrc --keepParent build/bin/proxyforward.app proxyforward-macos-universal.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: EXPERIMENTAL-macos-universal-${{ github.sha }}
+          path: proxyforward-macos-universal.zip
+          retention-days: 7
+          if-no-files-found: error
