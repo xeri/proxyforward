@@ -48,8 +48,23 @@ func TestStatsLifecycle(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- eng.Run(ctx) }()
 
-	// Long enough for the 100ms sampler to take several samples.
-	time.Sleep(1200 * time.Millisecond)
+	// Wait for the precondition the shutdown assertions below actually need,
+	// rather than sleeping a magic 1200ms (.claude/rules/go-tests.md: no bare
+	// sleeps as assertions). A persisted tier (>=15s) receives its first bucket
+	// only when a 1s-tier bucket COMPLETES and cascades up (stats.go add), so
+	// the store needs a full second of *sampling* — and a fixed sleep has to
+	// cover engine startup too. Under -race startup eats the budget and the old
+	// sleep lost the race; it was marginal even without it.
+	//
+	// A window wider than tier0's 2-minute span selects the 1s tier, so two
+	// buckets there means one has completed and cascaded into a persisted tier.
+	deadline := time.Now().Add(30 * time.Second)
+	for len(eng.History(300_000, 300).Buckets) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("sampler never completed a 1s bucket")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 
 	st := eng.Status()
 	if st.ProcessStartMs == 0 {
