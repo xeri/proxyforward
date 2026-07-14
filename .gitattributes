@@ -1,0 +1,6 @@
+# Git for Windows checks out CRLF by default (core.autocrlf=true), which makes
+# gofmt consider every .go file misformatted — the CI gofmt gate failed on all
+# ~90 files for exactly this reason. Pin the working tree to LF everywhere so a
+# runner's checkout is byte-identical to the index. text=auto still detects and
+# leaves binaries (icons, .mmdb fixtures, preview.png) alone.
+* text=auto eol=lf

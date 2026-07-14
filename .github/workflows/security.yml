@@ -1,0 +1,216 @@
+# Security scanning. Everything here is free because the repo is PUBLIC and owned
+# by a user account (not an org) - CodeQL, Scorecard, gitleaks and dependency
+# review all change licensing terms if either of those facts changes.
+#
+# Note the recurring constraint from ci.yml: anything that TYPE-CHECKS Go code
+# (CodeQL's manual build, govulncheck's package loader) must materialise
+# frontend/dist first, or the root package fails to compile on `all:frontend/dist`.
+name: security
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Mondays 06:00 UTC - catches newly-disclosed CVEs in unchanged code.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Go must use build-mode: manual. `none` is unsupported for Go, and
+          # autobuild runs `go build ./...`, which dies on the go:embed.
+          - language: go
+            build-mode: manual
+            os: windows-latest
+          - language: javascript-typescript
+            build-mode: none
+            os: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # setup-go MUST precede codeql init: the action asserts `which go` is
+      # unchanged between init and analyze, and errors if Go appears afterwards.
+      - if: matrix.language == 'go'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - if: matrix.build-mode == 'manual'
+        name: build (frontend first - go:embed)
+        shell: bash
+        run: |
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+          go build ./...
+      - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          category: /language:${{ matrix.language }}
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # govulncheck's source mode loads packages with full type info, so the
+      # embed target has to exist or every package fails to load.
+      - run: npm ci --prefix frontend && npm run build --prefix frontend
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      # Reports only vulnerabilities actually reachable from our call graph.
+      - run: govulncheck ./...
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # gitleaks scans history, not just the tip
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No GITLEAKS_LICENSE needed: free for user-account repos. If this repo
+          # ever moves into an organisation, this job starts failing without one.
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
+  npm-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm audit --audit-level=high
+        working-directory: frontend
+
+  # Advisory, NOT a merge gate. gosec overlaps CodeQL heavily and false-positives
+  # on math/rand and unchecked Close() - findings land in the Security tab where
+  # they can be triaged, instead of blocking merges and training everyone to
+  # ignore CI.
+  gosec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: stub frontend/dist for go:embed
+        run: mkdir -p frontend/dist && touch frontend/dist/index.html
+      # Install for the HOST (no GOOS here, or we'd build a Windows gosec binary).
+      - run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      # GOOS=windows on a linux runner is the trick: it analyses the build we
+      # actually ship (pipe ACL, service/elevation, netsh) — which the !windows
+      # build hides — while still emitting linux-style paths. A gosec run ON
+      # windows emits `D:\a\...`, which SARIF reads as URI scheme "d" and Code
+      # Scanning rejects outright.
+      - run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
+        env:
+          GOOS: windows
+      - uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+  # Static analysis of the workflows themselves: template injection, credential
+  # persistence, cache poisoning, unpinned actions. Its first run found all four
+  # here and they are fixed - actions pinned to SHAs, persist-credentials off,
+  # every expression routed through env, no cache restore in release.yml.
+  # Advisory (like gosec) so a new audit landing upstream can't block merges;
+  # actionlint (correctness) IS blocking, in ci.yml.
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
+        with:
+          advanced-security: true
+
+  # Supply-chain posture (branch protection, pinned deps, token permissions).
+  # Never runs on pull_request: the Branch-Protection check needs default-branch
+  # context and would always fail from a fork.
+  scorecard:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true
+      - uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard

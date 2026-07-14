@@ -7,6 +7,8 @@
 An ngrok-style reverse tunnel: the Minecraft machine dials *out* to a machine that can
 accept inbound connections, and that machine relays player traffic back through the tunnel.
 
+[![CI](https://github.com/xeri/proxyforward/actions/workflows/ci.yml/badge.svg)](https://github.com/xeri/proxyforward/actions/workflows/ci.yml)
+[![Security](https://github.com/xeri/proxyforward/actions/workflows/security.yml/badge.svg)](https://github.com/xeri/proxyforward/actions/workflows/security.yml)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](#)
 [![GUI](https://img.shields.io/badge/GUI-Wails%20%2B%20React%2019-61DAFB?logo=react&logoColor=black)](https://wails.io)
@@ -40,6 +42,24 @@ TCP+TLS connection open to the gateway, multiplexed with yamux into a control st
 plus one stream per player. Everything is programmed against a `transport.Session`
 interface, so a per-connection mode (sidesteps TCP head-of-line blocking) and a future
 QUIC transport drop in without touching agent or gateway code.
+
+## Download
+
+Grab the installer or the portable exe from the
+[latest release](https://github.com/xeri/proxyforward/releases/latest). Windows 10/11 x64;
+you need it on **both** machines. There is no Linux or macOS build — the engine is
+Windows-only (named pipes, service, firewall integration).
+
+The binaries are **not code-signed**, so SmartScreen will warn on first run
+("unknown publisher"). Rather than asking you to trust that, every release is built by
+[this workflow](.github/workflows/release.yml) and carries a provenance attestation you
+can verify:
+
+```
+gh attestation verify proxyforward-<version>-windows-amd64.exe -R xeri/proxyforward
+```
+
+`SHA256SUMS.txt` and an SPDX SBOM ship with each release.
 
 ## Quick start (two machines)
 
@@ -198,10 +218,18 @@ cd frontend && npm run dev
 go test ./...
 ```
 
-115 tests, including 5 fuzz targets on the internet-facing parsers (control frames,
-Minecraft handshake/VarInt/packet, offline responder) and an in-process loopback e2e
-suite that is goroutine-leak-checked with `goleak` and enforces the throughput/latency
-floor described above.
+8 fuzz targets on the internet-facing parsers (control frames, Minecraft
+handshake/VarInt/packet, login sniffer, offline responder) and an in-process loopback
+e2e suite that is goroutine-leak-checked with `goleak` and enforces the
+throughput/latency floor described above.
+
+`go test` runs the fuzz **seed corpora**; the targets are actually fuzzed nightly
+([`fuzz.yml`](.github/workflows/fuzz.yml)). Every push also runs the race detector, the
+burst floor, CodeQL, and `govulncheck` — see [`ci.yml`](.github/workflows/ci.yml) and
+[`security.yml`](.github/workflows/security.yml).
+
+A fresh clone must build the frontend once before any Go command
+(`cd frontend && npm ci && npm run build`) — `main.go` embeds `frontend/dist`.
 
 ## License
 

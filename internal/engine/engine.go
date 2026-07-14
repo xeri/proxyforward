@@ -257,7 +257,9 @@ func (e *Engine) runSampler(ctx context.Context) {
 			// Both roles run a heartbeat and measure RTT; -1 means unknown
 			// (no live link yet). Loss is a gauge where 0 is a real reading.
 			rtt := float64(-1)
-			loss := float64(-1)
+			// loss is set unconditionally below; PacketLossPct returns -1
+			// itself when it has no sample.
+			var loss float64
 			if e.Agent != nil {
 				appIn, appOut = e.Agent.Conns.Totals()
 				linkIn, linkOut = e.Agent.LinkTotalBytes()

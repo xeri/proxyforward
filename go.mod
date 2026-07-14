@@ -1,6 +1,10 @@
 module proxyforward
 
-go 1.25.0
+// 1.25.12 is a floor, not a preference: GO-2026-5856 (Encrypted Client Hello
+// privacy leak in crypto/tls) is reachable from control.WriteMsg and every
+// counted TLS read, and is fixed in crypto/tls@go1.25.12. govulncheck in
+// .github/workflows/security.yml enforces this.
+go 1.25.12
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
