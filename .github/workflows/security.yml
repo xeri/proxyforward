@@ -128,11 +128,8 @@ jobs:
   # on math/rand and unchecked Close() - findings land in the Security tab where
   # they can be triaged, instead of blocking merges and training everyone to
   # ignore CI.
-  # Windows, for the same reason as ci.yml's lint job: on linux the !windows build
-  # hides the code most worth scanning (the pipe ACL, the service/elevation paths,
-  # netsh).
   gosec:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     continue-on-error: true
     permissions:
@@ -145,10 +142,17 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
       - name: stub frontend/dist for go:embed
-        shell: bash
         run: mkdir -p frontend/dist && touch frontend/dist/index.html
+      # Install for the HOST (no GOOS here, or we'd build a Windows gosec binary).
       - run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      # GOOS=windows on a linux runner is the trick: it analyses the build we
+      # actually ship (pipe ACL, service/elevation, netsh) — which the !windows
+      # build hides — while still emitting linux-style paths. A gosec run ON
+      # windows emits `D:\a\...`, which SARIF reads as URI scheme "d" and Code
+      # Scanning rejects outright.
       - run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
+        env:
+          GOOS: windows
       - uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: gosec.sarif
