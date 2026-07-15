@@ -127,6 +127,13 @@ func TestValidateCatches(t *testing.T) {
 			dup.ID = NewID()
 			c.Agent.Tunnels = append(c.Agent.Tunnels, dup)
 		}, "already used by another enabled udp tunnel"},
+		"negative bandwidth": {func(c *Config) {
+			c.Agent.Tunnels[0].Options.BandwidthLimitMbps = -1
+		}, "bandwidth_limit_mbps"},
+		"bad bandwidth scope": {func(c *Config) {
+			c.Agent.Tunnels[0].Options.BandwidthLimitMbps = 10
+			c.Agent.Tunnels[0].Options.BandwidthLimitScope = "sideways"
+		}, "bandwidth_limit_scope"},
 		"retention too short": {func(c *Config) { c.Analytics.RetentionDays = 0 }, "retention_days"},
 		"retention too long":  {func(c *Config) { c.Analytics.RetentionDays = 4000 }, "retention_days"},
 		"geoip not mmdb":      {func(c *Config) { c.Analytics.GeoIPCityPath = `C:\geo\GeoLite2-City.zip` }, "geoip_city_path"},
@@ -155,6 +162,16 @@ func TestValidateAccepts(t *testing.T) {
 			udp.ID = NewID()
 			udp.Type = TunnelUDP
 			c.Agent.Tunnels = append(c.Agent.Tunnels, udp)
+		},
+		"bandwidth cap with explicit scope": func(c *Config) {
+			c.Agent.Tunnels[0].Options.BandwidthLimitMbps = 5
+			c.Agent.Tunnels[0].Options.BandwidthLimitScope = BandwidthScopePerConnection
+		},
+		"bandwidth cap with empty scope": func(c *Config) {
+			c.Agent.Tunnels[0].Options.BandwidthLimitMbps = 5 // empty scope normalizes to combined
+		},
+		"bandwidth scope ignored without a cap": func(c *Config) {
+			c.Agent.Tunnels[0].Options.BandwidthLimitScope = "sideways" // no cap, so not validated
 		},
 	}
 	for name, mutate := range cases {
