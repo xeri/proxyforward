@@ -153,7 +153,6 @@ The README and the Settings/Tunnels UI **oversell**. Ground truth at 4a8b0c9:
 
 | Feature (advertised in README/UI) | Actual state |
 |---|---|
-| Offline MOTD responder | `mc.ServeOffline` built + fuzzed, **never called**; gateway closes dead-session conns (`gateway.go handleClient`). |
 | `per-conn` transport | Config-valid only; agent never reads it, gateway rejects `KindData` (`handleControlConn`). |
 | UDP tunnels | Not implemented: no UDP socket code, `validateSpec` rejects `type:"udp"`. No longer advertised (the `tunnel-udp` capability was removed); config still accepts `type:"udp"` but the gateway rejects it — a latent gap, not an oversell. |
 | Bandwidth cap | `BandwidthLimitMbps` stored, never enforced. |

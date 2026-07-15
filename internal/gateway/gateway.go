@@ -27,6 +27,7 @@ import (
 	"proxyforward/internal/control"
 	"proxyforward/internal/link"
 	"proxyforward/internal/linkquality"
+	"proxyforward/internal/mc"
 	"proxyforward/internal/mcsniff"
 	"proxyforward/internal/netid"
 	"proxyforward/internal/relay"
@@ -46,6 +47,8 @@ const (
 	controlIdleTimeout = 15 * time.Second
 	// controlWriteTimeout bounds any single control-frame write.
 	controlWriteTimeout = 10 * time.Second
+	// offlineServeTimeout bounds one offline MOTD exchange with a player.
+	offlineServeTimeout = 10 * time.Second
 
 	// The gateway pings the agent on this cadence so it measures the same
 	// RTT/jitter/loss the agent does. lossWindow/lossTimeout mirror the agent:
@@ -780,9 +783,9 @@ func (g *Gateway) syncTunnels(sess *agentSession, sync *control.SyncTunnels) con
 }
 
 // handleClient runs per accepted public connection: open a stream to the
-// agent, send the OpenConn header, splice. A session dying mid-accept gets a
-// graceful close, not a goroutine panic (milestone 5 adds the offline MOTD
-// here).
+// agent, send the OpenConn header, splice. When there is no live session or the
+// agent reports the local backend down, it answers with the tunnel's offline
+// MOTD (when configured) instead of dropping the connection.
 func (g *Gateway) handleClient(sess *agentSession, spec control.TunnelSpec, clientConn net.Conn) {
 	defer clientConn.Close()
 	ip := remoteIP(clientConn)
@@ -792,12 +795,17 @@ func (g *Gateway) handleClient(sess *agentSession, spec control.TunnelSpec, clie
 	}
 	defer g.gate.release(ip)
 	mux := sess.session()
-	if mux == nil {
-		return // session died between accept and here
+	if mux == nil || backendDown(sess, spec.ID) {
+		// No live session, or the agent reports the local server down: answer
+		// with the offline MOTD when configured, else fall through to a clean
+		// close.
+		g.serveOffline(clientConn, spec)
+		return
 	}
 	stream, err := mux.OpenStream()
 	if err != nil {
 		sess.logger.Debug("open stream for client failed", "client", clientConn.RemoteAddr().String(), "err", err)
+		g.serveOffline(clientConn, spec)
 		return
 	}
 	defer stream.Close()
@@ -839,5 +847,32 @@ func (g *Gateway) handleClient(sess *agentSession, spec control.TunnelSpec, clie
 	}
 	if err := relay.Splice(client, stream, entry.Counters); err != nil {
 		sess.logger.Debug("splice ended with error", "client", clientConn.RemoteAddr().String(), "err", err)
+	}
+}
+
+// backendDown reports whether the agent has told us this tunnel's local server
+// is unreachable. Unknown health (never probed) counts as up, so a working
+// backend is never pre-empted by the offline responder.
+func backendDown(sess *agentSession, tunnelID string) bool {
+	v, ok := sess.health.Load(tunnelID)
+	if !ok {
+		return false
+	}
+	up, _ := v.(bool)
+	return !up
+}
+
+// serveOffline answers a player with the tunnel's offline MOTD when the backend
+// is unavailable. An empty OfflineMOTD means the feature is off, so it returns
+// and lets handleClient's deferred Close drop the connection cleanly — the
+// pre-existing behavior. mc.ServeOffline requires the caller to own the deadline
+// and the close, both of which handleClient already does.
+func (g *Gateway) serveOffline(conn net.Conn, spec control.TunnelSpec) {
+	if spec.OfflineMOTD == "" {
+		return
+	}
+	conn.SetDeadline(time.Now().Add(offlineServeTimeout))
+	if err := mc.ServeOffline(conn, mc.OfflineInfo{MOTD: spec.OfflineMOTD}); err != nil {
+		g.logger.Debug("offline responder ended", "tunnel", spec.Name, "err", err)
 	}
 }
