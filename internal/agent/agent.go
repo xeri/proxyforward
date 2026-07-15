@@ -673,7 +673,7 @@ func (s *session) handleDataStream(st transport.Stream) {
 	if tun.Options.MinecraftAware {
 		src = mcsniff.Tap(st, entry)
 	}
-	if err := relay.Splice(tcp, src, entry.Counters); err != nil {
+	if err := relay.Splice(tcp, src, entry.Counters, relay.SpliceOpts{}); err != nil {
 		s.agent.logger.Debug("splice ended with error", "client", oc.ClientAddr, "err", err)
 	}
 	s.agent.logger.Debug("client disconnected", "tunnel", tun.Name, "client", oc.ClientAddr)

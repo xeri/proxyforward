@@ -27,7 +27,7 @@ func TestTapPassthroughFidelity(t *testing.T) {
 		return n >= 8 // stop tapping after the first 8 bytes
 	})
 
-	go Splice(tapped, b, nil)
+	go Splice(tapped, b, nil, SpliceOpts{})
 
 	payload := make([]byte, 200*1024)
 	rand.Read(payload)

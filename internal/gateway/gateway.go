@@ -932,7 +932,7 @@ func (g *Gateway) handleClient(sess *agentSession, spec control.TunnelSpec, clie
 	if spec.MinecraftAware {
 		client = mcsniff.Tap(tcp, entry)
 	}
-	if err := relay.Splice(client, stream, entry.Counters); err != nil {
+	if err := relay.Splice(client, stream, entry.Counters, relay.SpliceOpts{}); err != nil {
 		sess.logger.Debug("splice ended with error", "client", clientConn.RemoteAddr().String(), "err", err)
 	}
 }
