@@ -132,19 +132,34 @@ type actor struct {
 	stopped chan struct{} // closed when run() exits; unblocks late do() callers
 
 	// State below is touched only from run().
-	current    *agentSession
-	generation uint64
-	listeners  map[string]*publicListener // tunnelID → listener
+	agents     map[string]*agentSession              // agentID → live session
+	generation uint64                                // global-monotonic supersede ordinal
+	listeners  map[string]map[string]*publicListener // agentID → tunnelID → listener
+	admitDamp  map[string]dampState                  // agentID → anti-flap state
 
-	clientWG sync.WaitGroup // tracks handleClient goroutines for Shutdown
+	clientWG sync.WaitGroup // tracks handleClient goroutines across all agents
 }
+
+// dampState is the per-agentID anti-flap record: a genuine collision between two
+// live machines claiming the same agentID degrades to a slow contest with a log
+// line rather than a tight teardown/rebind loop. Touched only from run().
+type dampState struct {
+	lastSupersedeAt time.Time
+	penalty         time.Duration
+}
+
+// errAdmitDampened is a transient admission refusal: the newcomer should back
+// off and retry, not treat it as fatal.
+var errAdmitDampened = fmt.Errorf("admission dampened: same agentID reconnecting too fast")
 
 func newActor(logger *slog.Logger) *actor {
 	return &actor{
 		logger:    logger,
 		cmds:      make(chan func()),
 		stopped:   make(chan struct{}),
-		listeners: make(map[string]*publicListener),
+		agents:    make(map[string]*agentSession),
+		listeners: make(map[string]map[string]*publicListener),
+		admitDamp: make(map[string]dampState),
 	}
 }
 
@@ -153,14 +168,27 @@ func (a *actor) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			// Shutdown: evict whatever is connected, then drain splices.
-			a.evictLocked("gateway shutting down")
+			// Shutdown: evict every agent, then drain all splices. clientWG is
+			// global; it is waited only here, never inside a per-agent evict.
+			for _, sess := range snapshotSessions(a.agents) {
+				a.evict(sess, "gateway shutting down")
+			}
 			a.clientWG.Wait()
 			return
 		case cmd := <-a.cmds:
 			cmd()
 		}
 	}
+}
+
+// snapshotSessions copies the live sessions so an evict loop can delete from the
+// map without racing the range.
+func snapshotSessions(m map[string]*agentSession) []*agentSession {
+	out := make([]*agentSession, 0, len(m))
+	for _, s := range m {
+		out = append(out, s)
+	}
+	return out
 }
 
 // do runs fn on the actor goroutine and waits for it, reporting whether fn
@@ -182,26 +210,32 @@ func (a *actor) do(fn func()) bool {
 	}
 }
 
-// admit decides what happens when an authenticated agent arrives: same
-// agentID supersedes the existing session (closing it and its listeners
-// first); a different agentID is rejected while one is connected.
+// admit decides what happens when an authenticated agent arrives on the shared
+// gateway token. A matching agentID supersedes the existing session (reconnect
+// semantics — closing it and its listeners first); a *different* agentID is
+// admitted alongside, so one gateway serves several agents. Supersede is
+// anti-flap dampened: two live machines colliding on an agentID degrade to a
+// slow contest, not a CPU-burning loop. A dampened newcomer gets a transient
+// error and should back off, never a fatal one.
 func (a *actor) admit(sess *agentSession) (uint64, error) {
 	var (
 		gen    uint64
 		outErr error
 	)
 	ran := a.do(func() {
-		if a.current != nil && a.current.agentID != sess.agentID {
-			outErr = fmt.Errorf("another agent (%s…) is already connected to this gateway; disconnect it first or reuse its identity", shortID(a.current.agentID))
-			return
-		}
-		if a.current != nil {
-			a.logger.Info("superseding previous session from same agent", "agent", sess.agentID, "old_generation", a.current.gen)
-			a.evictLocked("superseded by new connection from the same agent")
+		if incumbent, ok := a.agents[sess.agentID]; ok {
+			if d := a.admitDamp[sess.agentID]; d.penalty > 0 && time.Since(d.lastSupersedeAt) < d.penalty {
+				outErr = errAdmitDampened
+				a.logger.Warn("admission dampened; keeping incumbent", "agent", sess.agentID, "penalty", d.penalty)
+				return
+			}
+			a.logger.Info("superseding previous session from same agent", "agent", sess.agentID, "old_generation", incumbent.gen)
+			a.evict(incumbent, "superseded by new connection from the same agent")
+			a.noteSupersede(sess.agentID)
 		}
 		a.generation++
 		gen = a.generation
-		a.current = sess
+		a.agents[sess.agentID] = sess
 	})
 	if !ran {
 		return 0, fmt.Errorf("gateway is shutting down")
@@ -209,51 +243,88 @@ func (a *actor) admit(sess *agentSession) (uint64, error) {
 	return gen, outErr
 }
 
+// noteSupersede arms the anti-flap penalty only when supersedes come in rapid
+// succession — the signature of two live machines contesting one agentID. An
+// isolated supersede (a normal reconnect, even one that races the old session's
+// teardown) leaves the penalty at zero, so legitimate restarts are never
+// dampened. A sustained contest backs off exponentially to a cap. No timer —
+// everything decays by timestamp comparison.
+func (a *actor) noteSupersede(agentID string) {
+	const (
+		flapThreshold = 2 * time.Second // supersedes closer than this look like a flap
+		basePenalty   = 1 * time.Second
+		capPenalty    = 30 * time.Second
+	)
+	d := a.admitDamp[agentID]
+	if !d.lastSupersedeAt.IsZero() && time.Since(d.lastSupersedeAt) < flapThreshold {
+		if d.penalty == 0 {
+			d.penalty = basePenalty
+		} else {
+			d.penalty = min(2*d.penalty, capPenalty)
+		}
+	} else {
+		d.penalty = 0 // isolated supersede: no dampening
+	}
+	d.lastSupersedeAt = time.Now()
+	a.admitDamp[agentID] = d
+}
+
 // disconnected cleans up after a session's control handler exits. A session
-// that was already evicted (superseded) is a no-op.
+// that is no longer the live one for its agentID (superseded, or a dampened
+// newcomer that never entered the map) is a no-op.
 func (a *actor) disconnected(sess *agentSession) {
 	a.do(func() {
-		if a.current != sess {
+		if a.agents[sess.agentID] != sess {
 			return
 		}
-		a.evictLocked("agent disconnected")
+		a.evict(sess, "agent disconnected")
 	})
 }
 
-// evictLocked runs on the actor goroutine: close every listener owned by the
-// current session, wait for each accept loop to fully exit, then close the
-// session itself.
-func (a *actor) evictLocked(reason string) {
-	if a.current == nil {
-		return
-	}
-	sess := a.current
-	a.current = nil
+// evict runs on the actor goroutine: drop sess from the agent map, close ONLY
+// its listeners (waiting each accept loop for the ghost-listener guarantee),
+// then close its mux/conn — which tears down exactly this agent's splices and
+// none of another's. It never waits clientWG (that is global; waiting it here
+// would block on other agents' live splices). Isolation-safe: evicting one
+// agent touches no other agent's listeners or connections.
+// Precondition: a.agents[sess.agentID] == sess.
+func (a *actor) evict(sess *agentSession, reason string) {
+	delete(a.agents, sess.agentID)
 	sess.evicted.Store(true)
-	for id, pl := range a.listeners {
-		pl.ln.Close()
-		<-pl.done // ghost-listener guarantee: port is free before we return
-		delete(a.listeners, id)
+	if subtree := a.listeners[sess.agentID]; subtree != nil {
+		for id, pl := range subtree {
+			pl.ln.Close()
+			<-pl.done // ghost-listener guarantee: port is free before we move on
+			delete(subtree, id)
+		}
+		delete(a.listeners, sess.agentID) // don't leak an empty subtree
 	}
 	sess.closeAll()
 	a.logger.Debug("session evicted", "agent", sess.agentID, "generation", sess.gen, "reason", reason)
 }
 
-// bindLocked runs on the actor goroutine: replace any existing listener for
-// the spec's ID and open a fresh public listener.
+// bindLocked runs on the actor goroutine: replace this agent's existing listener
+// for the spec's ID (config hot-apply) and open a fresh public listener. The
+// nested map keys by agentID first, so a re-register can only replace the SAME
+// agent's listener — agent B can never steal agent A's. A public-port clash
+// across agents is caught by net.Listen (global FCFS).
 func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr string, handle func(*agentSession, control.TunnelSpec, net.Conn)) (int, error) {
-	if old, ok := a.listeners[spec.ID]; ok {
-		// Re-register of the same tunnel (config hot-apply): replace.
+	subtree := a.listeners[sess.agentID]
+	if old, ok := subtree[spec.ID]; ok {
 		old.ln.Close()
 		<-old.done
-		delete(a.listeners, spec.ID)
+		delete(subtree, spec.ID)
 	}
 	ln, err := net.Listen("tcp", net.JoinHostPort(bindAddr, strconv.Itoa(spec.PublicPort)))
 	if err != nil {
 		return 0, portowner.DecorateBindError(spec.PublicPort, err)
 	}
 	pl := &publicListener{spec: spec, owner: sess, ln: ln, done: make(chan struct{})}
-	a.listeners[spec.ID] = pl
+	if subtree == nil {
+		subtree = make(map[string]*publicListener)
+		a.listeners[sess.agentID] = subtree
+	}
+	subtree[spec.ID] = pl
 	go a.acceptClients(pl, handle)
 	return ln.Addr().(*net.TCPAddr).Port, nil
 }
@@ -261,13 +332,17 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr
 // unbindLocked runs on the actor goroutine: close one tunnel's listener if it
 // belongs to sess.
 func (a *actor) unbindLocked(sess *agentSession, tunnelID string) {
-	pl, ok := a.listeners[tunnelID]
+	subtree := a.listeners[sess.agentID]
+	pl, ok := subtree[tunnelID]
 	if !ok || pl.owner != sess {
 		return
 	}
 	pl.ln.Close()
 	<-pl.done
-	delete(a.listeners, tunnelID)
+	delete(subtree, tunnelID)
+	if len(subtree) == 0 {
+		delete(a.listeners, sess.agentID)
+	}
 }
 
 // bindTunnel opens the public listener for a tunnel spec. Runs net.Listen on
@@ -278,7 +353,7 @@ func (a *actor) bindTunnel(sess *agentSession, spec control.TunnelSpec, bindAddr
 		outErr error
 	)
 	ran := a.do(func() {
-		if a.current != sess || sess.evicted.Load() {
+		if a.agents[sess.agentID] != sess || sess.evicted.Load() {
 			outErr = fmt.Errorf("session is no longer active")
 			return
 		}
@@ -313,7 +388,7 @@ type reconcileOutcome struct {
 func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, bindAddr string, handle func(*agentSession, control.TunnelSpec, net.Conn)) ([]reconcileOutcome, bool) {
 	outcomes := make([]reconcileOutcome, 0, len(desired))
 	ran := a.do(func() {
-		if a.current != sess || sess.evicted.Load() {
+		if a.agents[sess.agentID] != sess || sess.evicted.Load() {
 			err := fmt.Errorf("session is no longer active")
 			for _, spec := range desired {
 				outcomes = append(outcomes, reconcileOutcome{ID: spec.ID, Err: err})
@@ -324,17 +399,21 @@ func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, bind
 		for _, spec := range desired {
 			want[spec.ID] = struct{}{}
 		}
-		for id, pl := range a.listeners {
-			if pl.owner != sess {
-				continue
-			}
+		// Remove this agent's listeners not in the desired set. Collect the ids
+		// first — unbindLocked may delete the subtree out from under a range.
+		subtree := a.listeners[sess.agentID]
+		var remove []string
+		for id := range subtree {
 			if _, ok := want[id]; !ok {
-				a.unbindLocked(sess, id)
-				a.logger.Debug("reconcile: tunnel removed", "tunnel_id", id)
+				remove = append(remove, id)
 			}
 		}
+		for _, id := range remove {
+			a.unbindLocked(sess, id)
+			a.logger.Debug("reconcile: tunnel removed", "tunnel_id", id)
+		}
 		for _, spec := range desired {
-			if pl, ok := a.listeners[spec.ID]; ok && pl.owner == sess && pl.spec == spec {
+			if pl, ok := a.listeners[sess.agentID][spec.ID]; ok && pl.spec == spec {
 				// Identical desired state: keep the listener and its live
 				// connections.
 				outcomes = append(outcomes, reconcileOutcome{ID: spec.ID, Port: pl.ln.Addr().(*net.TCPAddr).Port})
@@ -364,10 +443,17 @@ func (a *actor) acceptClients(pl *publicListener, handle func(*agentSession, con
 	}
 }
 
-// currentSession returns the connected agent session, if any.
-func (a *actor) currentSession() *agentSession {
+// sessions returns every connected agent session.
+func (a *actor) sessions() []*agentSession {
+	var out []*agentSession
+	a.do(func() { out = snapshotSessions(a.agents) })
+	return out
+}
+
+// session returns the live session for one agentID, or nil.
+func (a *actor) session(agentID string) *agentSession {
 	var sess *agentSession
-	a.do(func() { sess = a.current })
+	a.do(func() { sess = a.agents[agentID] })
 	return sess
 }
 
@@ -386,21 +472,26 @@ type TunnelSnapshot struct {
 func (a *actor) tunnels() []TunnelSnapshot {
 	var out []TunnelSnapshot
 	a.do(func() {
-		for _, pl := range a.listeners {
-			ts := TunnelSnapshot{
-				AgentID:    pl.owner.agentID,
-				ID:         pl.spec.ID,
-				Name:       pl.spec.Name,
-				PublicPort: pl.ln.Addr().(*net.TCPAddr).Port,
+		for _, subtree := range a.listeners {
+			for _, pl := range subtree {
+				ts := TunnelSnapshot{
+					AgentID:    pl.owner.agentID,
+					ID:         pl.spec.ID,
+					Name:       pl.spec.Name,
+					PublicPort: pl.ln.Addr().(*net.TCPAddr).Port,
+				}
+				if v, ok := pl.owner.health.Load(pl.spec.ID); ok {
+					ts.LocalUp, ts.LocalKnown = v.(bool), true
+				}
+				out = append(out, ts)
 			}
-			if v, ok := pl.owner.health.Load(pl.spec.ID); ok {
-				ts.LocalUp, ts.LocalKnown = v.(bool), true
-			}
-			out = append(out, ts)
 		}
 	})
 	// Map iteration order is random; sort so the GUI list is stable.
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].AgentID != out[j].AgentID {
+			return out[i].AgentID < out[j].AgentID
+		}
 		if out[i].Name != out[j].Name {
 			return out[i].Name < out[j].Name
 		}
@@ -409,24 +500,21 @@ func (a *actor) tunnels() []TunnelSnapshot {
 	return out
 }
 
-// tunnelPort reports the bound port for a tunnel ID.
+// tunnelPort reports the bound port for a tunnel ID, scanning every agent. Bare
+// tunnelIDs are globally-unique UUIDs in practice, so the first match is the
+// one; the multi-agent status surfaces (Phase 3) key by (agentID, tunnelID).
 func (a *actor) tunnelPort(tunnelID string) (int, bool) {
 	var (
 		port  int
 		found bool
 	)
 	a.do(func() {
-		if pl, ok := a.listeners[tunnelID]; ok {
-			port = pl.ln.Addr().(*net.TCPAddr).Port
-			found = true
+		for _, subtree := range a.listeners {
+			if pl, ok := subtree[tunnelID]; ok {
+				port, found = pl.ln.Addr().(*net.TCPAddr).Port, true
+				return
+			}
 		}
 	})
 	return port, found
-}
-
-func shortID(id string) string {
-	if len(id) > 8 {
-		return id[:8]
-	}
-	return id
 }

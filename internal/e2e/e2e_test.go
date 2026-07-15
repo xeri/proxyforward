@@ -606,29 +606,221 @@ func TestAgentRestartRebinds(t *testing.T) {
 	}
 }
 
-// TestSecondAgentRejected: a different agent identity with the same token
-// must be refused while the first is connected — and the refusal is fatal
-// (no retry hammering).
-func TestSecondAgentRejected(t *testing.T) {
+// tcpTunnel is a minimal enabled TCP tunnel spec for the two-agent tests.
+func tcpTunnel(id, localAddr string, publicPort int) config.Tunnel {
+	return config.Tunnel{
+		ID: id, Name: "t-" + id, Type: config.TunnelTCP,
+		LocalAddr: localAddr, PublicPort: publicPort, Enabled: true,
+	}
+}
+
+// addAgent starts another agent against the same gateway with a fresh agentID
+// and its own tunnels, and registers its shutdown. Drive it via
+// waitPublicPortOf / roundTrip.
+func (h *harness) addAgent(t *testing.T, agentID string, tunnels []config.Tunnel) *agent.Agent {
+	t.Helper()
+	cfg := config.Default()
+	*cfg = *h.agentCfg
+	cfg.Agent.AgentID = agentID
+	cfg.Agent.Tunnels = tunnels
+	ag := agent.New(cfg, testLogger(t).With("side", "agent-"+agentID[:4]))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- ag.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("added agent did not stop within 10s")
+		}
+	})
+	return ag
+}
+
+// waitPublicPortOf polls until ag's tunnel is registered, returning its address.
+func waitPublicPortOf(t *testing.T, ag *agent.Agent, tunnelID string) string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if port, ok := ag.TunnelPublicPort(tunnelID); ok {
+			return fmt.Sprintf("127.0.0.1:%d", port)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("tunnel %s never became live", tunnelID)
+	return ""
+}
+
+// TestSecondAgentAdmitted: on the shared token, a second agent with a distinct
+// identity is admitted alongside the first (was rejected before multi-agent).
+func TestSecondAgentAdmitted(t *testing.T) {
+	echoA, closeA := echoServer(t)
+	defer closeA()
+	echoB, closeB := echoServer(t)
+	defer closeB()
+	h := newHarness(t, echoA)
+	addrA := h.waitPublicPort()
+	roundTrip(t, addrA, []byte("A up"))
+
+	bTun := config.NewID()
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(bTun, echoB, 0)})
+	addrB := waitPublicPortOf(t, agB, bTun)
+
+	// Both serve concurrently; A is unharmed by B's admission.
+	roundTrip(t, addrB, []byte("B up"))
+	roundTrip(t, addrA, []byte("A still up"))
+
+	if tunnels := h.gw.Tunnels(); len(tunnels) != 2 {
+		t.Fatalf("gateway tunnels = %d, want 2 (one per agent)", len(tunnels))
+	}
+}
+
+// TestTwoAgentsSameTunnelID (T1) is the namespacing thesis: two agents use the
+// SAME tunnelID string and each binds/serves independently on its own port.
+// With a bare-tunnelID listener key, B would steal A's listener and A's port
+// would stop serving.
+func TestTwoAgentsSameTunnelID(t *testing.T) {
+	echoA, closeA := echoServer(t)
+	defer closeA()
+	echoB, closeB := echoServer(t)
+	defer closeB()
+	h := newHarness(t, echoA) // agent A serves h.tunnelID → echoA
+	addrA := h.waitPublicPort()
+
+	// Agent B reuses the very same tunnelID with its own backend and port.
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(h.tunnelID, echoB, 0)})
+	addrB := waitPublicPortOf(t, agB, h.tunnelID)
+
+	if addrA == addrB {
+		t.Fatalf("agents sharing tunnelID %q must bind distinct ports, both got %s", h.tunnelID, addrA)
+	}
+	roundTrip(t, addrA, []byte("A's tunnel"))
+	roundTrip(t, addrB, []byte("B's tunnel"))
+}
+
+// TestConcurrentPortRace (T2): two agents race to bind the same public port;
+// exactly one wins (global FCFS) and keeps serving, the other never binds it.
+func TestConcurrentPortRace(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarness(t, echoAddr)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close() // free it so both agents can contend
+
+	h := newHarness(t, echoAddr) // gateway + agent A (its own ephemeral tunnel)
 	h.waitPublicPort()
 
-	intruderCfg := config.Default()
-	*intruderCfg = *h.agentCfg
-	intruderCfg.Agent.AgentID = config.NewID() // different identity
-	intruderCfg.Agent.Tunnels = nil
+	bTun, cTun := config.NewID(), config.NewID()
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(bTun, echoAddr, port)})
+	agC := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(cTun, echoAddr, port)})
 
-	intruder := agent.New(intruderCfg, testLogger(t).With("side", "intruder"))
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	err := intruder.Run(ctx)
-	if !errors.Is(err, agent.ErrAgentConflict) {
-		t.Fatalf("want ErrAgentConflict, got %v", err)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		_, bOK := agB.TunnelPublicPort(bTun)
+		_, cOK := agC.TunnelPublicPort(cTun)
+		if bOK || cOK {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	// The original session must be unharmed.
-	roundTrip(t, h.waitPublicPort(), []byte("still alive"))
+	time.Sleep(500 * time.Millisecond) // let the loser's bind definitively fail
+	_, bOK := agB.TunnelPublicPort(bTun)
+	_, cOK := agC.TunnelPublicPort(cTun)
+	if bOK == cOK {
+		t.Fatalf("exactly one agent must win port %d; bOK=%v cOK=%v", port, bOK, cOK)
+	}
+	roundTrip(t, fmt.Sprintf("127.0.0.1:%d", port), []byte("winner serves"))
+}
+
+// TestAgentChurnPreservesOtherAgent (T3): one agent disconnecting and
+// reconnecting (which bumps the global generation) must not invalidate another
+// agent's session — currency is decided by map identity, not a generation
+// comparison.
+func TestAgentChurnPreservesOtherAgent(t *testing.T) {
+	echoA, closeA := echoServer(t)
+	defer closeA()
+	echoB, closeB := echoServer(t)
+	defer closeB()
+	h := newHarness(t, echoA)
+	h.waitPublicPort()
+
+	bTun := config.NewID()
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(bTun, echoB, 0)})
+	addrB := waitPublicPortOf(t, agB, bTun)
+	roundTrip(t, addrB, []byte("B before"))
+
+	// Churn agent A: stop and restart it (each readmit bumps a.generation).
+	h.stopAgent()
+	roundTrip(t, addrB, []byte("B while A down"))
+	h.startAgent()
+	h.waitPublicPort() // A back
+
+	roundTrip(t, addrB, []byte("B after A back"))
+	if p, ok := agB.TunnelPublicPort(bTun); !ok || fmt.Sprintf("127.0.0.1:%d", p) != addrB {
+		t.Fatalf("agent B's port changed during agent A churn: ok=%v port=%d want %s", ok, p, addrB)
+	}
+}
+
+// TestEvictionIsolatesAndDrains (T5): evicting one agent closes its listeners
+// AND terminates its live connections (the mux is the drain boundary), while
+// another agent keeps serving untouched.
+func TestEvictionIsolatesAndDrains(t *testing.T) {
+	echoA, closeA := echoServer(t)
+	defer closeA()
+	echoB, closeB := echoServer(t)
+	defer closeB()
+	h := newHarness(t, echoA)
+	addrA := h.waitPublicPort()
+
+	bTun := config.NewID()
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(bTun, echoB, 0)})
+	addrB := waitPublicPortOf(t, agB, bTun)
+
+	// Open a long-lived connection through agent A and confirm it echoes.
+	connA, err := net.DialTimeout("tcp", addrA, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connA.Close()
+	connA.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := connA.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(connA, buf); err != nil {
+		t.Fatalf("A conn echo before eviction: %v", err)
+	}
+
+	// Evict agent A by stopping it.
+	h.stopAgent()
+
+	// A's public port stops accepting.
+	portDead := false
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		c, derr := net.DialTimeout("tcp", addrA, 500*time.Millisecond)
+		if derr != nil {
+			portDead = true
+			break
+		}
+		c.Close()
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !portDead {
+		t.Fatal("agent A's public port still accepting after eviction")
+	}
+
+	// A's live connection is torn down (the read returns an error).
+	connA.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := connA.Read(buf); err == nil {
+		t.Fatal("agent A's live connection did not terminate on eviction")
+	}
+
+	// Agent B is unharmed.
+	roundTrip(t, addrB, []byte("B survives A eviction"))
 }
 
 // TestBadTokenRejected: wrong token → fatal ErrBadToken.

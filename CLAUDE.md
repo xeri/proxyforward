@@ -74,8 +74,13 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   dies; failed auth rate-limits per IP, fail2ban-style — successes never count
   (`limits.go authLimiter`). Public conns gate globally and per-IP (`limits.go
   connGate`; defaults in `config.go`).
-- Same agentID reconnect **supersedes** (generation counter); a different agentID on
-  the same token is **rejected** — no flapping (`actor.go admit`).
+- One shared gateway token admits **many** agents, told apart by self-asserted
+  `agentID`: a matching agentID **supersedes** (reconnect), a distinct one is admitted
+  **alongside**. Supersede is anti-flap dampened so an ID collision degrades to a slow
+  contest, not a loop (`actor.go admit`, `noteSupersede`). Residual risk that ships
+  (shared token + self-asserted ID + FCFS ports + no per-agent revocation): a
+  token-holder can supersede or port-squat any agent, recoverable only by rotating the
+  shared token — the mitigation (per-agent tokens/revocation) is deferred.
 - The IPC pipe ACL admits Administrators, SYSTEM, and the interactive user only
   (`ipc/server_windows.go pipeSecurity`).
 - Diagnostics bundles redact every secret, host, IP, and identity; peer IPs become
@@ -96,9 +101,11 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   network-change/resume ticks short-circuit it; DNS re-resolves every attempt
   (`link/backoff.go`, `netnotify/`, `agent.go runSession`).
 - **Ghost-listener guarantee**: all session/listener lifecycle runs on the gateway's
-  single actor goroutine; eviction closes each listener and waits for its accept loop
-  before anything else proceeds — a rebound port is provably free
-  (`actor.go evictLocked` / `bindLocked`; regression: e2e `TestAgentRestartRebinds`).
+  single actor goroutine; per-agent eviction closes that agent's listeners and waits
+  each accept loop before anything else proceeds — a rebound port is provably free, and
+  evicting one agent leaves the others' listeners and connections untouched (the
+  per-agent mux is the connection-drain boundary). (`actor.go evict` / `bindLocked`;
+  regressions: e2e `TestAgentRestartRebinds`, `TestEvictionIsolatesAndDrains`.)
 - Exactly one process owns ports and config: every engine serves the named pipe
   `\\.\pipe\proxyforward`; a GUI that finds it attaches as a thin client; pipe
   conflict is fatal by design (`engine.go Run`, `app/app.go Startup`).
