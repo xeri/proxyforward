@@ -10,7 +10,6 @@ package gateway
 
 import (
 	"context"
-	"crypto/subtle"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -87,6 +86,11 @@ type Gateway struct {
 	actor   atomic.Pointer[actor]
 	authLim *authLimiter
 	gate    *connGate
+	// validator authenticates every hello, on the control accept path and (with
+	// the per-conn data plane) the data accept path. v1 checks the shared token;
+	// swapping it in adds per-agent identity + revocation without touching the
+	// accept paths or the wire.
+	validator Validator
 
 	// Conns tracks live proxied connections for the GUI.
 	Conns *conntrack.Registry
@@ -150,6 +154,7 @@ func (g *Gateway) Start(ctx context.Context) error {
 	g.cancel = cancel
 	g.authLim = newAuthLimiter(g.cfg.Gateway.AuthAttemptsPerMin)
 	g.gate = newConnGate(g.cfg.Gateway.MaxConnsGlobal, g.cfg.Gateway.MaxConnsPerIP)
+	g.validator = sharedTokenValidator{token: g.cfg.Gateway.Token}
 	a := newActor(g.logger)
 	g.actor.Store(a)
 	g.wg.Add(2)
@@ -503,13 +508,25 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		conn.Close()
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(hello.Token), []byte(g.cfg.Gateway.Token)) != 1 {
-		logger.Warn("agent rejected: bad token")
-		g.authLim.fail(ip)
-		control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
-			Code:    control.ErrCodeBadToken,
-			Message: "invalid token — re-pair with the gateway's current pairing code",
-		})
+	identity, err := g.validator.Validate(hello)
+	if err != nil {
+		// A bad token is a credential failure — log it and count it toward the
+		// per-IP auth limiter. A missing agentID is a malformed hello, not a
+		// failed credential, so it does not count.
+		switch {
+		case errors.Is(err, ErrBadToken):
+			logger.Warn("agent rejected: bad token")
+			g.authLim.fail(ip)
+			control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
+				Code:    control.ErrCodeBadToken,
+				Message: "invalid token — re-pair with the gateway's current pairing code",
+			})
+		case errors.Is(err, ErrMissingAgentID):
+			control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
+				Code:    control.ErrCodeBadToken,
+				Message: "hello is missing agentId",
+			})
+		}
 		conn.Close()
 		return
 	}
@@ -522,14 +539,6 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		conn.Close()
 		return
 	}
-	if hello.AgentID == "" {
-		control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
-			Code:    control.ErrCodeBadToken,
-			Message: "hello is missing agentId",
-		})
-		conn.Close()
-		return
-	}
 
 	// --- Admission: supersede same agentID, admit distinct agents alongside. ---
 	negotiated := control.IntersectCaps(hello.Capabilities, control.SupportedCapabilities)
@@ -537,7 +546,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 	// splices unblock per-agent (evict) and on shutdown (parent).
 	sctx, cancel := context.WithCancel(ctx)
 	sess := &agentSession{
-		agentID:     hello.AgentID,
+		agentID:     identity.AgentID,
 		conn:        conn,
 		logger:      logger.With("agent", hello.AgentID),
 		connectedAt: time.Now(),
