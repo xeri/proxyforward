@@ -21,8 +21,12 @@ const (
 
 // PlayersQuery selects and pages the player wall.
 type PlayersQuery struct {
-	Search   string `json:"search"`
-	Sort     string `json:"sort"`     // recent | name | playtime | sessions | data
+	Search string `json:"search"`
+	Sort   string `json:"sort"` // recent | name | playtime | sessions | data
+	// AgentID scopes to one agent ("" = all agents). On a multi-agent gateway
+	// two agents may share a TunnelID, so a tunnel-scoped wall should set both;
+	// a bare TunnelID aggregates that tunnel across every agent.
+	AgentID  string `json:"agentId"`
 	TunnelID string `json:"tunnelId"` // "" = all tunnels
 	CC       string `json:"cc"`       // "" = all countries
 	Offset   int    `json:"offset"`
@@ -126,10 +130,10 @@ func (d *DB) Players(q PlayersQuery, online map[string]bool, nowMs int64) (Playe
 	prefix, orderArgs := onlineFirst(online)
 	order = prefix + order
 
-	// The aggregate join carries the tunnel scope, so a tunnel-filtered wall
-	// shows tunnel-scoped sessions/playtime/bytes/RTT rather than global
-	// figures next to a tunnel-scoped player list.
-	qargs := []any{nowMs, q.TunnelID, q.TunnelID}
+	// The aggregate join carries the agent+tunnel scope, so a scoped wall shows
+	// scoped sessions/playtime/bytes/RTT rather than global figures next to a
+	// scoped player list.
+	qargs := []any{nowMs, q.AgentID, q.AgentID, q.TunnelID, q.TunnelID}
 	qargs = append(qargs, args...)
 	qargs = append(qargs, orderArgs...)
 	qargs = append(qargs, limit, max(q.Offset, 0))
@@ -139,7 +143,8 @@ func (d *DB) Players(q PlayersQuery, online map[string]bool, nowMs int64) (Playe
 			COALESCE(SUM(COALESCE(s.ended_ms, ?) - s.started_ms), 0) AS play_ms,
 			COALESCE(SUM(s.bytes_in), 0), COALESCE(SUM(s.bytes_out), 0),
 			`+rttAggSQL+`
-		FROM players p LEFT JOIN sessions s ON s.player_uuid = p.uuid AND (? = '' OR s.tunnel_id = ?)
+		FROM players p LEFT JOIN sessions s ON s.player_uuid = p.uuid
+			AND (? = '' OR s.agent_id = ?) AND (? = '' OR s.tunnel_id = ?)
 		`+where+`
 		GROUP BY p.uuid
 		ORDER BY `+order+`
@@ -168,8 +173,12 @@ func playersFilter(q PlayersQuery) (string, []any) {
 		conds = append(conds, "p.name LIKE ? COLLATE NOCASE")
 		args = append(args, "%"+s+"%")
 	}
-	if q.TunnelID != "" || q.CC != "" {
+	if q.AgentID != "" || q.TunnelID != "" || q.CC != "" {
 		member := "s2.player_uuid = p.uuid"
+		if q.AgentID != "" {
+			member += " AND s2.agent_id = ?"
+			args = append(args, q.AgentID)
+		}
 		if q.TunnelID != "" {
 			member += " AND s2.tunnel_id = ?"
 			args = append(args, q.TunnelID)
@@ -309,6 +318,7 @@ func (d *DB) PlayerDetail(uuid string, online map[string]bool, nowMs int64) (*Pl
 // SessionsQuery filters the connection-history table.
 type SessionsQuery struct {
 	PlayerUUID string `json:"playerUuid"`
+	AgentID    string `json:"agentId"` // "" = all agents
 	TunnelID   string `json:"tunnelId"`
 	CC         string `json:"cc"` // "" = all countries
 	SinceMs    int64  `json:"sinceMs"`
@@ -333,6 +343,10 @@ func (d *DB) Sessions(q SessionsQuery, nowMs int64) (SessionsPage, error) {
 	if q.PlayerUUID != "" {
 		conds = append(conds, "player_uuid = ?")
 		args = append(args, q.PlayerUUID)
+	}
+	if q.AgentID != "" {
+		conds = append(conds, "agent_id = ?")
+		args = append(args, q.AgentID)
 	}
 	if q.TunnelID != "" {
 		conds = append(conds, "tunnel_id = ?")

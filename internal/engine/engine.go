@@ -437,7 +437,8 @@ func (e *Engine) Status() ipc.Status {
 		st.HealthScore = healthScore(st.AgentConnected, st.JitterMillis, st.PacketLossPct, st.LinkUpSinceMs)
 		for _, t := range e.Gateway.Tunnels() {
 			st.Tunnels = append(st.Tunnels, ipc.TunnelStatus{
-				ID: t.ID, Name: t.Name, PublicPort: t.PublicPort,
+				AgentID: t.AgentID,
+				ID:      t.ID, Name: t.Name, PublicPort: t.PublicPort,
 				LocalUp: t.LocalUp, LocalKnown: t.LocalKnown,
 			})
 		}
