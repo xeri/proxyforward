@@ -189,7 +189,10 @@ equirectangular paths (`worldgeo.ts`, generated — regenerate, don't edit).
 (gated bindings reject like the real backend), `&fatal=1`, `&fresh=1`,
 `&analytics=off`, `&paired=0` (never paired to a gateway — the sidebar's role
 switcher cannot become the agent and must route to setup), `&geo=off|empty|error|pending`,
-`&fx=low|high`. The traffic model is deterministic functions of absolute time, so
+`&fx=low|high`, `&fleet=multi|old` (gateway only — `multi`: a five-agent fleet with a
+good/fair/poor health spread instead of the default single agent, for the Agents roster
++ drill-in; `old`: a pre-roster daemon that sends no agents array → the roster's
+honest-unavailable state). The traffic model is deterministic functions of absolute time, so
 chart/tiles/replay all agree at any poll cadence. When you add a binding, add its stub
 here or the mock throws. Role setup mutates the mock's role, so the switcher flips the
 whole app live in the browser with no Go running.
