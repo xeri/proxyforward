@@ -24,6 +24,7 @@ const (
 	OpSummary         = "summary"
 	OpPeakMatrix      = "peak_matrix"
 	OpTunnelUptime    = "tunnel_uptime"
+	OpAgentHistory    = "agent_history"
 )
 
 // analyticsOp runs one query by name against the store, returning the
@@ -35,6 +36,22 @@ func (e *Engine) analyticsOp(op string, body json.RawMessage) (json.RawMessage, 
 	// when the database failed to open (the Settings badge relies on it).
 	if op == OpGeoStatus {
 		return encodeResult(e.geo.Status(), nil)
+	}
+	// agent_history reads the live stats store (per-agent RRD), not the SQLite
+	// query layer, so it answers even when the DB failed to open.
+	if op == OpAgentHistory {
+		var q struct {
+			AgentID    string `json:"agentId"`
+			WindowMs   int64  `json:"windowMs"`
+			MaxBuckets int    `json:"maxBuckets"`
+		}
+		if err := decodeBody(body, &q); err != nil {
+			return nil, err
+		}
+		if q.MaxBuckets <= 0 {
+			q.MaxBuckets = 300
+		}
+		return encodeResult(e.Stats.AgentHistory(q.AgentID, q.WindowMs, q.MaxBuckets), nil)
 	}
 	if e.DB == nil {
 		return nil, fmt.Errorf("analytics store unavailable")

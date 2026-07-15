@@ -221,6 +221,11 @@ type UIStatus struct {
 	LocalLANIPs  []string `json:"localLanIps"`
 	PeerLANIPs   []string `json:"peerLanIps"`
 
+	// Agents is the per-agent link state on a gateway (empty on the agent
+	// role); the Agents screen and drill-in read it. Tunnels/Connections stay
+	// flat and carry agentId so the GUI groups them per agent.
+	Agents []AgentUI `json:"agents"`
+
 	Tunnels       []TunnelUI `json:"tunnels"`
 	Connections   []ConnUI   `json:"connections"`
 	TotalBytesIn  int64      `json:"totalBytesIn"`
@@ -262,6 +267,7 @@ type UIStatus struct {
 
 // TunnelUI is one tunnel's live state for the frontend.
 type TunnelUI struct {
+	AgentID    string `json:"agentId,omitempty"` // owning agent (gateway role)
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	PublicPort int    `json:"publicPort"`
@@ -272,6 +278,7 @@ type TunnelUI struct {
 // ConnUI is one live connection for the frontend.
 type ConnUI struct {
 	ID         uint64 `json:"id"`
+	AgentID    string `json:"agentId,omitempty"` // owning agent (gateway role)
 	TunnelName string `json:"tunnelName"`
 	ClientAddr string `json:"clientAddr"`
 	StartedAt  int64  `json:"startedAt"` // unix millis
@@ -282,6 +289,24 @@ type ConnUI struct {
 	PlayerUUID string `json:"playerUuid,omitempty"`
 	// RttMs is the gateway-measured round-trip time to this client; -1 unknown.
 	RttMs float64 `json:"rttMs"`
+}
+
+// AgentUI is one connected agent's link state on a gateway, mirroring
+// ipc.AgentStatus for the Agents dashboard and drill-in.
+type AgentUI struct {
+	AgentID       string   `json:"agentId"`
+	Hostname      string   `json:"hostname"`
+	LANIPs        []string `json:"lanIps"`
+	RemoteIP      string   `json:"remoteIp"`
+	LinkUpSinceMs int64    `json:"linkUpSinceMs"`
+	RTTMillis     int64    `json:"rttMillis"`
+	JitterMillis  float64  `json:"jitterMillis"`
+	PacketLossPct float64  `json:"packetLossPct"`
+	HealthScore   string   `json:"healthScore"`
+	LinkBytesIn   int64    `json:"linkBytesIn"`
+	LinkBytesOut  int64    `json:"linkBytesOut"`
+	Tunnels       int      `json:"tunnels"`
+	Players       int      `json:"players"`
 }
 
 // applyIPCStatus copies a daemon snapshot into the UI shape.
@@ -317,10 +342,22 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 	st.AllTimeBytesOut = s.AllTimeBytesOut
 	st.CumulativeUptimeMs = s.CumulativeUptimeMs
 	st.LinkSessions = s.LinkSessions
+	st.Agents = make([]AgentUI, 0, len(s.Agents))
+	for _, ag := range s.Agents {
+		st.Agents = append(st.Agents, AgentUI{
+			AgentID: ag.AgentID, Hostname: ag.Hostname, LANIPs: ag.LANIPs,
+			RemoteIP: ag.RemoteIP, LinkUpSinceMs: ag.LinkUpSinceMs,
+			RTTMillis: ag.RTTMillis, JitterMillis: ag.JitterMillis,
+			PacketLossPct: ag.PacketLossPct, HealthScore: ag.HealthScore,
+			LinkBytesIn: ag.LinkBytesIn, LinkBytesOut: ag.LinkBytesOut,
+			Tunnels: ag.Tunnels, Players: ag.Players,
+		})
+	}
 	st.Tunnels = make([]TunnelUI, 0, len(s.Tunnels))
 	for _, t := range s.Tunnels {
 		st.Tunnels = append(st.Tunnels, TunnelUI{
-			ID: t.ID, Name: t.Name, PublicPort: t.PublicPort,
+			AgentID: t.AgentID,
+			ID:      t.ID, Name: t.Name, PublicPort: t.PublicPort,
 			LocalUp: t.LocalUp, LocalKnown: t.LocalKnown,
 		})
 	}
@@ -329,7 +366,7 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 	st.Connections = make([]ConnUI, 0, len(s.Connections))
 	for _, c := range s.Connections {
 		st.Connections = append(st.Connections, ConnUI{
-			ID: c.ID, TunnelName: c.TunnelName, ClientAddr: c.ClientAddr,
+			ID: c.ID, AgentID: c.AgentID, TunnelName: c.TunnelName, ClientAddr: c.ClientAddr,
 			StartedAt: c.StartedAt, BytesIn: c.BytesIn, BytesOut: c.BytesOut,
 			PlayerName: c.PlayerName, PlayerUUID: c.PlayerUUID, RttMs: c.RttMs,
 		})

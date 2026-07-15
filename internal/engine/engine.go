@@ -442,6 +442,34 @@ func (e *Engine) Status() ipc.Status {
 				LocalUp: t.LocalUp, LocalKnown: t.LocalKnown,
 			})
 		}
+		// Per-agent link records for the multi-agent dashboard. Tunnel counts
+		// come from the flat tunnel list; player counts from conntrack's
+		// per-agent totals. Agents is sorted (Gateway.Agents) and clamped.
+		tunnelCount := make(map[string]int)
+		for _, t := range st.Tunnels {
+			tunnelCount[t.AgentID]++
+		}
+		agentTraffic := e.Gateway.Conns.AgentTotals()
+		for _, ag := range e.Gateway.Agents() {
+			if len(st.Agents) >= ipc.MaxStatusAgents {
+				break
+			}
+			st.Agents = append(st.Agents, ipc.AgentStatus{
+				AgentID:       ag.AgentID,
+				Hostname:      ag.Hostname,
+				LANIPs:        ag.LANIPs,
+				RemoteIP:      ag.RemoteIP,
+				LinkUpSinceMs: ag.LinkUpSinceMs,
+				RTTMillis:     ag.RTTMillis,
+				JitterMillis:  ag.JitterMillis,
+				PacketLossPct: ag.PacketLossPct,
+				HealthScore:   healthScore(true, ag.JitterMillis, ag.PacketLossPct, ag.LinkUpSinceMs),
+				LinkBytesIn:   ag.LinkBytesIn,
+				LinkBytesOut:  ag.LinkBytesOut,
+				Tunnels:       tunnelCount[ag.AgentID],
+				Players:       agentTraffic[ag.AgentID].Players,
+			})
+		}
 		setStatusConns(&st, e.Gateway.Conns.Snapshot())
 		st.TotalBytesIn, st.TotalBytesOut = e.Gateway.Conns.Totals()
 	}

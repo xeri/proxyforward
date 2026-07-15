@@ -259,6 +259,7 @@ export namespace analytics {
 	export class PlayersQuery {
 	    search: string;
 	    sort: string;
+	    agentId: string;
 	    tunnelId: string;
 	    cc: string;
 	    offset: number;
@@ -272,6 +273,7 @@ export namespace analytics {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.search = source["search"];
 	        this.sort = source["sort"];
+	        this.agentId = source["agentId"];
 	        this.tunnelId = source["tunnelId"];
 	        this.cc = source["cc"];
 	        this.offset = source["offset"];
@@ -361,6 +363,7 @@ export namespace analytics {
 	}
 	export class SessionsQuery {
 	    playerUuid: string;
+	    agentId: string;
 	    tunnelId: string;
 	    cc: string;
 	    sinceMs: number;
@@ -374,6 +377,7 @@ export namespace analytics {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.playerUuid = source["playerUuid"];
+	        this.agentId = source["agentId"];
 	        this.tunnelId = source["tunnelId"];
 	        this.cc = source["cc"];
 	        this.sinceMs = source["sinceMs"];
@@ -531,8 +535,45 @@ export namespace analytics {
 
 export namespace app {
 	
+	export class AgentUI {
+	    agentId: string;
+	    hostname: string;
+	    lanIps: string[];
+	    remoteIp: string;
+	    linkUpSinceMs: number;
+	    rttMillis: number;
+	    jitterMillis: number;
+	    packetLossPct: number;
+	    healthScore: string;
+	    linkBytesIn: number;
+	    linkBytesOut: number;
+	    tunnels: number;
+	    players: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentUI(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agentId = source["agentId"];
+	        this.hostname = source["hostname"];
+	        this.lanIps = source["lanIps"];
+	        this.remoteIp = source["remoteIp"];
+	        this.linkUpSinceMs = source["linkUpSinceMs"];
+	        this.rttMillis = source["rttMillis"];
+	        this.jitterMillis = source["jitterMillis"];
+	        this.packetLossPct = source["packetLossPct"];
+	        this.healthScore = source["healthScore"];
+	        this.linkBytesIn = source["linkBytesIn"];
+	        this.linkBytesOut = source["linkBytesOut"];
+	        this.tunnels = source["tunnels"];
+	        this.players = source["players"];
+	    }
+	}
 	export class ConnUI {
 	    id: number;
+	    agentId?: string;
 	    tunnelName: string;
 	    clientAddr: string;
 	    startedAt: number;
@@ -549,6 +590,7 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.agentId = source["agentId"];
 	        this.tunnelName = source["tunnelName"];
 	        this.clientAddr = source["clientAddr"];
 	        this.startedAt = source["startedAt"];
@@ -610,6 +652,7 @@ export namespace app {
 	    }
 	}
 	export class TunnelUI {
+	    agentId?: string;
 	    id: string;
 	    name: string;
 	    publicPort: number;
@@ -622,6 +665,7 @@ export namespace app {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agentId = source["agentId"];
 	        this.id = source["id"];
 	        this.name = source["name"];
 	        this.publicPort = source["publicPort"];
@@ -647,6 +691,7 @@ export namespace app {
 	    peerPublicIp: string;
 	    localLanIps: string[];
 	    peerLanIps: string[];
+	    agents: AgentUI[];
 	    tunnels: TunnelUI[];
 	    connections: ConnUI[];
 	    totalBytesIn: number;
@@ -689,6 +734,7 @@ export namespace app {
 	        this.peerPublicIp = source["peerPublicIp"];
 	        this.localLanIps = source["localLanIps"];
 	        this.peerLanIps = source["peerLanIps"];
+	        this.agents = this.convertValues(source["agents"], AgentUI);
 	        this.tunnels = this.convertValues(source["tunnels"], TunnelUI);
 	        this.connections = this.convertValues(source["connections"], ConnUI);
 	        this.totalBytesIn = source["totalBytesIn"];
