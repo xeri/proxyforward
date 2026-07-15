@@ -11,6 +11,7 @@
 package relay
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -20,7 +21,11 @@ import (
 	"time"
 )
 
-const bufSize = 128 * 1024
+// BufSize is the pooled copy-buffer size, and thus the largest chunk handed to a
+// single Write (io.Copy's default 32 KiB throttles chunk-load bursts on fat
+// pipes). A rate limiter's burst is sized to this so WaitN(n) with n ≤ BufSize
+// never exceeds the burst.
+const BufSize = 128 * 1024
 
 // WriteStallTimeout is how long a single Write may make no progress before
 // the splice declares the peer dead. Generous: a healthy but slow client
@@ -29,7 +34,7 @@ const WriteStallTimeout = 2 * time.Minute
 
 var bufPool = sync.Pool{
 	New: func() any {
-		b := make([]byte, bufSize)
+		b := make([]byte, BufSize)
 		return &b
 	},
 }
@@ -48,10 +53,30 @@ type Counters struct {
 	BToA atomic.Int64
 }
 
+// Limiter throttles a copy direction: WaitN blocks until n tokens (bytes) are
+// available or ctx is done. *golang.org/x/time/rate.Limiter satisfies this
+// structurally; a nil Limiter is the uncapped fast path. Kept as an interface so
+// relay imports no rate library.
+type Limiter interface {
+	WaitN(ctx context.Context, n int) error
+}
+
+// SpliceOpts carries the optional bandwidth cap for one splice. The zero value
+// (nil Ctx, nil limiters) reproduces the uncapped fast path exactly. LimitAToB
+// throttles the a→b direction, LimitBToA the b→a direction (either may be nil);
+// Ctx is the parent whose cancellation (e.g. agent eviction) unblocks a parked
+// WaitN.
+type SpliceOpts struct {
+	Ctx       context.Context
+	LimitAToB Limiter
+	LimitBToA Limiter
+}
+
 // Splice pumps bytes both ways until both directions have finished, then
 // fully closes both conns. It returns the first error that wasn't a normal
-// EOF/close (nil for a clean shutdown).
-func Splice(a, b Conn, counters *Counters) error {
+// EOF/close (nil for a clean shutdown). opts optionally rate-limits each
+// direction; the zero value is the uncapped path and touches no context.
+func Splice(a, b Conn, counters *Counters, opts SpliceOpts) error {
 	var (
 		wg   sync.WaitGroup
 		errA error
@@ -61,14 +86,37 @@ func Splice(a, b Conn, counters *Counters) error {
 	if counters != nil {
 		cA, cB = &counters.AToB, &counters.BToA
 	}
+
+	// Only capped splices need a cancellable context. The child cancels when a
+	// half returns an *error* (so an abnormal teardown promptly unblocks the
+	// other half's throttled WaitN), but never on a clean EOF — the opposite
+	// direction must keep draining (final bytes arrive intact). The parent ctx
+	// cancels on eviction, unblocking both.
+	ctx := opts.Ctx
+	cancel := func() {}
+	if opts.LimitAToB != nil || opts.LimitBToA != nil {
+		parent := ctx
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx, cancel = context.WithCancel(parent)
+		defer cancel()
+	}
+
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		errA = copyHalf(b, a, cA) // a -> b
+		errA = copyHalf(b, a, cA, ctx, opts.LimitAToB) // a -> b
+		if errA != nil {
+			cancel()
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		errB = copyHalf(a, b, cB) // b -> a
+		errB = copyHalf(a, b, cB, ctx, opts.LimitBToA) // b -> a
+		if errB != nil {
+			cancel()
+		}
 	}()
 	wg.Wait()
 	a.Close()
@@ -84,8 +132,10 @@ func Splice(a, b Conn, counters *Counters) error {
 }
 
 // copyHalf copies src → dst until EOF, then half-closes dst so its reader
-// sees EOF while the opposite direction keeps flowing.
-func copyHalf(dst, src Conn, count *atomic.Int64) error {
+// sees EOF while the opposite direction keeps flowing. When lim is non-nil it
+// waits for n tokens before each write; a cancelled wait (teardown) tears the
+// half down like a write error.
+func copyHalf(dst, src Conn, count *atomic.Int64, ctx context.Context, lim Limiter) error {
 	bufp := bufPool.Get().(*[]byte)
 	defer bufPool.Put(bufp)
 	buf := *bufp
@@ -93,6 +143,14 @@ func copyHalf(dst, src Conn, count *atomic.Int64) error {
 	for {
 		n, rerr := src.Read(buf)
 		if n > 0 {
+			if lim != nil {
+				// Throttle before writing. n ≤ BufSize = the limiter's burst, so
+				// WaitN only blocks for the rate delay, never errors on burst.
+				if werr := lim.WaitN(ctx, n); werr != nil {
+					src.Close()
+					return werr
+				}
+			}
 			dst.SetWriteDeadline(time.Now().Add(WriteStallTimeout))
 			wn, werr := dst.Write(buf[:n])
 			if count != nil && wn > 0 {
@@ -124,13 +182,17 @@ func copyHalf(dst, src Conn, count *atomic.Int64) error {
 
 // isExpectedCloseErr filters the errors a normal teardown produces: EOFs,
 // "use of closed network connection" from our own Close racing a blocked
-// Read, and reset-by-peer when the far side vanished abruptly (a killed
-// Minecraft client). Write stalls (deadline exceeded) are NOT expected —
-// they indicate a parked peer and are worth surfacing.
+// Read, reset-by-peer when the far side vanished abruptly (a killed Minecraft
+// client), and a cancelled WaitN (the splice's own child ctx on abnormal
+// teardown, or the agent-session ctx on eviction). Write stalls (deadline
+// exceeded, a net timeout — distinct from context.DeadlineExceeded) are NOT
+// expected: they indicate a parked peer and are worth surfacing.
 func isExpectedCloseErr(err error) bool {
 	return err == nil ||
 		errors.Is(err, io.EOF) ||
 		errors.Is(err, net.ErrClosed) ||
 		errors.Is(err, syscall.ECONNRESET) ||
-		errors.Is(err, syscall.ECONNABORTED)
+		errors.Is(err, syscall.ECONNABORTED) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded)
 }
