@@ -143,12 +143,17 @@ func TestCapSet(t *testing.T) {
 
 func TestSupportedCapabilities(t *testing.T) {
 	s := NewCapSet(SupportedCapabilities)
-	if !s.Has(CapTunnelSync) || !s.Has(CapTunnelUDP) || !s.Has(CapConnStats) {
+	if !s.Has(CapTunnelSync) || !s.Has(CapConnStats) {
 		t.Fatalf("supported set missing a built-in capability: %v", SupportedCapabilities)
 	}
-	// A sync-only peer (older build) must negotiate away tunnel-udp and
-	// conn-stats — an old agent that never offers conn-stats gets no RTT
-	// frames.
+	// tunnel-udp is deliberately NOT advertised: it isn't implemented
+	// end-to-end (the gateway rejects udp specs), so offering it would be a
+	// protocol lie.
+	if s.Has("tunnel-udp") {
+		t.Fatal("tunnel-udp must not be advertised until it is implemented")
+	}
+	// A sync-only peer (older build) must negotiate away conn-stats — an old
+	// agent that never offers conn-stats gets no RTT frames.
 	got := IntersectCaps(SupportedCapabilities, []string{CapTunnelSync})
 	if !reflect.DeepEqual(got, []string{CapTunnelSync}) {
 		t.Fatalf("against a sync-only peer: got %v want [tunnel-sync]", got)

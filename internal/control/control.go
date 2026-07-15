@@ -31,11 +31,6 @@ const (
 	// full-set desired-state tunnel sync instead of per-tunnel
 	// register/unregister frames.
 	CapTunnelSync = "tunnel-sync"
-	// CapTunnelUDP: the peer relays type:"udp" tunnel specs. Each UDP flow
-	// (one client source address) gets its own data stream: the usual
-	// OpenConn header, then raw datagrams framed as a 2-byte big-endian
-	// length + payload (not JSON envelopes).
-	CapTunnelUDP = "tunnel-udp"
 	// CapConnStats: the agent accepts TypeConnStats frames carrying the
 	// gateway's per-connection RTT measurements (keyed by OpenConn.ConnID) so
 	// the agent's GUI and analytics can attribute a real network RTT to each
@@ -45,7 +40,7 @@ const (
 )
 
 // SupportedCapabilities is everything this build implements, both roles.
-var SupportedCapabilities = []string{CapTunnelSync, CapTunnelUDP, CapConnStats}
+var SupportedCapabilities = []string{CapTunnelSync, CapConnStats}
 
 // IntersectCaps returns offered ∩ supported, preserving supported's order.
 // Nil-safe on both arguments; unknown offered strings are simply dropped.
@@ -180,7 +175,7 @@ type HelloErr struct {
 type TunnelSpec struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-	Type string `json:"type"` // tcp | udp (udp requires CapTunnelUDP)
+	Type string `json:"type"` // tcp | udp; udp not yet implemented (gateway rejects it)
 	// PublicPort 0 asks the gateway to pick an ephemeral port.
 	PublicPort int `json:"publicPort"`
 	// OfflineMOTD, when set, keeps the public port answering Minecraft status
