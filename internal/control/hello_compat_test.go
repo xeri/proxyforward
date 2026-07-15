@@ -66,3 +66,45 @@ func TestHelloOKAndPongOmitEmpty(t *testing.T) {
 		t.Errorf("set Pong.RecvUnixNano missing from the wire: %s", bp2)
 	}
 }
+
+// The bandwidth-cap fields are additive: an uncapped spec must encode exactly
+// like a legacy one, a legacy frame must decode with both fields zero, and a
+// set cap must round-trip.
+func TestTunnelSpecWireBackCompat(t *testing.T) {
+	// An uncapped spec must not put either bandwidth key on the wire.
+	uncapped := control.TunnelSpec{ID: "t1", Name: "web", Type: "tcp", PublicPort: 25565}
+	b, err := json.Marshal(uncapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"bandwidthLimitMbps", "bandwidthLimitScope"} {
+		if strings.Contains(string(b), f) {
+			t.Errorf("uncapped TunnelSpec.%s leaked onto the wire: %s", f, b)
+		}
+	}
+
+	// A legacy frame (no bandwidth fields) decodes with both zero.
+	var got control.TunnelSpec
+	if err := json.Unmarshal([]byte(`{"id":"t1","name":"web","type":"tcp","publicPort":25565}`), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.BandwidthLimitMbps != 0 || got.BandwidthLimitScope != "" {
+		t.Errorf("legacy frame produced non-zero bandwidth fields: %+v", got)
+	}
+
+	// A set cap round-trips and appears on the wire.
+	capped := control.TunnelSpec{ID: "t1", Name: "web", Type: "tcp", BandwidthLimitMbps: 5, BandwidthLimitScope: "per-direction"}
+	b2, _ := json.Marshal(capped)
+	for _, f := range []string{"bandwidthLimitMbps", "bandwidthLimitScope"} {
+		if !strings.Contains(string(b2), f) {
+			t.Errorf("set TunnelSpec.%s missing from the wire: %s", f, b2)
+		}
+	}
+	var g2 control.TunnelSpec
+	if err := json.Unmarshal(b2, &g2); err != nil {
+		t.Fatal(err)
+	}
+	if g2.BandwidthLimitMbps != 5 || g2.BandwidthLimitScope != "per-direction" {
+		t.Errorf("TunnelSpec bandwidth round-trip failed: %+v", g2)
+	}
+}
