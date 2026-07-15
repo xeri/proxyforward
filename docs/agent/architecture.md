@@ -103,6 +103,7 @@ persisted to config.
 | Avatars | sizes 16–128 (default 64), 8×8 master; Mojang spacing 60 s/player, 1 rps burst 3; miss TTL 15 min; evict 4000 files / 64 MiB / 6 h | `app/avatars.go:37-56` |
 | Pipe | 5 s request / 2 min idle timeouts; ACL BA+SY+IU | `ipc/server_windows.go` |
 | Cert | ECDSA P-256, 20-year validity (trust = pin, not expiry) | `link/cert.go:86` |
+| Key exchange | X25519MLKEM768 (PQ hybrid, Go default; `CurvePreferences` unset) | `link/cert.go`, `link/pq_test.go` |
 | Perf floor | ≥20 MiB/s, worst cross-stream RTT ≤500 ms (64 MiB loopback burst) | `e2e_test.go:716,719` |
 | Blur ladder | control 10, Signal Glass 20, card frost 30, chrome 36, island 40, float 48, pop 56 px | `tokens.css` |
 | Switch geometry | 40×22 track, 1px rim + 2px seat → 16px knob (7px radius), 18px travel; ×`--ui-scale` | `tokens.css`, `ui.tsx Switch` |

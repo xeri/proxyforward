@@ -101,7 +101,11 @@ func generateCert() (certPEM, keyPEM []byte, err error) {
 	return certPEM, keyPEM, nil
 }
 
-// GatewayTLSConfig is the listener-side TLS setup.
+// GatewayTLSConfig is the listener-side TLS setup. CurvePreferences is left
+// unset deliberately: Go's default key-exchange list leads with the
+// X25519MLKEM768 post-quantum hybrid, so tunneled bytes get PQ confidentiality
+// (against harvest-now-decrypt-later) for free. Do not pin it — that would
+// silently drop the hybrid (asserted by pq_test.go).
 func GatewayTLSConfig(cert tls.Certificate) *tls.Config {
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
@@ -112,6 +116,8 @@ func GatewayTLSConfig(cert tls.Certificate) *tls.Config {
 // AgentTLSConfig trusts exactly one certificate: the one whose SHA-256
 // fingerprint was delivered out-of-band in the pairing code. Standard chain
 // verification is disabled (self-signed) and replaced by the pin.
+// CurvePreferences is left unset so the X25519MLKEM768 PQ hybrid is negotiated
+// (see GatewayTLSConfig; asserted by pq_test.go).
 func AgentTLSConfig(pinnedFingerprint string) *tls.Config {
 	return &tls.Config{
 		MinVersion:         tls.VersionTLS13,
