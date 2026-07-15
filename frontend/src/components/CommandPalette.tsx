@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'react'
-import {Command, CommandCtx, COMMANDS, fuzzyScore} from '../commands'
+import {Command, CommandCtx, COMMANDS, fuzzyScore, navCommands} from '../commands'
 import {IconSearch} from './icons'
 import {Kbd} from './ui'
 
@@ -21,7 +21,10 @@ export function CommandPalette({ctx, onClose}: {ctx: CommandCtx; onClose: () => 
     window.setTimeout(() => closeRef.current(), 150)
   }
 
-  const available = useMemo(() => COMMANDS.filter(c => !c.when || c.when(ctx)), [ctx])
+  // Navigate commands are role-derived (the gateway's Agents entry); prepend
+  // them so the palette lists exactly the screens the current role can reach.
+  const all = useMemo(() => [...navCommands(ctx.status.role), ...COMMANDS], [ctx.status.role])
+  const available = useMemo(() => all.filter(c => !c.when || c.when(ctx)), [all, ctx])
   const results = useMemo(() => {
     if (!q.trim()) return available
     return available

@@ -74,6 +74,19 @@ export function hasRtt(ms: number): boolean {
   return ms > 0
 }
 
+/** worstHealth: the fleet rollup — the least-healthy agent sets the verdict, so
+ * one struggling machine is never hidden behind healthy ones. Unknown among
+ * healthy reads as caution. Empty is 'good' (callers gate on count). The one
+ * definition, shared by the connection pill and the Agents roster. */
+export function worstHealth(items: {healthScore: string}[]): 'good' | 'warn' | 'bad' {
+  let tone: 'good' | 'warn' | 'bad' = 'good'
+  for (const it of items) {
+    if (it.healthScore === 'bad') return 'bad'
+    if (it.healthScore === 'warn' || it.healthScore === 'unknown') tone = 'warn'
+  }
+  return tone
+}
+
 /** fmtRtt renders a known round-trip time ("34 ms"). Guard with hasRtt. */
 export function fmtRtt(ms: number): string {
   return `${Math.round(ms)} ms`

@@ -3,8 +3,9 @@ import {flushSync} from 'react-dom'
 import {Shell} from './layout/Shell'
 import {TitleBar} from './layout/TitleBar'
 import {Sidebar} from './layout/Sidebar'
-import {NAV_MAIN, NAV_SETTINGS, NavId} from './nav'
+import {mainNav, navFor, NavId} from './nav'
 import {Overview} from './screens/Overview'
+import {Agents} from './screens/Agents'
 import {Traffic} from './screens/Traffic'
 import {Players} from './screens/Players'
 import {Analytics} from './screens/Analytics'
@@ -86,10 +87,19 @@ export default function App() {
     }
   }
 
-  // Ctrl+K opens the palette; Ctrl+1..6 jump straight to a screen.
+  // A live role switch (RoleSwitcher) can hide the current screen — the agent
+  // has no Agents rail. Fall back to Overview so the console never renders a
+  // screen the role can't reach.
+  useEffect(() => {
+    const role = status?.role || ''
+    if (nav !== 'settings' && !mainNav(role).some(n => n.id === nav)) setNav('overview')
+  }, [status?.role, nav])
+
+  // Ctrl+K opens the palette; Ctrl+1..n jump straight to a screen (the rail is
+  // role-dependent, so the map is derived from the live role).
   const [palette, setPalette] = useState(false)
   useEffect(() => {
-    const items = [...NAV_MAIN, NAV_SETTINGS]
+    const items = navFor(status?.role || '')
     const h = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.altKey || e.metaKey) return
       if (e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette(o => !o); return }
@@ -159,6 +169,7 @@ export default function App() {
       >
         <div key={nav} className={supportsVT ? '' : 'pf-page'}>
           {nav === 'overview' && <Overview status={s} onNavigate={go} />}
+          {nav === 'agents' && <Agents status={s} />}
           {nav === 'traffic' && <Traffic status={s} onNavigate={go} />}
           {nav === 'players' && <Players status={s} />}
           {nav === 'analytics' && <Analytics status={s} />}
