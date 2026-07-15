@@ -104,6 +104,13 @@ export function loadCandlePref(): boolean {
 }
 export function saveCandlePref(on: boolean) { localStorage.setItem('pf-chart-candles', on ? '1' : '0') }
 
+/** Uptime strip: show the coverage timeline (when the app was actually
+ * recording) beneath the time axis. Off by default — it's a secondary read. */
+export function loadUptimePref(): boolean {
+  return localStorage.getItem('pf-chart-uptime') === '1'
+}
+export function saveUptimePref(on: boolean) { localStorage.setItem('pf-chart-uptime', on ? '1' : '0') }
+
 /** Per-series visibility: download / upload / connections / RTT. */
 export type SeriesVisibility = {dl: boolean; ul: boolean; conn: boolean; rtt: boolean}
 

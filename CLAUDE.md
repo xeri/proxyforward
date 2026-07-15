@@ -131,12 +131,15 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   alone (`ui.tsx StatusDot`).
 - All motion gates on `prefersReduced()` / `data-motion` (`motion.ts`, kill switch at
   the bottom of `motion.css`); data changes are instant under reduced motion, never
-  eased (`NumberTicker`, `charts/util.ts useTweenedValues`).
+  eased (`NumberTicker`, `charts/util.ts useTweenedValues`). That kill switch only
+  zeroes CSS durations, so *scripted* motion must gate itself in JS — the scroll
+  rubber band attaches no listener at all under it (`rubberband.ts useRubberBand`).
 - Chart series tokens `--dl/--ul/--conn/--rtt` are load-bearing names; direction
   mapping (wire "in/out" → UI "upload/download") happens in exactly one place,
   the `frontend/src/history.ts` header. Never re-map elsewhere.
-- The design charter is `frontend/DESIGN.md` — one identity surface per screen, glass
-  as a reward, motion communicates network state, color is signal.
+- The design charter is `frontend/DESIGN.md` — one identity surface per screen; every
+  surface is glass but only Signal Glass *answers the pointer* (never give a card the
+  caustics/streak/wake); motion communicates network state; color is signal.
 
 ### Privacy
 - Player/traffic analytics are local-only (SQLite next to the config); the only

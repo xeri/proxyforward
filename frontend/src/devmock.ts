@@ -14,6 +14,9 @@
 //   &fx=high         — high-fx glass: refraction filter on the palette
 //   &fx=low          — low-fx glass: solid cards, no caustics/chart glow
 //   &analytics=off   — daemon without the analytics store (unsupported state)
+//   &paired=0        — this machine has never been paired to a gateway, so the
+//                      sidebar's role switcher can't become the agent and must
+//                      route to setup instead (pair with ?mock=gateway)
 //   &geo=off|empty|error|pending
 //                    — GeoIP axes: unconfigured / configured-but-no-locations /
 //                      database failed to open / picked but engine not restarted
@@ -33,6 +36,7 @@ export function installDevMock() {
   const axisFatal = params.get('fatal') === '1'
   const axisFresh = params.get('fresh') === '1'
   const axisAnalyticsOff = params.get('analytics') === 'off'
+  const axisUnpaired = params.get('paired') === '0'
   const axisGeo = params.get('geo') || '' // off | empty | error | pending
   const fx = params.get('fx')
   if (fx) document.documentElement.dataset.fx = fx // &fx=high | &fx=low
@@ -213,6 +217,14 @@ export function installDevMock() {
     UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: true, Autostart: false},
     Analytics: {RetentionDays: 180, MojangLookups: true, GeoIPCityPath: '', GeoIPASNPath: ''},
   }
+  // A machine that has never been paired holds no agent credentials — the
+  // gateway half of the config is complete, the agent half is empty. This is
+  // the one state where the role switcher cannot simply flip.
+  if (axisUnpaired) {
+    config.Agent.Token = ''
+    config.Agent.GatewayHost = ''
+    config.Agent.CertFingerprint = ''
+  }
 
   // Link-quality mock: healthy jitter/loss on the agent; the gateway leaves
   // them unknown (-1) like the real backend, since RTT is measured agent-side.
@@ -228,25 +240,31 @@ export function installDevMock() {
   const status = () => {
     const jitter = isWizard || !state.linkUp ? -1 : jitterMs()
     const loss = isWizard || !state.linkUp ? -1 : lossPct()
+    // Read the LIVE role, not the URL scenario: the sidebar's role switcher
+    // flips state.role, and every identity below has to follow it or the app
+    // would keep wearing the old role's peer after a switch.
+    const gw = state.role === 'gateway'
     return {
     mode: isWizard ? 'wizard' : axisAttached ? 'attached' : 'engine',
     role: isWizard ? '' : state.role,
-    version: '0.1.0-dev', hostname: 'DESKTOP-DEV', pid: 4242, configPath: 'C\\\\Users\\\\you\\\\AppData\\\\Roaming\\\\proxyforward\\\\config.toml',
+    // A real Windows path, escaped once — the config-file row is sized against
+    // exactly this string, so an over-escaped mock would flatter it.
+    version: '0.1.0-dev', hostname: 'DESKTOP-DEV', pid: 4242, configPath: 'C:\\Users\\you\\AppData\\Roaming\\proxyforward\\config.toml',
     linkUp: state.linkUp, rttMillis: state.linkUp ? state.rtt : 0, agentConnected: state.agentConnected,
     jitterMillis: jitter,
     packetLossPct: loss,
     healthScore: isWizard ? 'unknown' : healthOf(jitter, loss),
-    peerHostname: isWizard ? '' : isGateway ? 'DESKTOP-DEV' : 'GATEWAY-VPS-01',
-    publicIp: isWizard ? '' : isGateway ? '203.0.113.9' : '84.23.101.7',
-    peerPublicIp: isWizard ? '' : isGateway ? '84.23.101.7' : 'play.example.com',
-    localLanIps: isWizard ? [] : isGateway ? ['10.0.0.5'] : ['192.168.1.24'],
-    peerLanIps: isWizard ? [] : isGateway ? ['192.168.1.24'] : ['10.0.0.5'],
+    peerHostname: isWizard ? '' : gw ? 'DESKTOP-DEV' : 'GATEWAY-VPS-01',
+    publicIp: isWizard ? '' : gw ? '203.0.113.9' : '84.23.101.7',
+    peerPublicIp: isWizard ? '' : gw ? '84.23.101.7' : 'play.example.com',
+    localLanIps: isWizard ? [] : gw ? ['10.0.0.5'] : ['192.168.1.24'],
+    peerLanIps: isWizard ? [] : gw ? ['192.168.1.24'] : ['10.0.0.5'],
     tunnels: [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true}],
     connections: state.linkUp ? state.conns : [],
     totalBytesIn: state.bytesIn, totalBytesOut: state.bytesOut,
     linkUpSinceMs: isWizard || !state.linkUp ? 0 : LINK_UP_SINCE,
     processStartMs: isWizard ? 0 : PROCESS_START,
-    peerAddr: isWizard ? '' : isGateway ? '84.23.101.7' : 'play.example.com:8474',
+    peerAddr: isWizard ? '' : gw ? '84.23.101.7' : 'play.example.com:8474',
     linkBytesIn: Math.round(state.bytesIn * 1.06) + 2_400_000,
     linkBytesOut: Math.round(state.bytesOut * 1.06) + 3_100_000,
     allTimeBytesIn: Math.round(3.4 * 1024 ** 3) + state.bytesIn,
@@ -591,6 +609,14 @@ export function installDevMock() {
     }
   }
 
+  // A role flip in the mock is the same one-field change it is in the engine:
+  // the config's Role and the status the tick reports. Peers/addresses are
+  // derived from state.role in status(), so they follow automatically.
+  const becomeRole = (r: string) => {
+    config.Role = r
+    state.role = r
+  }
+
   const ok = <T,>(v: T) => Promise.resolve(v)
   // Attached mode: a service owns the engine — gated bindings reject exactly
   // like the real backend so the UI's disabled/degraded states can be tested.
@@ -622,10 +648,24 @@ export function installDevMock() {
     Version: () => ok('0.1.0-dev'),
     LogsSince: (seq: number) => ok(axisAttached ? [] : logs.filter(l => l.seq > seq)),
     TestReachability: () => new Promise(r => setTimeout(() => r('Reachable: play.example.com:25565 answered in 38ms — players can connect.'), 700)),
-    SetupGateway: () => gated(() => undefined),
-    SetupAgent: () => gated(() => undefined),
+    // Role setup actually flips the mock's role: state.role is read on every
+    // tick, so the whole app (accent ramp, screens, sidebar) swaps live in the
+    // browser with no Go running — which is the only way to exercise the
+    // sidebar's role switcher on both axes.
+    SetupGateway: () => gated(() => { becomeRole('gateway'); return undefined }),
+    SetupAgent: () => gated(() => { becomeRole('agent'); return undefined }),
     SaveTunnels: (t: any) => { config.Agent.Tunnels = t; return ok(undefined) },
-    SaveSettings: () => ok(undefined),
+    SaveSettings: (c: any) => {
+      // The real SaveSettings validates before it writes: an agent with no
+      // pairing token is refused and nothing is persisted (config.go
+      // validateAgent). Mirror that, or the switcher's error path can't be seen.
+      if (c?.Role === 'agent' && !(config.Agent.Token && config.Agent.GatewayHost)) {
+        return Promise.reject(new Error('agent.token: required (pair with a gateway first)'))
+      }
+      if (c?.Role) becomeRole(c.Role)
+      if (c?.Logging) config.Logging = c.Logging
+      return ok(undefined)
+    },
     SetTheme: (t: string) => { config.UI.Theme = t; return ok(undefined) },
     RestartEngine: () => gated(() => undefined),
     RegenerateToken: () => gated(() => undefined),

@@ -107,18 +107,20 @@ export function CommandPalette({ctx, onClose}: {ctx: CommandCtx; onClose: () => 
           />
           <Kbd>Esc</Kbd>
         </div>
-        <div ref={listRef} className="max-h-[46vh] overflow-y-auto p-1.5">
-          {results.length === 0 && (
-            <div className="px-3 py-8 text-center text-sm text-[var(--text-3)]">Nothing matches "{q}".</div>
-          )}
-          {grouped
-            ? grouped.map(([section, cmds]) => (
-                <div key={section}>
-                  <div className="px-2.5 pb-1 pt-2.5 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--text-3)]">{section}</div>
-                  {cmds.map(renderItem)}
-                </div>
-              ))
-            : results.map(renderItem)}
+        <div ref={listRef} className="max-h-[46vh] overflow-y-auto overscroll-y-contain p-1.5">
+          <div data-band-content>
+            {results.length === 0 && (
+              <div className="px-3 py-8 text-center text-sm text-[var(--text-3)]">Nothing matches "{q}".</div>
+            )}
+            {grouped
+              ? grouped.map(([section, cmds]) => (
+                  <div key={section}>
+                    <div className="px-2.5 pb-1 pt-2.5 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--text-3)]">{section}</div>
+                    {cmds.map(renderItem)}
+                  </div>
+                ))
+              : results.map(renderItem)}
+          </div>
         </div>
         <div className="flex items-center gap-3 border-t border-[var(--border)] px-4 py-2 text-[11px] text-[var(--text-3)]">
           <span className="flex items-center gap-1"><Kbd>↑ ↓</Kbd> navigate</span>

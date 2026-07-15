@@ -1,19 +1,29 @@
 /* ---------------------------------------------------------------------------
    Surface materials. See frontend/DESIGN.md — the Visual Charter.
 
-   "Glass is a reward, not a default." Two content materials:
+   Everything in this app is glass. What distinguishes the identity surface is
+   not that it is the only glass — it is that it is the only glass that
+   ANSWERS YOU (DESIGN.md rule 2):
 
-   .pf-card    — the quiet tier-2 panel: near-solid, one subtle border, one
-                 soft shadow. The default. It recedes.
-   .pf-signal  — SIGNAL GLASS, the product's own material: true backdrop
-                 blur, directional reflection streak, curved-acrylic arc,
-                 chromatic edge, and light that answers the pointer (rim +
-                 caustics wake on approach). Only on surfaces representing
-                 live network activity — one identity surface per screen.
+   .pf-card    — FROST: heavy backdrop blur, low transmission, a milled rim.
+                 It refracts what passes behind it and does nothing else. No
+                 caustics, no streak, no arc, no pointer-wake. It is the
+                 workhorse panel and it still recedes.
+   .pf-signal  — SIGNAL GLASS, the product's own material: thin, high
+                 transmission, a directional reflection streak, the curved-
+                 acrylic arc, a chromatic edge, drifting caustics, and light
+                 that follows the pointer (rim glow + surface bloom on
+                 approach). It ignites when the network does. Only on surfaces
+                 representing live network activity — one per screen.
+   .pf-control — the input tier: a thin frosted film + rim, for anything the
+                 user types into, toggles, or presses (inputs, selects,
+                 switches, kbd chips, segmented tracks, icon tiles).
 
    Chrome and floats (.pf-sheet / .pf-island / .pf-glass / .pf-menu) keep
    true backdrop-filter, tiered by blur radius (--blur-chrome → --blur-pop).
-   `data-fx="low"` on <html> strips signal/button/menu blur for weak GPUs.
+   `data-fx="low"` on <html> strips card/signal/control/menu blur for weak
+   GPUs — cards are numerous, so that escape hatch is load-bearing, not
+   cosmetic.
 
    One light source for everything: top-left, along --light-angle. Rims are
    bright where they face it, dark where they don't; the glare layers are
@@ -67,8 +77,6 @@ aside.pf-sheet {
   backdrop-filter: blur(var(--blur-island)) saturate(180%) brightness(1.08);
   -webkit-backdrop-filter: blur(var(--blur-island)) saturate(180%) brightness(1.08);
   box-shadow:
-    inset 0 1px 0 var(--bevel-top),
-    inset 0 -1px 0 var(--bevel-bot),
     var(--shadow-contact),
     0 2px 8px rgba(0, 0, 0, 0.35),
     0 20px 48px -16px rgba(0, 0, 0, 0.65);
@@ -85,36 +93,62 @@ aside.pf-sheet {
   backdrop-filter: blur(var(--blur-float)) saturate(170%) brightness(1.1);
   -webkit-backdrop-filter: blur(var(--blur-float)) saturate(170%) brightness(1.1);
   box-shadow:
-    inset 0 1px 0 var(--bevel-top),
-    inset 0 -1px 0 var(--bevel-bot),
     var(--shadow-contact),
     var(--shadow-key),
     var(--shadow-ambient);
 }
 
-/* Specular rim: a 1px gradient ring (mask-composite cuts out the middle) —
-   brightest facing the light, picking up a whisper of the role accent at the
-   far corner. Replaces the flat border. Shared by floats and the island. */
+/* THE RIM PRIMITIVE — every milled edge in this file is one of these.
+   A 1px gradient ring: brightest facing the light, picking up a whisper of the
+   role accent at the far corner. Replaces the flat border.
+
+   The ring is carved by `background-clip: border-area` — the background paints
+   in the border region ONLY, following border-radius. That is the same
+   difference-of-rounded-rects path Skia strokes a real `border` with: ONE
+   anti-aliased boundary pair, rasterized once.
+
+   It replaced a `padding: 1px` + `mask-composite: exclude` ring, which XOR-ed
+   two INDEPENDENTLY anti-aliased rounded rects. Their coverage stopped
+   cancelling where the straight edge joins the corner arc, so at fractional
+   Windows DPI the band dropped a speck at the tangent points and the arcs read
+   stair-stepped. A `filter: blur(0.4px)` feather used to smear that; it is gone
+   with the cause. Do not reintroduce a mask here — see the @supports fallback
+   at the bottom of this section for what it cost.
+
+   THE BEVEL PAIR RIDES IN THIS RING TOO, for the same reason. An
+   `inset 0 1px 0` on the surface paints its shape minus its own shape offset
+   1px: along a straight edge a clean band, but around a corner a crescent that
+   thins along the arc and stops dead where the arc turns vertical. At
+   fractional Windows DPI that blunt end lands on the rim and reads as a speck —
+   two per side, at the tangent points, which is exactly what they looked like.
+   As ring layers the bevels fade out over the corner (--r-lg) instead of
+   terminating on it, and the whole milled edge is one annulus, anti-aliased
+   once. Do not move them back out to box-shadow.
+
+   --fringe-cool / --fringe-warm are opt-in: only .pf-fringe sets them. */
 .pf-glass::before,
 .pf-island::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  border: 1px solid transparent;
   pointer-events: none;
   z-index: 1;
-  background: linear-gradient(
-    var(--light-angle),
-    var(--edge-hi),
-    var(--edge-mid) 28%,
-    var(--edge-lo) 55%,
-    color-mix(in oklab, var(--accent) 30%, transparent) 100%
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
+  background:
+    linear-gradient(
+      var(--light-angle),
+      var(--edge-hi),
+      var(--edge-mid) 28%,
+      var(--edge-lo) 55%,
+      color-mix(in oklab, var(--accent) 30%, transparent) 100%
+    ),
+    linear-gradient(180deg, var(--bevel-top), transparent var(--r-lg)),
+    linear-gradient(0deg, var(--bevel-bot), transparent var(--r-lg)),
+    linear-gradient(90deg, var(--fringe-cool, transparent) 0 1px, transparent 1px),
+    linear-gradient(270deg, var(--fringe-warm, transparent) 0 1px, transparent 1px);
+  background-origin: border-box;
+  background-clip: border-area;
 }
 
 /* Frozen glare; motion.css sweeps it once when the surface opens. */
@@ -132,19 +166,14 @@ aside.pf-sheet {
 }
 
 /* Palette garnish: a 1px chromatic fringe — cool light entering one edge,
-   warm leaving the other — suggests dispersion in the thickest glass. The
-   full shadow stack is restated because box-shadow doesn't compose. */
+   warm leaving the other — suggests dispersion in the thickest glass. It rides
+   the rim ring (the two --fringe-* slots above), so this modifier only names
+   the colors and the deeper blur — no shadow stack to restate. */
 .pf-glass.pf-fringe {
+  --fringe-cool: rgba(140, 190, 255, 0.05);
+  --fringe-warm: rgba(255, 130, 160, 0.05);
   backdrop-filter: blur(var(--blur-pop)) saturate(170%) brightness(1.1);
   -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(170%) brightness(1.1);
-  box-shadow:
-    inset 1px 0 0 rgba(140, 190, 255, 0.05),
-    inset -1px 0 0 rgba(255, 130, 160, 0.05),
-    inset 0 1px 0 var(--bevel-top),
-    inset 0 -1px 0 var(--bevel-bot),
-    var(--shadow-contact),
-    var(--shadow-key),
-    var(--shadow-ambient);
 }
 
 /* High-fx mode (devmock &fx=high): genuine refraction through the palette via
@@ -155,26 +184,69 @@ aside.pf-sheet {
   -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(170%) url(#pf-refract);
 }
 
-/* Quiet panel: the workhorse tier-2 card. Near-solid so the atmosphere only
-   whispers through; a single subtle border and one soft shadow. No blur, no
-   reflections, no rim — it recedes so the identity surface can matter.
-   position:relative is the documented exception to "material only":
-   consumers anchor headers/overlays to it. */
+/* FROST: the workhorse panel. Heavy blur, low transmission — the atmosphere
+   arrives diffused, never legible, so text stays crisp over it and the eye
+   still passes over the panel on its way to the identity surface. It refracts;
+   it does not react: no caustics, no streak, no arc, no pointer-wake — those
+   stay exclusive to .pf-signal, and that exclusivity is what keeps one
+   identity surface per screen (DESIGN.md rules 1 and 2).
+
+   The edge is the rim ring (see the primitive above), not a border: a flat
+   1px border can't carry the bevel pair without specking, and every other
+   milled surface here is one annulus already.
+
+   position:relative is the documented exception to "material only": consumers
+   anchor headers/overlays to it. backdrop-filter makes each card a stacking
+   context AND a containing block for fixed/absolute descendants — Select and
+   Modal both portal to <body> for exactly that reason. Anything new that
+   floats out of a card must do the same. */
 .pf-card {
   position: relative;
-  background: var(--card-2-bg);
-  border: 1px solid var(--card-2-border);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-card-2);
+  background:
+    var(--noise-glass),
+    linear-gradient(
+      var(--light-angle),
+      color-mix(in oklab, var(--card-2-bg) 100%, white 3%),
+      var(--card-2-bg) 55%
+    );
+  backdrop-filter: blur(var(--blur-frost)) saturate(150%) brightness(1.04);
+  -webkit-backdrop-filter: blur(var(--blur-frost)) saturate(150%) brightness(1.04);
+  box-shadow: var(--shadow-contact), var(--shadow-card-2);
   /* No contain:paint here — Select dropdowns escape card bounds. */
 }
 
-/* Material hover response; .pf-lift still owns the timing. */
+.pf-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid transparent;
+  pointer-events: none;
+  z-index: 1;
+  opacity: var(--card-rim-o, 0.75);
+  background:
+    linear-gradient(
+      var(--light-angle),
+      var(--edge-hi),
+      var(--edge-mid) 30%,
+      var(--edge-lo) 58%,
+      color-mix(in oklab, var(--accent) 18%, transparent) 100%
+    ),
+    linear-gradient(180deg, var(--bevel-top), transparent var(--r-lg)),
+    linear-gradient(0deg, var(--bevel-bot), transparent var(--r-lg));
+  background-origin: border-box;
+  background-clip: border-area;
+  transition: opacity 0.25s ease;
+}
+
+/* Material hover response; .pf-lift still owns the timing. The edge brightens
+   instead of a border-color swap — the border is a gradient ring now. */
 .pf-card.pf-lift:hover {
   transform: translateY(-1px);
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-card-2), var(--shadow-soft);
+  box-shadow: var(--shadow-contact), var(--shadow-card-2), var(--shadow-soft);
 }
+.pf-card.pf-lift:hover::before { --card-rim-o: 1; }
 
 /* SIGNAL GLASS — the product's own material, and a reward: reserved for the
    one surface per screen that represents live network activity. A
@@ -183,22 +255,33 @@ aside.pf-sheet {
    streak, and a faint chromatic edge (cool light entering one side, warm
    leaving the other) make it read as curved acrylic over live electronics. */
 .pf-signal {
-  --card-rim-opacity: 0.85;
-  --card-bevel-top: color-mix(in srgb, var(--bevel-top) 55%, white);
+  /* The rim runs at full strength — this is the shiniest edge in the app, and
+     it has to stay distinguishable now that the quiet cards are glass too. The
+     dim lives in the ring's own color stops, not in an `opacity` on the pseudo:
+     the pseudo also carries the bevel pair, which must stay full (see below). */
+  --card-rim-dim: 100%;
+  --card-rim-hi: color-mix(in srgb, var(--edge-crisp) var(--card-rim-dim), transparent);
+  --card-rim-mid: color-mix(in srgb, var(--edge-mid) var(--card-rim-dim), transparent);
+  --card-rim-lo: color-mix(in srgb, var(--edge-lo) var(--card-rim-dim), transparent);
+  --card-rim-accent: color-mix(in srgb, color-mix(in oklab, var(--accent) 40%, transparent) var(--card-rim-dim), transparent);
+  --card-rim-glow: color-mix(in srgb, color-mix(in oklab, var(--accent) 70%, white 25%) var(--card-rim-dim), transparent);
+  --card-bevel-top: color-mix(in srgb, var(--bevel-top) 40%, white);
+  /* Wet-look garnishes, hotter than the ambient --arc/--streak the chrome uses:
+     a top gloss, the curved-acrylic softbox, and the 120° reflection. */
+  --signal-arc: rgba(255, 255, 255, 0.1);
+  --signal-streak: rgba(255, 255, 255, 0.13);
+  --signal-gloss: rgba(255, 255, 255, 0.09);
   position: relative;
   background:
     var(--noise-glass),
-    radial-gradient(140% 95% at 50% -52%, var(--arc) 0 60%, transparent 61%),
-    linear-gradient(120deg, var(--streak), transparent 18%),
-    linear-gradient(var(--light-angle), color-mix(in oklab, var(--glass-card) 100%, white 3%), var(--glass-card) 50%);
-  backdrop-filter: blur(var(--blur-card)) saturate(160%) brightness(1.05);
-  -webkit-backdrop-filter: blur(var(--blur-card)) saturate(160%) brightness(1.05);
+    linear-gradient(180deg, var(--signal-gloss), transparent 45%),
+    radial-gradient(140% 95% at 50% -52%, var(--signal-arc) 0 60%, transparent 61%),
+    linear-gradient(120deg, var(--signal-streak), transparent 20%),
+    linear-gradient(var(--light-angle), color-mix(in oklab, var(--glass-card) 100%, white 5%), var(--glass-card) 50%);
+  backdrop-filter: blur(var(--blur-card)) saturate(195%) brightness(1.1);
+  -webkit-backdrop-filter: blur(var(--blur-card)) saturate(195%) brightness(1.1);
   border-radius: var(--r-lg);
   box-shadow:
-    inset 1px 0 0 rgba(140, 190, 255, 0.04),
-    inset -1px 0 0 rgba(255, 130, 160, 0.04),
-    inset 0 1px 0 var(--card-bevel-top),
-    inset 0 -1px 0 var(--bevel-bot),
     var(--shadow-contact),
     var(--shadow-key),
     var(--shadow-ambient-card);
@@ -206,34 +289,43 @@ aside.pf-sheet {
 
 /* Signal rim: specular ring + pointer-tracked accent glow. The static ring
    is always present (it is the material's edge); the accent layer parks
-   offscreen until the Shell lamp writes --mx/--my on approach. */
+   offscreen until the Shell lamp writes --mx/--my on approach.
+
+   The bevel pair and the chromatic fringe are LAYERS OF THIS RING, not inset
+   box-shadows on the card. An `inset 0 1px 0` paints the card's shape minus
+   its own shape offset 1px — around a corner that difference is a crescent
+   that thins along the arc and stops dead where the arc turns vertical. At
+   fractional Windows DPI its last pixel lands on the rim's own and reads as a
+   speck: two per side, at the tangent points. Folded in here, every milled
+   edge is one annulus, anti-aliased once, and the bevels fade out over the
+   corner (--r-lg) instead of terminating on it. Do not move them back out. */
 .pf-signal::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  border: 1px solid transparent;
   pointer-events: none;
   z-index: 1;
-  opacity: var(--card-rim-opacity);
-  transition: opacity 0.25s ease;
   background:
     radial-gradient(
       220px circle at var(--mx, -999px) var(--my, -999px),
-      color-mix(in oklab, var(--accent) 55%, white 20%),
+      var(--card-rim-glow),
       transparent 70%
     ),
     linear-gradient(
       var(--light-angle),
-      var(--edge-hi),
-      var(--edge-mid) 28%,
-      var(--edge-lo) 55%,
-      color-mix(in oklab, var(--accent) 30%, transparent) 100%
-    );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
+      var(--card-rim-hi),
+      var(--card-rim-mid) 28%,
+      var(--card-rim-lo) 55%,
+      var(--card-rim-accent) 100%
+    ),
+    linear-gradient(180deg, var(--card-bevel-top), transparent var(--r-lg)),
+    linear-gradient(0deg, var(--bevel-bot), transparent var(--r-lg)),
+    linear-gradient(90deg, rgba(140, 190, 255, 0.04) 0 1px, transparent 1px),
+    linear-gradient(270deg, rgba(255, 130, 160, 0.04) 0 1px, transparent 1px);
+  background-origin: border-box;
+  background-clip: border-area;
 }
 
 /* Surface bloom: the pointer shines faintly INTO the glass (dark theme only —
@@ -246,7 +338,7 @@ aside.pf-sheet {
   pointer-events: none;
   background: radial-gradient(
     240px circle at var(--mx, -999px) var(--my, -999px),
-    rgba(255, 255, 255, 0.05),
+    rgba(255, 255, 255, 0.08),
     transparent 70%
   );
   mix-blend-mode: screen;
@@ -275,21 +367,32 @@ aside.pf-sheet {
 
 /* Inset well inside a card (code boxes, terminals, checklists): pressed INTO
    the glass — a translucent shade so the card's own blur keeps showing
-   through, with the bevel pair inverted (dark seat on top, lit lip below). */
+   through, with the bevel pair inverted (dark seat on top, lit lip below).
+
+   The lit lip is a background BAND clipped to the padding box, not an
+   `inset 0 -1px 0`: an offset inset shadow rounds each corner as a crescent
+   that dies at the tangent point and specks there (see the rim primitive). The
+   seat above it keeps its box-shadow — it is blurred, so it has no crisp end to
+   speck. The fill is a layer too, so the band can clip to the padding box while
+   the fill still runs under the translucent border. */
 .pf-well {
-  background: rgba(0, 0, 0, 0.24);
+  --well-fill: rgba(0, 0, 0, 0.24);
+  background-image:
+    linear-gradient(0deg, var(--bevel-top) 0 1px, transparent 1px),
+    linear-gradient(var(--well-fill), var(--well-fill));
+  background-clip: padding-box, border-box;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  box-shadow: inset 0 2px 4px -1px var(--bevel-bot), inset 0 -1px 0 var(--bevel-top);
+  box-shadow: inset 0 2px 4px -1px var(--bevel-bot);
 }
 
 /* Flush well: same pressed-in read for regions that run edge-to-edge inside
-   a card (the log tail). */
+   a card (the log tail). Square, so the inset lip has no corner to speck. */
 .pf-well-flush {
   background: rgba(0, 0, 0, 0.3);
   box-shadow: inset 0 2px 4px -1px var(--bevel-bot), inset 0 -1px 0 var(--bevel-top);
 }
-:root[data-theme="light"] .pf-well { background: rgba(60, 70, 110, 0.08); }
+:root[data-theme="light"] .pf-well { --well-fill: rgba(60, 70, 110, 0.08); }
 :root[data-theme="light"] .pf-well-flush { background: rgba(60, 70, 110, 0.1); }
 
 /* Toolbar band: a slightly raised control strip inside a card. Appearance
@@ -330,11 +433,14 @@ aside.pf-sheet {
 /* Nav active indicator: light lives INSIDE the glass — an internal accent
    glow instead of a solid pill. */
 .pf-nav-glow {
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  --nav-fill: color-mix(in srgb, var(--accent) 9%, transparent);
+  /* Catch-light as a padding-box band, not an inset shadow — see .pf-well. */
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px),
+    linear-gradient(var(--nav-fill), var(--nav-fill));
+  background-clip: padding-box, border-box;
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-  box-shadow:
-    inset 0 0 14px 1px color-mix(in srgb, var(--accent) 16%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 14px 1px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 /* Caustic drift: near-subliminal reflection bands crossing the card over
@@ -374,12 +480,16 @@ aside.pf-sheet {
 
 /* Milled glass buttons: a thin frosted film riding the card glass, machined
    under the app's one light source — an angled catch-light film crossing the
-   face and a specular ring that brightens toward the light corner (the same
-   mask-composite trick as the card rims, at button scale). Each variant's
-   fill, text, and glow stay Tailwind utilities in ui.tsx: this recipe owns
-   only material (blur, film, rim) — background-image composites over any
-   background-color, and positioning stays with the consumer (ui.tsx sets
-   `relative`). */
+   face and a specular ring that brightens toward the light corner. Each
+   variant's fill, text, and glow stay Tailwind utilities in ui.tsx: this
+   recipe owns only material (blur, film, rim) — background-image composites
+   over any background-color, and positioning stays with the consumer (ui.tsx
+   sets `relative`).
+
+   THE CATCH-LIGHT IS A LAYER OF THE RING (--btn-lip). ui.tsx used to restate
+   `inset 0 1px 0 rgba(255,255,255,.28)` on the same element that already wore
+   this ring — the exact pattern the rim primitive above says specks at the
+   corners. The hot variant just turns --btn-lip up instead. */
 .pf-btn {
   background-image: linear-gradient(
     var(--light-angle),
@@ -388,52 +498,137 @@ aside.pf-sheet {
     rgba(255, 255, 255, 0) 60%,
     rgba(255, 255, 255, 0.06)
   );
-  backdrop-filter: blur(10px) saturate(150%);
-  -webkit-backdrop-filter: blur(10px) saturate(150%);
+  backdrop-filter: blur(var(--blur-control)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur-control)) saturate(150%);
 }
 .pf-btn::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  border: 1px solid transparent;
   pointer-events: none;
   opacity: 0.55;
-  background: linear-gradient(
-    var(--light-angle),
-    var(--edge-hi),
-    var(--edge-mid) 32%,
-    transparent 58%,
-    var(--edge-lo) 100%
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, var(--btn-lip, 0.1)),
+      transparent var(--r-md)
+    ),
+    linear-gradient(
+      var(--light-angle),
+      var(--edge-hi),
+      var(--edge-mid) 32%,
+      transparent 58%,
+      var(--edge-lo) 100%
+    );
+  background-origin: border-box;
+  background-clip: border-area;
   transition: opacity 0.2s ease;
 }
 .pf-btn:hover:not(:disabled)::before { opacity: 0.9; }
 .pf-btn:disabled::before { opacity: 0.3; }
 
+/* THE CONTROL TIER — every surface the hand touches: text inputs, the Select
+   trigger, checkboxes, the switch track, kbd chips, the segmented track and
+   its thumb, icon tiles. A thin frosted film over whatever glass it sits on,
+   plus the rim ring with the bevel pair folded in.
+
+   Material only. Size, padding, fill, and focus glow stay with the consumer —
+   and the consumer must NOT carry a `border`: this ring IS the edge (it sits
+   in the pseudo's own 1px border area, at inset 0). Adding a border too would
+   paint a second edge one pixel inboard.
+
+   Blurred insets (the pressed-in seat, `inset 0 2px 4px -1px`) are still plain
+   box-shadows on the consumer — a blurred shadow has no crisp end and cannot
+   speck. Only the crisp `inset 0 ±1px 0` bevels had to move in here.
+
+   <input> cannot host a pseudo-element, so TextInput puts .pf-control on its
+   wrapper and lets :has() carry the focus state inward. */
+.pf-control {
+  background-image: linear-gradient(
+    var(--light-angle),
+    rgba(255, 255, 255, 0.1),
+    rgba(255, 255, 255, 0.03) 40%,
+    rgba(255, 255, 255, 0) 62%,
+    rgba(255, 255, 255, 0.05)
+  );
+  backdrop-filter: blur(var(--blur-control)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--blur-control)) saturate(140%);
+}
+.pf-control::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid transparent;
+  pointer-events: none;
+  z-index: 1;
+  opacity: var(--control-rim-o, 0.8);
+  background:
+    linear-gradient(var(--control-edge, transparent), var(--control-edge, transparent)),
+    linear-gradient(
+      var(--light-angle),
+      var(--edge-hi),
+      var(--edge-mid) 30%,
+      var(--edge-lo) 60%,
+      var(--edge-mid) 100%
+    ),
+    linear-gradient(180deg, var(--bevel-top), transparent var(--r-md)),
+    linear-gradient(0deg, var(--bevel-bot), transparent var(--r-md));
+  background-origin: border-box;
+  background-clip: border-area;
+  transition: opacity 0.2s ease;
+}
+.pf-control:hover::before { --control-rim-o: 1; }
+
+/* Focus and open states take the accent through the ring's top layer, so the
+   lit edge and the focus glow (a box-shadow the consumer owns) agree. :has()
+   carries it from a wrapped <input> out to the wrapper that owns the ring. */
+.pf-control:focus-visible::before,
+.pf-control:has(:focus-visible)::before,
+.pf-control[data-open="true"]::before {
+  --control-edge: var(--accent);
+  --control-rim-o: 1;
+}
+.pf-control:disabled::before,
+.pf-control[data-disabled="true"]::before { --control-rim-o: 0.35; }
+
+/* The switch knob: a milled cap riding inside a .pf-control track. Its
+   catch-light is a background BAND, clipped by the knob's own corner radius in
+   the same anti-aliasing pass as the fill — an `inset 0 1px 0` would paint the
+   knob's shape minus its shape offset 1px and speck at the tangent points (see
+   the rim primitive). The drop shadow stays a box-shadow: it is blurred, so it
+   has no crisp end. Fill and geometry come from the consumer (ui.tsx Switch,
+   tokens.css --switch-*). */
+.pf-knob {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0 1px, transparent 1px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+:root[data-theme="light"] .pf-knob {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0 1px, transparent 1px);
+  box-shadow: 0 1px 2px rgba(30, 34, 58, 0.25);
+}
+
 /* Menu glass: floating option lists (Select). Far more opaque than the other
    floats — options must stay legible over whatever surface they cover — but
    still milled: angled fill, bevel pair, deep pop shadow. */
 .pf-menu {
+  /* Bevel pair as padding-box bands, not inset shadows — see .pf-well. */
   background:
+    linear-gradient(180deg, var(--bevel-top) 0 1px, transparent 1px),
+    linear-gradient(0deg, var(--bevel-bot) 0 1px, transparent 1px),
     var(--noise-glass),
     linear-gradient(
       var(--light-angle),
       color-mix(in oklab, var(--panel-2) 96%, white),
       color-mix(in srgb, var(--panel) 96%, transparent) 55%
     );
+  background-clip: padding-box, padding-box, border-box, border-box;
   backdrop-filter: blur(var(--blur-float)) saturate(150%);
   -webkit-backdrop-filter: blur(var(--blur-float)) saturate(150%);
   border: 1px solid var(--border-strong);
-  box-shadow:
-    inset 0 1px 0 var(--bevel-top),
-    inset 0 -1px 0 var(--bevel-bot),
-    var(--shadow-key),
-    var(--shadow-pop);
+  box-shadow: var(--shadow-key), var(--shadow-pop);
 }
 
 /* Frozen glare on menu glass, same optics as the other floats; motion.css
@@ -487,7 +682,7 @@ aside.pf-sheet {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  border: 1px solid transparent;
   pointer-events: none;
   background: linear-gradient(
     var(--light-angle),
@@ -496,10 +691,8 @@ aside.pf-sheet {
     color-mix(in srgb, var(--role-c, var(--accent)) 18%, transparent) 75%,
     color-mix(in srgb, var(--role-c, var(--accent)) 55%, transparent)
   );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
+  background-origin: border-box;
+  background-clip: border-area;
 }
 
 /* Chart line bloom: tiny per-series glow (consumed by BandwidthChart via
@@ -538,8 +731,33 @@ aside.pf-sheet {
   -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(120%) brightness(1.04);
 }
 :root[data-theme="light"] .pf-signal {
-  backdrop-filter: blur(var(--blur-card)) saturate(120%) brightness(1.02);
-  -webkit-backdrop-filter: blur(var(--blur-card)) saturate(120%) brightness(1.02);
+  /* Ice catches hotter whites: the gloss/arc/streak need far more strength to
+     read over a bright backdrop (same reasoning as the --arc/--streak tokens). */
+  --signal-arc: rgba(255, 255, 255, 0.8);
+  --signal-streak: rgba(255, 255, 255, 0.55);
+  --signal-gloss: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(var(--blur-card)) saturate(135%) brightness(1.04);
+  -webkit-backdrop-filter: blur(var(--blur-card)) saturate(135%) brightness(1.04);
+}
+/* Frosted ice: the backdrop is already bright, so transmission drops and the
+   saturation boost stays gentle — a hot one turns the aurora into stained
+   glass under every card on the page. */
+:root[data-theme="light"] .pf-card {
+  backdrop-filter: blur(var(--blur-frost)) saturate(115%) brightness(1.02);
+  -webkit-backdrop-filter: blur(var(--blur-frost)) saturate(115%) brightness(1.02);
+}
+/* Ice controls: white-on-white won't read, so the film keeps a hot catch at the
+   light corner and exits through a faint dark seat — same trick as .pf-btn. */
+:root[data-theme="light"] .pf-control {
+  background-image: linear-gradient(
+    var(--light-angle),
+    rgba(255, 255, 255, 0.5),
+    rgba(255, 255, 255, 0.14) 40%,
+    rgba(255, 255, 255, 0) 62%,
+    rgba(25, 28, 38, 0.05)
+  );
+  backdrop-filter: blur(var(--blur-control)) saturate(115%);
+  -webkit-backdrop-filter: blur(var(--blur-control)) saturate(115%);
 }
 /* Ice buttons: white-on-white won't read, so the film keeps a hot catch at
    the light corner but exits through a faint dark seat — the shadow side
@@ -586,9 +804,15 @@ aside.pf-sheet {
 
 /* ---------------------------------------------------------------------------
    Low-fx (Settings → Appearance → "Reduce glass effects", or &fx=low in dev):
-   Signal Glass falls back to a solid look — zero blur, light model only —
-   and the moving/filtered garnishes switch off. Chrome keeps its blur (the
-   old four-surface budget). Quiet .pf-card panels are already blur-free.
+   the content tiers fall back to a solid look — zero blur, light model only —
+   and the moving/filtered garnishes switch off. Chrome keeps its blur (the old
+   four-surface budget).
+
+   Cards matter most here and this is why the hatch exists: .pf-card is now
+   frosted, and a Players wall or an Analytics page puts DOZENS of blurred
+   surfaces on screen at once. Every backdrop-filter is a separate backdrop
+   rasterization; a weak GPU falls off a cliff. Stripping card blur is the
+   single biggest win in this block — never let it rot.
 --------------------------------------------------------------------------- */
 :root[data-fx="low"] .pf-signal {
   backdrop-filter: none;
@@ -598,6 +822,15 @@ aside.pf-sheet {
     color-mix(in oklab, var(--panel) 100%, white 2.5%),
     var(--panel) 50%
   );
+}
+:root[data-fx="low"] .pf-card {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+}
+:root[data-fx="low"] .pf-control {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 :root[data-fx="low"] .pf-caustic { display: none; }
 :root[data-fx="low"] .pf-chart-glow { filter: none; }
@@ -610,4 +843,32 @@ aside.pf-sheet {
 :root[data-fx="low"] .pf-menu {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Rim fallback — engines without `background-clip: border-area` (pre-Chromium
+   137). The old XOR ring, quarantined: a 1px band cut by compositing two
+   independently anti-aliased rounded rects. Their coverage fails to cancel
+   where the straight edge meets the corner arc, so it drops a bright speck at
+   the tangent points and stair-steps the arcs at fractional DPI — the feather
+   is what kept that survivable. Every shipping WebView2 takes the border-area
+   path above; this exists so an old engine degrades instead of losing its
+   edges. Delete it once the floor is provably ≥137.
+--------------------------------------------------------------------------- */
+@supports not (background-clip: border-area) {
+  .pf-glass::before,
+  .pf-island::before,
+  .pf-signal::before,
+  .pf-card::before,
+  .pf-control::before,
+  .pf-btn::before,
+  .pf-role-chip::before {
+    border: 0;
+    padding: 1px;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    filter: blur(0.4px);
+  }
 }
