@@ -192,6 +192,10 @@ type TunnelStatus struct {
 	PublicPort int    `json:"publicPort,omitempty"` // confirmed bound port
 	LocalUp    bool   `json:"localUp"`
 	LocalKnown bool   `json:"localKnown"`
+	// BandwidthLimitMbps/Scope surface a tunnel's configured cap read-only (0 =
+	// unlimited); omitempty keeps uncapped tunnels' frames unchanged.
+	BandwidthLimitMbps  int    `json:"bandwidthLimitMbps,omitempty"`
+	BandwidthLimitScope string `json:"bandwidthLimitScope,omitempty"`
 }
 
 // StatusSource produces the current Status snapshot for each request.
