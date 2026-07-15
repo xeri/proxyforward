@@ -82,6 +82,66 @@ func TestStatsRoundTripThroughSQLite(t *testing.T) {
 	}
 }
 
+// TestAgentHistoryRoundTripThroughSQLite: two agents' bandwidth histories
+// persist and restore with their agent_id, distinct from each other and from
+// the gateway-wide (”) series.
+func TestAgentHistoryRoundTripThroughSQLite(t *testing.T) {
+	dir := t.TempDir()
+	d := openTest(t, dir)
+	s := stats.Open(d, nil)
+
+	mid := time.Now().Add(-2 * time.Minute).UnixMilli()
+	start := mid - 600_000
+	var gIn, gOut, aIn, aOut, bIn, bOut int64
+	for ts := start; ts <= mid; ts += 1000 {
+		now := time.UnixMilli(ts)
+		s.Sample(now, gIn, gOut, 0, 0, 3, -1, 25, -1) // gateway-wide series
+		s.SampleAgent("agentA", now, aIn, aOut, 2, -1, 25, -1)
+		s.SampleAgent("agentB", now, bIn, bOut, 1, -1, 40, -1)
+		gIn += 60_000
+		gOut += 600_000
+		aIn += 40_000 // agent A carries twice agent B's rate
+		aOut += 400_000
+		bIn += 20_000
+		bOut += 200_000
+	}
+	beforeA := s.AgentHistory("agentA", 3_600_000, 240)
+	beforeB := s.AgentHistory("agentB", 3_600_000, 240)
+	if len(beforeA.Buckets) == 0 || len(beforeB.Buckets) == 0 {
+		t.Fatal("no per-agent buckets sampled")
+	}
+	if err := s.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	// Restore into a second store from the same database.
+	s2 := stats.Open(d, nil)
+	afterA := s2.AgentHistory("agentA", 3_600_000, 240)
+	afterB := s2.AgentHistory("agentB", 3_600_000, 240)
+	if len(afterA.Buckets) != len(beforeA.Buckets) {
+		t.Fatalf("agentA restored %d buckets, want %d", len(afterA.Buckets), len(beforeA.Buckets))
+	}
+	var sumA, sumB int64
+	for _, bk := range afterA.Buckets {
+		sumA += bk.In
+	}
+	for _, bk := range afterB.Buckets {
+		sumB += bk.In
+	}
+	if sumA == 0 || sumB == 0 || sumA <= sumB {
+		t.Fatalf("per-agent bytes commingled or wrong: A=%d B=%d (want A>B>0)", sumA, sumB)
+	}
+
+	// The rrd table carries at least three distinct series: '', agentA, agentB.
+	var nSeries int
+	if err := d.read.QueryRow(`SELECT COUNT(DISTINCT agent_id) FROM rrd`).Scan(&nSeries); err != nil {
+		t.Fatalf("count rrd series: %v", err)
+	}
+	if nSeries < 3 {
+		t.Fatalf("rrd has %d distinct agent_id series, want ≥ 3", nSeries)
+	}
+}
+
 func legacyV2JSON() string {
 	return `{"v":2,"lifetime":{"bytesIn":1000,"bytesOut":10000,"linkSessions":4,"firstRunMs":1},` +
 		`"peers":[{"ip":"198.51.100.7","firstSeen":5,"lastSeen":9,"totalBytesIn":11,"totalBytesOut":22,"totalConns":3}],` +

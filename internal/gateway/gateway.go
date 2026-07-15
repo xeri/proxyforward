@@ -272,6 +272,25 @@ func (g *Gateway) PacketLossPct() float64 {
 	return -1
 }
 
+// AgentQuality reports one agent's link RTT (ms, -1 unknown) and packet loss
+// (0–100, -1 unknown), the per-agent gauges for the bandwidth-history sampler.
+// Returns (-1, -1) when that agent is not the connected session.
+func (g *Gateway) AgentQuality(agentID string) (rttMs, lossPct float64) {
+	sess := g.session()
+	if sess == nil || sess.agentID != agentID {
+		return -1, -1
+	}
+	rttMs = -1
+	if r := sess.rttMillis.Load(); r > 0 {
+		rttMs = float64(r)
+	}
+	lossPct = -1
+	if sess.quality != nil {
+		lossPct = sess.quality.LossPct()
+	}
+	return rttMs, lossPct
+}
+
 // ProbeLatency runs an on-demand latency burst toward the connected agent,
 // mirroring the agent's own latency test. Errors when no agent is connected or
 // a probe is already running.

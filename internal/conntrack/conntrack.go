@@ -136,6 +136,12 @@ type Registry struct {
 	closedIn  atomic.Int64
 	closedOut atomic.Int64
 
+	// closedByAgent accumulates closed-connection bytes per owning agent so
+	// AgentTotals stays monotonic across connection churn (a closing conn moves
+	// its bytes here, not out of the per-agent total). Guarded by mu; keyed by
+	// AgentID ("" on single-agent/agent-side paths).
+	closedByAgent map[string][2]int64
+
 	// Optional observers; set before traffic flows. Hooks run outside the
 	// registry lock and must not call back into the registry.
 	onOpen   func(e *Entry)
@@ -145,7 +151,10 @@ type Registry struct {
 }
 
 func NewRegistry() *Registry {
-	return &Registry{conns: make(map[uint64]*Entry)}
+	return &Registry{
+		conns:         make(map[uint64]*Entry),
+		closedByAgent: make(map[string][2]int64),
+	}
 }
 
 // SetHooks installs connection observers: onOpen fires when a connection is
@@ -196,6 +205,10 @@ func (r *Registry) Open(agentID, tunnelID, tunnelName, clientAddr, connKey strin
 			in, out := e.bytesIn(), e.bytesOut()
 			r.closedIn.Add(in)
 			r.closedOut.Add(out)
+			cb := r.closedByAgent[e.AgentID]
+			cb[0] += in
+			cb[1] += out
+			r.closedByAgent[e.AgentID] = cb
 			delete(r.conns, e.ID)
 			r.mu.Unlock()
 			if r.onClose != nil {
@@ -280,6 +293,56 @@ func (r *Registry) EntryByConnKey(key string) *Entry {
 		}
 	}
 	return nil
+}
+
+// AgentTraffic is one agent's monotonic byte totals plus its current live
+// connection and identified-player counts — the per-agent inputs to the
+// bandwidth-history sampler.
+type AgentTraffic struct {
+	BytesIn  int64
+	BytesOut int64
+	Conns    int
+	Players  int
+}
+
+// AgentTotals groups traffic by owning agent: monotonic bytes (closed + live)
+// so the sampler's deltas never dip on a connection close, plus live conn and
+// deduped-player counts. Keyed by AgentID; the "" key covers the single-agent /
+// agent-side paths. O(live conns) under one lock hold — called at the sample
+// cadence, not per byte.
+func (r *Registry) AgentTotals() map[string]AgentTraffic {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]AgentTraffic, len(r.closedByAgent)+1)
+	for id, cb := range r.closedByAgent {
+		out[id] = AgentTraffic{BytesIn: cb[0], BytesOut: cb[1]}
+	}
+	seen := make(map[string]map[string]struct{})
+	for _, e := range r.conns {
+		at := out[e.AgentID]
+		at.BytesIn += e.bytesIn()
+		at.BytesOut += e.bytesOut()
+		at.Conns++
+		out[e.AgentID] = at
+		if p := e.player.Load(); p != nil {
+			key := p.UUID
+			if key == "" {
+				key = "name:" + strings.ToLower(p.Name)
+			}
+			s := seen[e.AgentID]
+			if s == nil {
+				s = make(map[string]struct{})
+				seen[e.AgentID] = s
+			}
+			s[key] = struct{}{}
+		}
+	}
+	for id, s := range seen {
+		at := out[id]
+		at.Players = len(s)
+		out[id] = at
+	}
+	return out
 }
 
 // Totals reports lifetime bytes (closed + live), for bandwidth graphs that
