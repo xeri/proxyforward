@@ -117,8 +117,9 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   intact (`relay_test.go`, e2e `TestFinalBytesThroughTunnel`). Every write refreshes
   a progress deadline so a parked peer can't leak a goroutine.
 - No Nagle anywhere: Go's default `TCP_NODELAY` end-to-end, set explicitly on the
-  agent's two dials (`SetNoDelay` in `agent.go runSession` and `handleDataStream`);
-  the yamux window is sized so a chunk burst fits in flight.
+  agent's dials (`SetNoDelay` in `agent.go dialGateway` — control conn and every
+  per-conn data conn — and `handleDataStream` for the local dial); the yamux
+  window is sized so a chunk burst fits in flight.
 - **Enforced floor**: `TestBurstThroughputAndCrossStreamLatency` in
   `internal/e2e/e2e_test.go` — throughput and worst cross-stream RTT bounds are in
   the numbers table. Run it before and after any hot-path change (`hot-path` skill).
@@ -160,7 +161,6 @@ The README and the Settings/Tunnels UI **oversell**. Ground truth at 4a8b0c9:
 
 | Feature (advertised in README/UI) | Actual state |
 |---|---|
-| `per-conn` transport | Config-valid only; agent never reads it, gateway rejects `KindData` (`handleControlConn`). |
 | UDP tunnels | Not implemented: no UDP socket code, `validateSpec` rejects `type:"udp"`. No longer advertised (the `tunnel-udp` capability was removed); config still accepts `type:"udp"` but the gateway rejects it — a latent gap, not an oversell. |
 | MC status polling (MOTD/players) | Only login sniffing (`mcsniff/`); the health probe is a bare TCP dial (`health.go probeOnce`). |
 | Tray / minimize-to-tray / autostart | Hidden `tray_spike.go` command only; `MinimizeToTray` / `Autostart` stored, unused. |

@@ -48,7 +48,7 @@ const (
 )
 
 // SupportedCapabilities is everything this build implements, both roles.
-var SupportedCapabilities = []string{CapTunnelSync, CapConnStats}
+var SupportedCapabilities = []string{CapTunnelSync, CapConnStats, CapPerConn}
 
 // IntersectCaps returns offered ∩ supported, preserving supported's order.
 // Nil-safe on both arguments; unknown offered strings are simply dropped.
