@@ -11,6 +11,9 @@ operating a live network. Every design decision is held to these rules:
    - Traffic — *Motion*: the bandwidth graph itself, bare. The graph is the artwork.
    - Analytics — *Time & place*: the world map, huge and bare.
    - Players — *People*: the wall of faces.
+   - Agents (gateway) — *Fleet*: the roster of machine health cards. Frost, never
+     Signal Glass — N equal cards can't each answer the pointer (rule 2). The
+     drill-in borrows Traffic's bare bandwidth hero, scoped to one agent.
    - Settings — *Precision*: no identity surface. IDE-quiet.
    - Activity — *Terminal*: the log well, near-zero decoration.
 

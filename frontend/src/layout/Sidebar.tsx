@@ -1,5 +1,5 @@
 import {UIStatus} from '../state'
-import {NAV_MAIN, NAV_SETTINGS, NavId, NavItem} from '../nav'
+import {mainNav, settingsNav, NavId, NavItem} from '../nav'
 import {Kbd} from '../components/ui'
 import {RoleSwitcher} from '../components/RoleSwitcher'
 import {IconServer} from '../components/icons'
@@ -21,7 +21,11 @@ export function Sidebar({status, nav, onNav, onPair}: {
   onPair: () => void
 }) {
   const isAgent = status.role === 'agent'
-  const activeIdx = NAV_MAIN.findIndex(n => n.id === nav)
+  // The rail is role-dependent — the gateway carries an extra Agents entry, so
+  // both the buttons and the sliding indicator index into the same filtered list.
+  const nav_main = mainNav(status.role)
+  const nav_settings = settingsNav(status.role)
+  const activeIdx = nav_main.findIndex(n => n.id === nav)
 
   return (
     <div className="flex h-full flex-col">
@@ -52,14 +56,14 @@ export function Sidebar({status, nav, onNav, onPair}: {
           }}
         />
         <div className="relative flex flex-col" style={{gap: GAP}}>
-          {NAV_MAIN.map(item => (
+          {nav_main.map(item => (
             <NavButton key={item.id} item={item} on={nav === item.id} onNav={onNav} />
           ))}
         </div>
       </nav>
 
       <div className="px-2 pb-1">
-        <NavButton item={NAV_SETTINGS} on={nav === 'settings'} onNav={onNav} standalone />
+        <NavButton item={nav_settings} on={nav === 'settings'} onNav={onNav} standalone />
       </div>
 
       <div className="pf-sep mx-2" aria-hidden />

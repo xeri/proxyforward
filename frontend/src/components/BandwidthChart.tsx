@@ -34,20 +34,31 @@ const UPTIME_LANE = 20
 // cadence and keeps it in a module-level cache so tab switches never lose
 // history.
 // ---------------------------------------------------------------------------
-export function BandwidthPanel({historyUnsupported, compact = false, hero = false, onExpand}: {
+export function BandwidthPanel({historyUnsupported, compact = false, hero = false, onExpand, useHistory, heading = 'Bandwidth', vtName = 'pf-bw'}: {
   historyUnsupported?: boolean
   /** Compact teaser: live-rate headline + a 1h sparkline, no controls, optional jump-off. */
   compact?: boolean
   /** Hero: Traffic's identity surface — bare, no card. The graph is the artwork. */
   hero?: boolean
   onExpand?: () => void
+  /** History source hook — defaults to the gateway-wide series. The Agents
+   * drill-in injects a per-agent source so the same instrument (range, candles,
+   * series, stats) draws one agent's RRD without forking the panel. */
+  useHistory?: (range: RangeKey) => HistoryResult | null
+  /** Card heading override (the per-agent panel keeps "Bandwidth"). */
+  heading?: string
+  /** View-transition name — one per screen. Pass null for the drill-in chart,
+   * which shares a screen with no morph target. */
+  vtName?: string | null
 }) {
   const [rangePref, setRange] = useState<RangeKey>(loadRangePref)
   const [candles, setCandles] = useState<boolean>(loadCandlePref)
   const [vis, setVis] = useState<SeriesVisibility>(loadSeriesPref)
   const [uptime, setUptime] = useState<boolean>(loadUptimePref)
   const range: RangeKey = compact ? '1h' : rangePref
-  const data = useBandwidthHistory(range)
+  // One hook call, one position — the source is chosen once per mount.
+  const useHist = useHistory ?? useBandwidthHistory
+  const data = useHist(range)
   const spec = RANGES[range]
   const mode = modeFor(range, candles)
   const buckets = data?.buckets ?? []
@@ -164,8 +175,9 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
     // The panel names itself a shared element: navigating Overview ⇄ Traffic
     // morphs the teaser into the hero (each screen mounts exactly one). The
     // view-transition group animates the box, so the teaser's quiet card can
-    // morph into the bare hero.
-    <div style={{viewTransitionName: 'pf-bw'} as React.CSSProperties}>
+    // morph into the bare hero. The drill-in chart passes vtName=null — it has
+    // no morph partner and must not claim the name a real transition owns.
+    <div style={vtName ? {viewTransitionName: vtName} as React.CSSProperties : undefined}>
       {hero ? (
         <section>
           <div className="mb-4 flex items-end justify-between gap-3">
@@ -179,7 +191,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
         </section>
       ) : (
         <Card
-          title={compact ? undefined : 'Bandwidth'}
+          title={compact ? undefined : heading}
           label={compact ? 'Bandwidth' : undefined}
           subtitle={compact ? 'Last hour' : subtitleFor(range, data)}
           action={compact ? (
