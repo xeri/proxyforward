@@ -39,6 +39,7 @@ internal/
 frontend/src/           React 19 + Tailwind v4 + hand-rolled SVG charts, no router,
                         no state lib. state.ts (tick) · history/analytics/players.ts
                         (polled data layers + module caches) · devmock.ts (browser dev)
+                        · motion.ts (the gate) + rubberband.ts (scroll rubber band)
                         · styles/ = tokens → base → glass → motion · DESIGN.md charter
 frontend/wailsjs/       GENERATED bindings — never edit; regen via wails build/dev
 ```
@@ -92,6 +93,11 @@ persisted to config.
 | Pipe | 5 s request / 2 min idle timeouts; ACL BA+SY+IU | `ipc/server_windows.go` |
 | Cert | ECDSA P-256, 20-year validity (trust = pin, not expiry) | `link/cert.go:86` |
 | Perf floor | ≥20 MiB/s, worst cross-stream RTT ≤500 ms (64 MiB loopback burst) | `e2e_test.go:716,719` |
+| Blur ladder | control 10, Signal Glass 20, card frost 30, chrome 36, island 40, float 48, pop 56 px | `tokens.css` |
+| Switch geometry | 40×22 track, 1px rim + 2px seat → 16px knob (7px radius), 18px travel; ×`--ui-scale` | `tokens.css`, `ui.tsx Switch` |
+| Control height | 2.25rem + 2px = 1px rim + 0.5rem padding + 1.25rem line, per side | `tokens.css` |
+| Halo clearance | 12px dot→label (the halo ring breathes out to 5px) | `tokens.css`, `motion.css` |
+| Hero bleed | 0 → (page-pad − 8px), continuous from 640px of container width | `tokens.css`, `Overview.tsx` |
 
 ## Control-plane message flow
 
@@ -181,9 +187,12 @@ equirectangular paths (`worldgeo.ts`, generated — regenerate, don't edit).
 
 `?mock=agent|gateway|wizard` plus composable: `&link=down`, `&mode=attached`
 (gated bindings reject like the real backend), `&fatal=1`, `&fresh=1`,
-`&analytics=off`, `&geo=off|empty|error|pending`, `&fx=low|high`. The traffic model
-is deterministic functions of absolute time, so chart/tiles/replay all agree at any
-poll cadence. When you add a binding, add its stub here or the mock throws.
+`&analytics=off`, `&paired=0` (never paired to a gateway — the sidebar's role
+switcher cannot become the agent and must route to setup), `&geo=off|empty|error|pending`,
+`&fx=low|high`. The traffic model is deterministic functions of absolute time, so
+chart/tiles/replay all agree at any poll cadence. When you add a binding, add its stub
+here or the mock throws. Role setup mutates the mock's role, so the switcher flips the
+whole app live in the browser with no Go running.
 
 ## Windows integration corners
 

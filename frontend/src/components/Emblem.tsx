@@ -28,10 +28,17 @@ export function Emblem({role, size = 32, glow = false, fixed = false}: {
         borderRadius: Math.max(4, Math.round(size * 0.28)),
         color: c,
         border: `1px solid color-mix(in srgb, ${c} 45%, var(--border))`,
-        background: `linear-gradient(160deg, color-mix(in srgb, ${c} 26%, transparent), color-mix(in srgb, ${c} 8%, transparent))`,
+        // Catch-light is a padding-box band, not an `inset 0 1px 0`: an offset
+        // inset shadow rounds the corner as a crescent that specks where it
+        // ends (glass.css, the rim primitive).
+        // backgroundImage, never the `background` shorthand: React warns when a
+        // style object updates a shorthand alongside a longhand it subsumes
+        // (backgroundClip), and this mark re-tints on every role swap.
+        backgroundImage: `linear-gradient(180deg, var(--bevel-top) 0 1px, transparent 1px), linear-gradient(160deg, color-mix(in srgb, ${c} 26%, transparent), color-mix(in srgb, ${c} 8%, transparent))`,
+        backgroundClip: 'padding-box, border-box',
         boxShadow: glow
-          ? `inset 0 1px 0 var(--bevel-top), 0 0 ${Math.round(size * 0.8)}px ${-Math.round(size * 0.25)}px color-mix(in srgb, ${c} 70%, transparent)`
-          : 'inset 0 1px 0 var(--bevel-top)',
+          ? `0 0 ${Math.round(size * 0.8)}px ${-Math.round(size * 0.25)}px color-mix(in srgb, ${c} 70%, transparent)`
+          : undefined,
       }}
     >
       <Icon size={Math.round(size * 0.52)} />

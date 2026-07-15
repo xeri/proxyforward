@@ -34,6 +34,10 @@ export function GeoRank({rows, metric, hoverCc, onHover, onSelect, selectedCc, c
           <span>{metric === 'latency' ? 'Avg ping' : 'Sessions'}</span>
         </div>
       )}
+      {/* Deliberately NOT overscroll-contain (rubberband.ts): an embedded list on
+          a long page must keep chaining, or reaching its end would freeze the
+          page under the cursor. Overscroll here falls through to the page, and
+          the page is what bounces. */}
       <div className={compact ? 'space-y-0.5' : 'max-h-[22rem] space-y-0.5 overflow-y-auto pr-1'}>
         {shown.map(r => {
           const val = metric === 'latency' ? r.rttAvg : r.sessions

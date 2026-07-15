@@ -234,9 +234,11 @@ jobs:
         shell: bash
         env:
           SHA: ${{ github.sha }}
+        # The build-metadata suffix uses the short SHA — the full 40 chars end
+        # up in the UI (sidebar footer, Settings → About) and overflow them.
         run: >
           wails build -platform windows/amd64 -clean -s -trimpath
-          -ldflags "-X proxyforward/internal/version.Version=0.0.0-dev+$SHA -X proxyforward/internal/version.Commit=$SHA"
+          -ldflags "-X proxyforward/internal/version.Version=0.0.0-dev+${SHA::7} -X proxyforward/internal/version.Commit=$SHA"
       # frontend/wailsjs is generated and committed; a PreToolUse hook blocks
       # hand-edits. This promotes that hook into a merge gate: bindings that have
       # drifted from the bound Go types fail here.

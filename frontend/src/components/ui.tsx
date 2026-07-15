@@ -147,7 +147,7 @@ export function PillGroup<T extends string>({value, onChange, options}: {
     <div ref={ref} className="relative inline-flex flex-wrap items-center gap-1.5" role="radiogroup">
       <div
         aria-hidden
-        className={`pointer-events-none absolute left-0 top-0 rounded-full border border-[color-mix(in_srgb,var(--accent)_45%,transparent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] ${
+        className={`pf-control pointer-events-none absolute left-0 top-0 rounded-full bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] [--control-edge:color-mix(in_srgb,var(--accent)_45%,transparent)] [--control-rim-o:1] ${
           armed ? 'transition-[transform,width,height] duration-[var(--dur-slow)] [transition-timing-function:var(--ease-spring)]' : ''
         }`}
         style={{
@@ -185,10 +185,14 @@ export function RoleWord({role, children}: {role: 'agent' | 'gateway'; children?
 }
 
 /** LiveDot: a small breathing dot that marks a surface as live and
- * self-updating (charts, live tables). Breathing gates on data-motion. */
+ * self-updating (charts, live tables). Breathing gates on data-motion.
+ *
+ * The gap is --halo-gap, not a Tailwind rem: .pf-halo breathes a 5px ring out
+ * of the dot, and gap-1.5 is ~5.06px at this root — the ring was landing on the
+ * word "live". Anything haloed keeps that much air (tokens.css). */
 export function LiveDot() {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[var(--text-3)]">
+    <span className="inline-flex items-center gap-[var(--halo-gap)] text-[10px] uppercase tracking-wide text-[var(--text-3)]">
       <span className="inline-flex h-2 w-2 rounded-full pf-halo" style={{background: 'var(--good)', ['--halo' as string]: 'var(--good)'}} />
       live
     </span>
@@ -223,10 +227,15 @@ export function Button({children, onClick, variant = 'primary', size = 'md', dis
   className?: string
   title?: string
 }) {
+  // The catch-light is --btn-lip, a layer of .pf-btn's rim ring — never an
+  // `inset 0 1px 0` here: this element already wears the ring, and a crisp
+  // inset bevel on top of it specks at the corners (glass.css, the rim
+  // primitive). The hot variant just turns the lip up. Blurred glows stay
+  // box-shadows; they have no crisp end.
   const styles = {
-    primary: 'pf-btn-hot bg-[var(--btn-accent-fill)] text-[var(--accent-contrast)] shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_2px_12px_-2px_color-mix(in_srgb,var(--accent)_45%,transparent)] hover:bg-[var(--btn-accent-fill-hover)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_4px_20px_-2px_color-mix(in_srgb,var(--accent)_60%,transparent)] disabled:opacity-50 disabled:shadow-none',
+    primary: 'pf-btn-hot [--btn-lip:0.28] bg-[var(--btn-accent-fill)] text-[var(--accent-contrast)] shadow-[0_2px_12px_-2px_color-mix(in_srgb,var(--accent)_45%,transparent)] hover:bg-[var(--btn-accent-fill-hover)] hover:shadow-[0_4px_20px_-2px_color-mix(in_srgb,var(--accent)_60%,transparent)] disabled:opacity-50 disabled:shadow-none',
     ghost: 'border border-[color-mix(in_srgb,var(--text)_14%,transparent)] bg-transparent text-[var(--text)] hover:bg-[var(--btn-bg)] hover:border-[color-mix(in_srgb,var(--text)_24%,transparent)] disabled:opacity-50',
-    subtle: 'bg-[var(--btn-bg)] text-[var(--text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] hover:bg-[var(--btn-bg-hover)] disabled:opacity-50',
+    subtle: 'bg-[var(--btn-bg)] text-[var(--text)] hover:bg-[var(--btn-bg-hover)] disabled:opacity-50',
     danger: 'border border-[color-mix(in_srgb,var(--bad)_55%,var(--border))] bg-transparent text-[var(--bad)] hover:bg-[var(--bad)] hover:border-[var(--bad)] hover:text-white disabled:opacity-50',
   }[variant]
   const sz = size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-2 text-sm'
@@ -263,20 +272,38 @@ export function Field({label, hint, children}: {label: string; hint?: ReactNode;
   )
 }
 
-export function TextInput({value, onChange, placeholder, type = 'text', mono, onEnter, autoFocus}: {
+/** TextInput: the one text field. The WRAPPER wears .pf-control (an <input>
+ * cannot host a pseudo-element, so the rim ring has nowhere to live on the
+ * input itself) and :has() carries focus outward to it; the input is a
+ * transparent pane inside. The pressed-in seat stays a blurred inset shadow —
+ * blurred shadows have no crisp end and cannot speck (glass.css).
+ *
+ * `size="sm"` + `icon` is the compact form for list toolbars. Screens must not
+ * hand-roll their own search box beside this one. */
+export function TextInput({value, onChange, placeholder, type = 'text', mono, onEnter, autoFocus, size = 'md', icon, ariaLabel}: {
   value: string; onChange: (v: string) => void; placeholder?: string; type?: string; mono?: boolean
-  onEnter?: () => void; autoFocus?: boolean
+  onEnter?: () => void; autoFocus?: boolean; size?: 'sm' | 'md'; icon?: ReactNode; ariaLabel?: string
 }) {
   const isPassword = type === 'password'
   const [reveal, setReveal] = useState(false)
   const effectiveType = isPassword && reveal ? 'text' : type
+  const sm = size === 'sm'
   return (
-    <div className="relative">
+    <div
+      className={`pf-control relative flex items-center rounded-[var(--r-md)] bg-[var(--input-bg)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot)] transition-[background-color,box-shadow] duration-200 hover:bg-[var(--input-bg-hover)] has-[:focus]:bg-[var(--input-bg-hover)] has-[:focus]:shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)] ${
+        sm ? 'h-8' : 'h-[var(--control-h)]'
+      }`}
+    >
+      {icon && (
+        <span className="pointer-events-none absolute left-2.5 flex text-[var(--text-3)]">{icon}</span>
+      )}
       <input
-        type={effectiveType} value={value} placeholder={placeholder} autoFocus={autoFocus}
+        type={effectiveType} value={value} placeholder={placeholder} autoFocus={autoFocus} aria-label={ariaLabel}
         onChange={e => onChange(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && onEnter) onEnter() }}
-        className={`w-full rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] py-2 pl-3 text-sm text-[var(--text)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),inset_0_-1px_0_var(--bevel-top)] outline-none transition-all duration-200 placeholder:text-[var(--text-3)] hover:border-[var(--border-strong)] hover:bg-[var(--input-bg-hover)] focus:border-[var(--accent)] focus:bg-[var(--input-bg-hover)] focus:shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)] ${isPassword ? 'pr-10' : 'pr-3'} ${mono ? 'font-mono text-[12.5px]' : ''}`}
+        className={`h-full w-full min-w-0 rounded-[inherit] bg-transparent text-[var(--text)] outline-none placeholder:text-[var(--text-3)] ${
+          icon ? 'pl-8' : sm ? 'pl-2.5' : 'pl-3'
+        } ${isPassword ? 'pr-10' : sm ? 'pr-2.5' : 'pr-3'} ${sm ? 'text-xs' : 'text-sm'} ${mono ? 'font-mono text-[12.5px]' : ''}`}
       />
       {isPassword && (
         <button
@@ -304,10 +331,10 @@ export function Checkbox({checked, onChange, label}: {
       className="inline-flex items-center gap-1.5 text-xs text-[var(--text-2)] transition-colors hover:text-[var(--text)]"
     >
       <span
-        className={`grid h-4 w-4 place-items-center rounded-[var(--r-xs)] transition-all duration-150 ${
+        className={`pf-control relative grid h-4 w-4 place-items-center rounded-[var(--r-xs)] transition-colors duration-150 ${
           checked
-            ? 'border border-transparent bg-[var(--accent)] text-[var(--accent-contrast)]'
-            : 'border border-[var(--border-strong)] bg-[var(--input-bg)] text-transparent'
+            ? 'bg-[var(--accent)] text-[var(--accent-contrast)] [--control-edge:var(--accent)] [--control-rim-o:1]'
+            : 'bg-[var(--input-bg)] text-transparent'
         }`}
       >
         <IconCheck size={12} />
@@ -378,10 +405,11 @@ export function Select({value, onChange, options}: {
       <button
         ref={btnRef}
         type="button" onClick={toggle} aria-haspopup="listbox" aria-expanded={open}
-        className={`flex w-full items-center justify-between gap-2 rounded-[var(--r-md)] border px-3 py-2 text-left text-sm text-[var(--text)] outline-none transition-all duration-200 hover:border-[var(--border-strong)] hover:bg-[var(--input-bg-hover)] ${
+        data-open={open}
+        className={`pf-control relative flex h-[var(--control-h)] w-full items-center justify-between gap-2 rounded-[var(--r-md)] px-3 text-left text-sm text-[var(--text)] outline-none transition-[background-color,box-shadow] duration-200 hover:bg-[var(--input-bg-hover)] ${
           open
-            ? 'border-[var(--accent)] bg-[var(--input-bg-hover)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)]'
-            : 'border-[var(--border)] bg-[var(--input-bg)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),inset_0_-1px_0_var(--bevel-top)]'
+            ? 'bg-[var(--input-bg-hover)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)]'
+            : 'bg-[var(--input-bg)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot)]'
         }`}
       >
         <span className="min-w-0 truncate">{current ? current.label : value}</span>
@@ -391,7 +419,7 @@ export function Select({value, onChange, options}: {
         <div
           ref={listRef}
           role="listbox"
-          className="pf-fade pf-menu fixed z-[60] max-h-60 overflow-auto rounded-[var(--r-md)] p-1"
+          className="pf-fade pf-menu fixed z-[60] max-h-60 overflow-auto overscroll-y-contain rounded-[var(--r-md)] p-1"
           style={{
             left: anchor.left,
             width: anchor.width,
@@ -400,21 +428,23 @@ export function Select({value, onChange, options}: {
               : {top: anchor.bottom + 4}),
           }}
         >
-          {options.map(o => {
-            const on = o.value === value
-            return (
-              <button
-                key={o.value} type="button" role="option" aria-selected={on}
-                onClick={() => { onChange(o.value); setOpen(false) }}
-                className={`flex w-full items-center justify-between gap-2 rounded-[var(--r-sm)] px-2.5 py-1.5 text-left text-sm transition-colors duration-100 ${
-                  on ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--text)]' : 'text-[var(--text-2)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]'
-                }`}
-              >
-                <span className="min-w-0 truncate">{o.label}</span>
-                {on && <span className="shrink-0 text-[var(--accent)]"><IconCheck size={14} /></span>}
-              </button>
-            )
-          })}
+          <div data-band-content>
+            {options.map(o => {
+              const on = o.value === value
+              return (
+                <button
+                  key={o.value} type="button" role="option" aria-selected={on}
+                  onClick={() => { onChange(o.value); setOpen(false) }}
+                  className={`flex w-full items-center justify-between gap-2 rounded-[var(--r-sm)] px-2.5 py-1.5 text-left text-sm transition-colors duration-100 ${
+                    on ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--text)]' : 'text-[var(--text-2)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  <span className="min-w-0 truncate">{o.label}</span>
+                  {on && <span className="shrink-0 text-[var(--accent)]"><IconCheck size={14} /></span>}
+                </button>
+              )
+            })}
+          </div>
         </div>,
         document.body
       )}
@@ -422,24 +452,132 @@ export function Select({value, onChange, options}: {
   )
 }
 
-// Toggle knob geometry (padding-box px): the two seats and the commit line.
-const KNOB_MIN = 2
-const KNOB_MAX = 18
-const KNOB_MID = (KNOB_MIN + KNOB_MAX) / 2
+/** Menu: Select's popup mechanics without the value semantics — a portalled
+ * float on menu glass, anchored to a trigger, tracking scroll and resize,
+ * flipping up when the viewport below is tight, closing on click-outside and
+ * Esc. Rows are arbitrary children (MenuItem), so they can seat an Emblem.
+ *
+ * It portals for the same reason Select's list does: every card, and every
+ * chrome surface, is a backdrop-filter stacking context — an in-place absolute
+ * float paints underneath the next one no matter its z-index. */
+export function Menu({open, anchor, onClose, children, align = 'left', minWidth}: {
+  open: boolean
+  anchor: React.RefObject<HTMLElement | null>
+  onClose: () => void
+  children: ReactNode
+  align?: 'left' | 'right'
+  minWidth?: number
+}) {
+  const listRef = useRef<HTMLDivElement>(null)
+  const [at, setAt] = useState<{top: number; bottom: number; left: number; right: number; up: boolean} | null>(null)
 
-export function Toggle({checked, onChange, label, hint, disabled}: {
-  checked: boolean; onChange: (v: boolean) => void; label: string; hint?: ReactNode; disabled?: boolean
+  const place = () => {
+    const r = anchor.current?.getBoundingClientRect()
+    if (!r) return
+    const below = window.innerHeight - r.bottom
+    setAt({
+      top: r.top, bottom: r.bottom, left: r.left, right: window.innerWidth - r.right,
+      up: below < 220 && r.top > below,
+    })
+  }
+
+  // Place before paint, so the menu never flashes at the wrong anchor.
+  useLayoutEffect(() => { if (open) place() }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (!anchor.current?.contains(t) && !listRef.current?.contains(t)) onClose()
+    }
+    // stopPropagation so an enclosing Modal (window listener, bubbles later)
+    // doesn't close alongside the menu.
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }
+    const onMove = () => place()
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onMove)
+    document.addEventListener('scroll', onMove, true)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onMove)
+      document.removeEventListener('scroll', onMove, true)
+    }
+  }, [open, onClose])
+
+  if (!open || !at) return null
+  return createPortal(
+    <div
+      ref={listRef}
+      role="menu"
+      className="pf-fade pf-menu fixed z-[60] overflow-auto overscroll-y-contain rounded-[var(--r-md)] p-1"
+      style={{
+        ...(align === 'right' ? {right: at.right} : {left: at.left}),
+        minWidth,
+        maxHeight: at.up ? at.top - 12 : window.innerHeight - at.bottom - 12,
+        ...(at.up ? {bottom: window.innerHeight - at.top + 4} : {top: at.bottom + 4}),
+      }}
+    >
+      <div data-band-content>{children}</div>
+    </div>,
+    document.body
+  )
+}
+
+/** MenuItem: one row of a Menu — a lead slot (icon/Emblem), a title, a quiet
+ * hint underneath, and a check when it is the current choice. */
+export function MenuItem({lead, title, hint, on, disabled, onClick, onPointerEnter, onPointerLeave}: {
+  lead?: ReactNode; title: ReactNode; hint?: ReactNode; on?: boolean; disabled?: boolean
+  onClick?: () => void
+  onPointerEnter?: () => void
+  onPointerLeave?: () => void
+}) {
+  return (
+    <button
+      type="button" role="menuitem" disabled={disabled}
+      onClick={onClick} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}
+      className={`flex w-full items-center gap-2.5 rounded-[var(--r-sm)] px-2 py-1.5 text-left transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-60 ${
+        on
+          ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--text)]'
+          : 'text-[var(--text-2)] enabled:hover:bg-[var(--panel-2)] enabled:hover:text-[var(--text)]'
+      }`}
+    >
+      {lead && <span className="shrink-0">{lead}</span>}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">{title}</span>
+        {hint && <span className="mt-0.5 block text-[11px] leading-snug text-[var(--text-3)]">{hint}</span>}
+      </span>
+      {on && <span className="shrink-0 text-[var(--accent)]"><IconCheck size={14} /></span>}
+    </button>
+  )
+}
+
+/** Switch: the bare milled-glass switch — track, knob, drag. No label, no row:
+ * `Toggle` is this plus a settings row, and a `Field` can stand one beside a
+ * Select instead.
+ *
+ * Every length is a token (tokens.css --switch-*) and the drag reads the one
+ * length it needs — --switch-travel, registered as a <length> so it resolves to
+ * px — back out of the computed style. The knob's rest positions are CSS
+ * calc()s off that same token, so the pointer math and the CSS cannot disagree.
+ * They used to: a rem-sized track (h-5 w-9) with hard-px seats (2 / 18) left the
+ * knob overhanging its track by ~1.4px at scale 1 and ~2.8px at 0.9259, and that
+ * overhang riding the corner arc was the "pixelated corner". */
+export function Switch({checked, onChange, disabled, label}: {
+  checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string
 }) {
   // Drag-to-flip: the pointer is captured on press and the knob follows it
-  // between its seats, committing to whichever side it lands nearest. A
-  // sub-threshold press never becomes a drag — it falls through to onClick,
-  // which also keeps keyboard (Enter/Space) activation working.
-  const [dragX, setDragX] = useState<number | null>(null)
-  const drag = useRef({startX: 0, moved: false, suppressClick: false})
+  // between its seats as a 0→1 fraction of the travel, committing to whichever
+  // side it lands nearest. A sub-threshold press never becomes a drag — it
+  // falls through to onClick, which also keeps keyboard (Enter/Space) working.
+  const [dragT, setDragT] = useState<number | null>(null)
+  const drag = useRef({startX: 0, travel: 0, moved: false, suppressClick: false})
 
   const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (disabled || e.button !== 0) return
-    drag.current = {startX: e.clientX, moved: false, suppressClick: false}
+    const travel = parseFloat(getComputedStyle(e.currentTarget).getPropertyValue('--switch-travel'))
+    drag.current = {startX: e.clientX, travel: travel || 0, moved: false, suppressClick: false}
     e.currentTarget.setPointerCapture(e.pointerId)
   }
   const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
@@ -447,7 +585,9 @@ export function Toggle({checked, onChange, label, hint, disabled}: {
     const dx = e.clientX - drag.current.startX
     if (!drag.current.moved && Math.abs(dx) < 4) return
     drag.current.moved = true
-    setDragX(Math.min(KNOB_MAX, Math.max(KNOB_MIN, (checked ? KNOB_MAX : KNOB_MIN) + dx)))
+    const from = checked ? 1 : 0
+    const moved = drag.current.travel > 0 ? dx / drag.current.travel : 0
+    setDragT(Math.min(1, Math.max(0, from + moved)))
   }
   const onPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
@@ -455,46 +595,56 @@ export function Toggle({checked, onChange, label, hint, disabled}: {
     if (!drag.current.moved) return
     // The click that follows a drag must not re-toggle the committed state.
     drag.current.suppressClick = true
-    const next = (dragX ?? (checked ? KNOB_MAX : KNOB_MIN)) > KNOB_MID
-    setDragX(null)
+    const next = (dragT ?? (checked ? 1 : 0)) > 0.5
+    setDragT(null)
     if (next !== checked) onChange(next)
   }
-  const onPointerCancel = () => { setDragX(null); drag.current.moved = false }
+  const onPointerCancel = () => { setDragT(null); drag.current.moved = false }
   const onClick = () => {
     if (drag.current.suppressClick) { drag.current.suppressClick = false; return }
     if (!disabled) onChange(!checked)
   }
 
-  // Mid-drag the surface previews the side the knob would commit to.
-  const visualOn = dragX !== null ? dragX > KNOB_MID : checked
+  // Mid-drag the track previews the side the knob would commit to.
+  const visualOn = dragT !== null ? dragT > 0.5 : checked
 
+  return (
+    <button
+      role="switch" aria-checked={checked} aria-label={label} disabled={disabled}
+      onClick={onClick}
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
+      className={`pf-control relative h-[var(--switch-h)] w-[var(--switch-w)] shrink-0 touch-none rounded-[var(--switch-r)] transition-colors duration-300 ${
+        visualOn
+          ? 'bg-[var(--accent)] shadow-[0_1px_8px_-1px_color-mix(in_srgb,var(--accent)_60%,transparent)] [--control-edge:var(--accent)] [--control-rim-o:1]'
+          : 'bg-[var(--btn-bg)] shadow-[inset_0_1px_2px_var(--bevel-bot)] hover:bg-[var(--btn-bg-hover)]'
+      }`}
+    >
+      <span
+        className={`pf-knob absolute top-1/2 h-[var(--switch-knob)] w-[var(--switch-knob)] -translate-y-1/2 rounded-[var(--switch-knob-r)] transition-[left,background-color] duration-300 [transition-timing-function:var(--ease-spring)] ${
+          visualOn ? 'bg-[var(--accent-contrast)]' : 'bg-[var(--text-3)]'
+        }`}
+        style={dragT !== null
+          ? {left: `calc(var(--switch-seat) + ${dragT} * var(--switch-travel))`, transition: 'none'}
+          : {left: checked ? 'calc(var(--switch-seat) + var(--switch-travel))' : 'var(--switch-seat)'}}
+      />
+    </button>
+  )
+}
+
+/** Toggle: the settings row — label + hint on the left, a Switch on the right. */
+export function Toggle({checked, onChange, label, hint, disabled}: {
+  checked: boolean; onChange: (v: boolean) => void; label: string; hint?: ReactNode; disabled?: boolean
+}) {
   return (
     <div className={`flex items-start justify-between gap-4 py-2 ${disabled ? 'opacity-50' : ''}`}>
       <div className="min-w-0">
         <div className="text-sm font-medium text-[var(--text)]">{label}</div>
         {hint && <div className="mt-0.5 text-xs leading-relaxed text-[var(--text-3)]">{hint}</div>}
       </div>
-      {/* Milled-glass switch, concentric geometry: 6px track radius − 1px
-          border − 2px knob gap = 3px knob radius, with the same 2px gap on
-          every side of the knob in both positions. */}
-      <button
-        role="switch" aria-checked={checked} disabled={disabled}
-        onClick={onClick}
-        onPointerDown={onPointerDown} onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
-        className={`relative mt-0.5 h-5 w-9 shrink-0 touch-none rounded-[var(--r-sm)] border transition-colors duration-300 ${
-          visualOn
-            ? 'border-transparent bg-[var(--accent)] shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_1px_8px_-1px_color-mix(in_srgb,var(--accent)_60%,transparent)]'
-            : 'border-[var(--border-strong)] bg-[var(--btn-bg)] shadow-[inset_0_1px_2px_var(--bevel-bot)] hover:bg-[var(--btn-bg-hover)]'
-        }`}
-      >
-        <span
-          className={`absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_1px_2px_rgba(0,0,0,0.35)] transition-all duration-300 [transition-timing-function:var(--ease-spring)] ${
-            visualOn ? 'bg-[var(--accent-contrast)]' : 'bg-[var(--text-3)]'
-          } ${checked ? 'left-[18px]' : 'left-[2px]'}`}
-          style={dragX !== null ? {left: dragX, transition: 'none'} : undefined}
-        />
-      </button>
+      <div className="mt-0.5 shrink-0">
+        <Switch checked={checked} onChange={onChange} disabled={disabled} label={label} />
+      </div>
     </div>
   )
 }
@@ -503,16 +653,28 @@ const dotColor: Record<State, string> = {
   good: 'var(--good)', warn: 'var(--warn)', bad: 'var(--bad)', unknown: 'var(--text-3)',
 }
 
-/** StatusDot: color + label, never color alone. Breathes a halo when live. */
+/** StatusDot: color + label, never color alone. Breathes a halo when live.
+ *
+ * The dot is sized in `em` so it tracks whatever type it leads, and it aligns
+ * on the label's BASELINE, not the line box. Line-box centering is geometric:
+ * it puts the dot on the midline of a box that includes the leading and the
+ * descender space, which sits well off the optical centre of a run of
+ * lowercase text — that mismatch is what read as "the circles don't line up
+ * with the words" beside "No agent connected yet". Seated on the baseline and
+ * nudged a hair down, the dot lands on the x-height midline instead, and it
+ * stays there at every --ui-scale step because both lengths are em.
+ *
+ * An empty label emits no span and no gap: a zero-width span behind the gap
+ * left ~7px of dead air in both Overview identity cards. */
 export function StatusDot({state, label, pulse}: {state: State; label: string; pulse?: boolean}) {
   const live = pulse && state === 'good'
   return (
-    <span className="inline-flex items-center gap-2 text-sm">
+    <span className="inline-flex items-baseline gap-[var(--halo-gap)] text-sm">
       <span
-        className={`inline-flex h-2.5 w-2.5 rounded-full ${live ? 'pf-halo' : ''}`}
+        className={`inline-flex h-[0.62em] w-[0.62em] shrink-0 translate-y-[0.04em] rounded-full ${live ? 'pf-halo' : ''}`}
         style={{background: dotColor[state], ['--halo' as string]: dotColor[state]}}
       />
-      <span className="text-[var(--text-2)]">{label}</span>
+      {label && <span className="min-w-0 text-[var(--text-2)]">{label}</span>}
     </span>
   )
 }
@@ -579,7 +741,7 @@ export function Kbd({children, className = ''}: {children: string; className?: s
       {children.split(' ').map((k, i) => (
         <kbd
           key={i}
-          className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[var(--r-xs)] border border-[var(--border)] bg-[var(--panel-2)] px-1 font-sans text-[10.5px] font-medium text-[var(--text-3)] shadow-[inset_0_-1px_0_var(--border)]"
+          className="pf-control relative inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[var(--r-xs)] bg-[var(--panel-2)] px-1 font-sans text-[10.5px] font-medium text-[var(--text-3)]"
         >{k}</kbd>
       ))}
     </span>
@@ -609,13 +771,22 @@ export function SegmentedControl<T extends string>({value, onChange, options, cl
   const n = options.length
   const ref = useRef<HTMLDivElement>(null)
   const [dragPx, setDragPx] = useState<number | null>(null)
-  const drag = useRef({startX: 0, moved: false, suppress: false, thumbW: 0, origin: 0})
+  const drag = useRef({startX: 0, moved: false, suppress: false, thumbW: 0, origin: 0, pad: 0})
+
+  // The track's content box, measured — never a px literal. clientWidth already
+  // excludes the rim, and the padding is a rem utility that moves with
+  // --ui-scale, so the old "content = width − 6" was only ever right at a 16px
+  // root (it is 1.69px of padding here, not 2). Same family of bug as the
+  // toggle's hard-px seats.
+  const metrics = (el: HTMLDivElement) => {
+    const pad = parseFloat(getComputedStyle(el).paddingLeft) || 0
+    return {pad, thumbW: (el.clientWidth - pad * 2) / n}
+  }
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || !ref.current) return
-    // Border (1px) + padding (2px) each side: content = width − 6.
-    const thumbW = (ref.current.getBoundingClientRect().width - 6) / n
-    drag.current = {startX: e.clientX, moved: false, suppress: false, thumbW, origin: idx * thumbW}
+    const {pad, thumbW} = metrics(ref.current)
+    drag.current = {startX: e.clientX, moved: false, suppress: false, thumbW, origin: idx * thumbW, pad}
     ref.current.setPointerCapture(e.pointerId)
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -646,7 +817,7 @@ export function SegmentedControl<T extends string>({value, onChange, options, cl
       commit(Math.round(px / drag.current.thumbW))
     } else {
       const r = ref.current.getBoundingClientRect()
-      commit(Math.floor((e.clientX - r.left - 3) / drag.current.thumbW))
+      commit(Math.floor((e.clientX - r.left - drag.current.pad) / drag.current.thumbW))
     }
   }
   const onPointerCancel = () => { setDragPx(null); drag.current.moved = false }
@@ -660,16 +831,17 @@ export function SegmentedControl<T extends string>({value, onChange, options, cl
       ref={ref}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
       onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
-      className={`relative grid touch-none rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] p-0.5 shadow-[inset_0_1px_3px_var(--bevel-bot)] ${className}`}
+      className={`pf-control relative grid touch-none rounded-[var(--r-md)] bg-[var(--input-bg)] p-0.5 shadow-[inset_0_1px_3px_var(--bevel-bot)] ${className}`}
       style={{gridTemplateColumns: `repeat(${n}, 1fr)`}}
       role="radiogroup"
     >
+      {/* The thumb is milled glass too, and its seats come off the track's own
+          padding (0.5 = 0.125rem) — the same length the drag math measures. */}
       <div
         aria-hidden
-        className="absolute bottom-0.5 top-0.5 rounded-[calc(var(--r-md)-2px)] border border-[var(--border-strong)] bg-[var(--panel-3)] shadow-[inset_0_1px_0_rgba(255,255,255,0.1),var(--shadow-soft)] transition-transform duration-300 [transition-timing-function:var(--ease-out)]"
+        className="pf-control absolute bottom-0.5 left-0.5 top-0.5 rounded-[calc(var(--r-md)-2px)] bg-[var(--panel-3)] shadow-[var(--shadow-soft)] transition-transform duration-300 [transition-timing-function:var(--ease-out)]"
         style={{
-          left: 2,
-          width: `calc((100% - 4px) / ${n})`,
+          width: `calc((100% - 0.25rem) / ${n})`,
           ...(dragPx !== null
             ? {transform: `translateX(${dragPx}px)`, transition: 'none'}
             : {transform: `translateX(${idx * 100}%)`}),
@@ -824,7 +996,7 @@ export function EmptyState({icon, title, hint, action}: {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
       {icon && (
-        <div className="pf-float grid h-12 w-12 place-items-center rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] text-[var(--text-3)] shadow-[inset_0_1px_0_var(--hairline)]">
+        <div className="pf-control pf-float relative grid h-12 w-12 place-items-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-3)]">
           {icon}
         </div>
       )}
@@ -836,7 +1008,13 @@ export function EmptyState({icon, title, hint, action}: {
 }
 
 /** Modal: centered glass dialog with a scrim; Esc / backdrop-click closes.
- * Exits animate — [data-closing] runs the mirrored keyframes, then unmounts. */
+ * Exits animate — [data-closing] runs the mirrored keyframes, then unmounts.
+ *
+ * It renders through a portal for the same reason Select's list does: every
+ * .pf-card is a backdrop-filter surface, which makes it a containing block for
+ * fixed descendants. Analytics opens the session replay from inside its history
+ * card — anchored there, `fixed inset-0` would size to the CARD, not the
+ * viewport, and the dialog would be trapped in it. */
 export function Modal({title, onClose, children, footer, wide}: {
   title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean
 }) {
@@ -852,7 +1030,7 @@ export function Modal({title, onClose, children, footer, wide}: {
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
   }, [])
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-6"
       data-closing={closing || undefined}
@@ -868,7 +1046,9 @@ export function Modal({title, onClose, children, footer, wide}: {
           <IconButton title="Close" onClick={begin}><IconClose size={16} /></IconButton>
         </div>
         <div className="pf-sep" aria-hidden />
-        <div className="max-h-[calc(85vh-8rem)] overflow-y-auto px-5 py-4">{children}</div>
+        <div className="max-h-[calc(85vh-8rem)] overflow-y-auto overscroll-y-contain px-5 py-4">
+          <div data-band-content>{children}</div>
+        </div>
         {footer && (
           <>
             <div className="pf-sep" aria-hidden />
@@ -876,15 +1056,25 @@ export function Modal({title, onClose, children, footer, wide}: {
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
-/** Codebox: a selectable, monospaced value with a copy affordance. */
-export function Codebox({text, action}: {text: string; action?: ReactNode}) {
+/** Codebox: a selectable, monospaced value with a copy affordance.
+ *
+ * `selectable={false}` for a MASKED value: the mask is real text, so a
+ * select-all drag off a masked pairing code hands out a string of bullets that
+ * looks like it came from the app. Copy still works — callers copy the real
+ * string, not what is on screen. */
+export function Codebox({text, action, selectable = true}: {
+  text: string; action?: ReactNode; selectable?: boolean
+}) {
   return (
     <div className="flex items-stretch gap-2">
-      <code className="pf-well min-w-0 flex-1 select-text break-all px-3 py-2.5 font-mono text-[14px] leading-relaxed text-[var(--text)]">
+      <code className={`pf-well min-w-0 flex-1 break-all px-3 py-2.5 font-mono text-[14px] leading-relaxed text-[var(--text)] ${
+        selectable ? 'select-text' : 'select-none'
+      }`}>
         {text}
       </code>
       {action}

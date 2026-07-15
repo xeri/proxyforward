@@ -16,6 +16,7 @@ import {CommandPalette} from './components/CommandPalette'
 import {Spinner} from './components/ui'
 import {UIStatus, useTick} from './state'
 import {prefersReduced} from './motion'
+import {resetBands} from './rubberband'
 
 const supportsVT = typeof (document as Document & {startViewTransition?: unknown}).startViewTransition === 'function'
 
@@ -73,6 +74,8 @@ export default function App() {
   // Navigate inside a view transition: content morphs, chrome stays pinned.
   const go = (id: NavId) => {
     if (id === nav) return
+    // A bounce still in flight would be captured into the pf-content snapshot.
+    resetBands()
     const doc = document as Document & {startViewTransition?: (cb: () => void) => {finished: Promise<void>}}
     if (!prefersReduced() && doc.startViewTransition) {
       document.documentElement.classList.add('pf-vt-nav')
@@ -137,7 +140,11 @@ export default function App() {
   const s = status
   return (
     <Shell
-      sidebar={<Sidebar status={s} nav={nav} onNav={go} />}
+      // onPair reopens setup from the console: the sidebar's role switcher can
+      // always become the gateway, but becoming the agent needs a pairing code
+      // this machine may never have had — that route lands in the wizard's own
+      // pairing flow rather than failing backend validation.
+      sidebar={<Sidebar status={s} nav={nav} onNav={go} onPair={() => setWizardHold(true)} />}
       titlebar={<TitleBar status={s} nav={nav} onPalette={() => setPalette(true)} />}
     >
       {/* The wide adaptive canvas: screens lay out against this container's
@@ -146,6 +153,7 @@ export default function App() {
           not-yet-redesigned screens at their designed width; each redesign
           deletes its own clamp. */}
       <div
+        data-band-content
         className="@container mx-auto w-full max-w-[var(--content-max)] px-[var(--page-pad)] py-6"
         style={{viewTransitionName: 'pf-content'} as CSSProperties}
       >

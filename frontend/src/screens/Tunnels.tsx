@@ -124,7 +124,7 @@ export function Tunnels({status}: {status: UIStatus}) {
             <div key={t.ID} className="pf-card pf-lift flex flex-col p-4">
               <div className="flex items-start justify-between">
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] text-[var(--text-2)] shadow-[inset_0_1px_0_var(--hairline)]">
+                  <div className="pf-control relative flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-2)]">
                     <IconServer size={18} />
                   </div>
                   <div className="min-w-0">

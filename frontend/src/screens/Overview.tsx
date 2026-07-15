@@ -6,10 +6,10 @@ import {BandwidthPanel} from '../components/BandwidthChart'
 import {NumberTicker} from '../components/NumberTicker'
 import {
   Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, ErrorBanner,
-  Overline, PageHeader, RoleWord, SignalCard, StatTile, StatusDot,
+  IconButton, Overline, PageHeader, RoleWord, SignalCard, StatTile, StatusDot,
 } from '../components/ui'
 import {Emblem} from '../components/Emblem'
-import {IconActivity, IconGlobe, IconLink, IconServer} from '../components/icons'
+import {IconActivity, IconEye, IconEyeOff, IconGlobe, IconLink, IconServer} from '../components/icons'
 import {NavId} from '../nav'
 import {fmtBytes, fmtUptime, UIStatus} from '../state'
 
@@ -102,15 +102,23 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
         {/* The identity surface: the traffic path as three machined stations
             on Signal Glass, flow streaming between them when live. It breaks
             the content grid once — running past the column edges — so the
-            pipeline reads as the page's sculpture. A warn/bad link leaks
+            pipeline reads as the page's sculpture. The bleed GROWS with the
+            container (--hero-bleed, tokens.css) rather than switching on at a
+            breakpoint: the old binary @7xl variant snapped the gutters from
+            28px to 8px the moment the window crossed ~1080px, which is what
+            read as the card resizing and then clipping. A warn/bad link leaks
             tone-colored light from behind the glass. */}
-        <div className="-mx-[calc(var(--page-pad)-8px)]">
+        <div className="mx-[calc(-1*var(--hero-bleed))]">
         <Bleed
           color={linkState === 'bad' ? 'var(--bad)' : linkState === 'warn' ? 'var(--warn)' : null}
           strength="20%"
         >
         <SignalCard pad={false} className={ignite ? 'pf-ignite' : ''}>
-        <div className="grid grid-cols-1 gap-3 p-5 @3xl:grid-cols-[1fr_3rem_1fr_3rem_1fr] @3xl:gap-0">
+        {/* Five children, in order: node / conduit / node / conduit / node —
+            motion.css's ignite cascade addresses the stations by nth-child.
+            The conduits take a range instead of a fixed 3rem so the stations
+            get the slack at mid widths instead of truncating their headlines. */}
+        <div className="grid grid-cols-1 gap-3 p-5 @3xl:grid-cols-[minmax(0,1fr)_minmax(2rem,4rem)_minmax(0,1fr)_minmax(2rem,4rem)_minmax(0,1fr)] @3xl:gap-0">
           <PipeNode
             icon={<IconServer size={20} />}
             title={isAgent ? 'Local server' : 'Agent link'}
@@ -243,10 +251,21 @@ function HealthPanel({status}: {status: UIStatus}) {
               style={{
                 color: c,
                 borderColor: `color-mix(in srgb, ${c} 40%, var(--border))`,
-                background: `color-mix(in srgb, ${c} 10%, transparent)`,
+                // Catch-light as a padding-box band; an `inset 0 1px 0` specks
+                // at the corners (glass.css, the rim primitive). backgroundImage,
+                // not the `background` shorthand — React warns when a style
+                // object updates a shorthand next to a longhand it subsumes
+                // (backgroundClip), and this tile re-tints as health changes.
+                backgroundImage: [
+                  `linear-gradient(180deg, ${score !== 'unknown'
+                    ? 'color-mix(in srgb, var(--bevel-top) 55%, white)'
+                    : 'var(--bevel-top)'} 0 1px, transparent 1px)`,
+                  `linear-gradient(color-mix(in srgb, ${c} 10%, transparent), color-mix(in srgb, ${c} 10%, transparent))`,
+                ].join(', '),
+                backgroundClip: 'padding-box, border-box',
                 boxShadow: score !== 'unknown'
-                  ? `inset 0 1px 0 color-mix(in srgb, var(--bevel-top) 55%, white), 0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)`
-                  : 'inset 0 1px 0 var(--bevel-top)',
+                  ? `0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)`
+                  : undefined,
               }}
             >
               <IconActivity size={22} />
@@ -387,7 +406,7 @@ function PipeNode({icon, title, state, headline, detail, extra, pulse}: {
 }) {
   const c = segColor[state]
   return (
-    <div className="pf-pipenode flex min-w-0 items-start gap-3 rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--input-bg)] p-3.5 shadow-[inset_0_1px_0_var(--hairline)]">
+    <div className="pf-pipenode pf-control relative flex min-w-0 items-start gap-3 rounded-[var(--r-lg)] bg-[var(--input-bg)] p-3.5">
       <div
         className="grid h-11 w-11 shrink-0 place-items-center rounded-[var(--r-md)] border transition-all duration-500"
         style={{
@@ -475,10 +494,14 @@ function PlayerAddressStrip({status, onNavigate}: {status: UIStatus; onNavigate:
   )
 }
 
-/** GatewayPairingStrip: the pairing code as a compact row. */
+/** GatewayPairingStrip: the pairing code as a compact row. The code is a
+ * secret (it embeds the gateway token), so it rests masked — screen shares
+ * and screenshots don't leak it — with an eye toggle to reveal. Copy works
+ * without revealing. */
 function GatewayPairingStrip() {
   const [code, setCode] = useState('')
   const [err, setErr] = useState('')
+  const [shown, setShown] = useState(false)
   useEffect(() => {
     let cancelled = false
     const poll = (n: number) => {
@@ -497,7 +520,22 @@ function GatewayPairingStrip() {
         </div>
         <div className="min-w-56 flex-1">
           {code
-            ? <div className="pf-fade"><Codebox text={code} action={<CopyButton text={code} label="Copy" />} /></div>
+            ? <div className="pf-fade">
+                <Codebox
+                  text={shown ? code : '•'.repeat(28)}
+                  // The mask is real text — selectable, it drags out of the app
+                  // as a string of bullets. Copy still hands over the real code.
+                  selectable={shown}
+                  action={
+                    <div className="flex items-center gap-1.5">
+                      <IconButton title={shown ? 'Hide pairing code' : 'Reveal pairing code'} onClick={() => setShown(s => !s)}>
+                        {shown ? <IconEyeOff size={16} /> : <IconEye size={16} />}
+                      </IconButton>
+                      <CopyButton text={code} label="Copy" />
+                    </div>
+                  }
+                />
+              </div>
             : err
               ? <ErrorBanner message={err} />
               : <span className="text-sm text-[var(--text-3)]">Generating…</span>}
