@@ -96,6 +96,8 @@ type harnessOpts struct {
 	offerCaps []string
 	// mcAware marks the tunnel Minecraft-aware so both seams sniff logins.
 	mcAware bool
+	// offlineMOTD, when set, configures the tunnel's offline responder message.
+	offlineMOTD string
 }
 
 func newHarness(t *testing.T, localAddr string) *harness {
@@ -141,7 +143,7 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 		LocalAddr:  localAddr,
 		PublicPort: 0, // gateway picks
 		Enabled:    true,
-		Options:    config.TunnelOptions{MinecraftAware: opts.mcAware},
+		Options:    config.TunnelOptions{MinecraftAware: opts.mcAware, OfflineMOTD: opts.offlineMOTD},
 	}}
 
 	h := &harness{t: t, gw: gw, gwCancel: gwCancel, agentCfg: agentCfg, tunnelID: tunnelID, offerCaps: opts.offerCaps}
