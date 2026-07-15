@@ -82,6 +82,7 @@ persisted to config.
 | Protocol version | 1 | `control.go:19` |
 | Frame caps | 64 KiB post-auth / 4 KiB pre-auth | `control.go:88-91` |
 | Pre-auth prologue deadline | 10 s | `gateway.go:43` |
+| Per-conn dial-back wait | 12 s (> data-conn pre-auth, so its failure surfaces first) | `perconn.go dataDialTimeout` |
 | Heartbeat / idle deadline / ctrl write | 5 s / 15 s / 10 s | `agent.go:38-43`, `gateway.go:45-53` |
 | yamux window / conn-write timeout | 1 MiB / 30 s | `transport/yamux.go` |
 | Splice buffer / write-stall deadline | 128 KiB pooled / 2 min | `relay.go` (`BufSize` / `WriteStallTimeout`) |
@@ -125,6 +126,19 @@ Steady state: `ping/pong` both directions (RTT/jitter/loss both sides; pong echo
 probe transitions; gateway pushes `conn_stats{[{c,r}]}` (cap `conn-stats`) mapping
 kernel RTT onto agent conn entries via `ConnKey`. Data streams: gateway →
 `OpenStream` + `open_conn{tunnelId, clientAddr, connId}` header, then raw bytes.
+
+Per-conn data plane (cap `per-conn-data`; agent config `transport = "per-conn"`): the
+control plane stays on the mux, but instead of `OpenStream` the gateway sends
+`open_data{connId}` on the control stream and the agent dials back (`dialBackData`) a
+fresh `KindData` TCP+TLS connection carrying that connId. The gateway authenticates it
+through the same `Validator` and matches it to the waiting player (`perconn.go`
+`pendingConn` — an exactly-once, loser-closes handoff), then writes the same `open_conn`
+header and splices. One dedicated connection per player, so a lost segment on one
+player's connection cannot head-of-line-block another's (the one defect of yamux-over-one-
+TCP). Data conns resume the control conn's TLS session (`dialGateway` shares an LRU
+`ClientSessionCache`) and are drained on eviction alongside the mux (`agentSession`
+`dataConns`, `closeAll`). The gateway advertises the capability only because it serves
+the accept path end-to-end; a mux/legacy agent never offers it and rides `OpenStream`.
 
 ## Analytics data model (`internal/analytics/schema.go`)
 

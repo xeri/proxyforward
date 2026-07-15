@@ -103,8 +103,8 @@ type Agent struct {
 	curSession atomic.Pointer[session]
 
 	// offerCaps overrides the capabilities offered in the hello; nil means
-	// control.SupportedCapabilities. Tests set an explicit empty slice via
-	// SetCapabilityOffer to simulate a legacy agent.
+	// defaultOffer(). Tests set an explicit empty slice via SetCapabilityOffer
+	// to simulate a legacy agent.
 	offerCaps []string
 
 	// Conns tracks live proxied connections for the GUI.
@@ -113,16 +113,42 @@ type Agent struct {
 	// bwLimiters holds each tunnel's shared bandwidth-cap limiters, keyed by
 	// tunnel ID (unique within one agent). Uncapped tunnels resolve to nil.
 	bwLimiters *bwcap.Registry
+
+	// sessionCache lets per-conn data connections resume the control
+	// connection's TLS session, skipping the full handshake on every player
+	// join. Process-lifetime, shared across the control conn and every data
+	// conn. The fingerprint pin runs on full handshakes and is inherited by
+	// resumed ones, so trust is preserved.
+	sessionCache tls.ClientSessionCache
 }
 
 func New(cfg *config.Config, logger *slog.Logger) *Agent {
-	return &Agent{cfg: cfg, logger: logger, Conns: conntrack.NewRegistry(), bwLimiters: bwcap.NewRegistry()}
+	return &Agent{
+		cfg:          cfg,
+		logger:       logger,
+		Conns:        conntrack.NewRegistry(),
+		bwLimiters:   bwcap.NewRegistry(),
+		sessionCache: tls.NewLRUClientSessionCache(0),
+	}
 }
 
 // SetCapabilityOffer overrides the capabilities offered in the hello
-// exchange; nil restores the default (control.SupportedCapabilities) and an
-// explicit empty slice simulates a legacy agent. Call before Run.
+// exchange; nil restores the default (defaultOffer) and an explicit empty
+// slice simulates a legacy agent. Call before Run.
 func (a *Agent) SetCapabilityOffer(caps []string) { a.offerCaps = caps }
+
+// defaultOffer is the capability set a normally-configured agent offers. It is
+// transport-independent (tunnel-sync + conn-stats) plus per-conn-data only when
+// this agent is configured for the per-conn transport — deliberately NOT
+// control.SupportedCapabilities, which would offer per-conn regardless of
+// config and force it on every agent.
+func (a *Agent) defaultOffer() []string {
+	caps := []string{control.CapTunnelSync, control.CapConnStats}
+	if a.cfg.Agent.Transport == config.TransportPerConn {
+		caps = append(caps, control.CapPerConn)
+	}
+	return caps
+}
 
 // Run is the blocking entrypoint used by the CLI.
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
@@ -270,25 +296,38 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
-// runSession performs one full connect → serve cycle and returns why the
-// session ended.
-func (a *Agent) runSession(ctx context.Context) error {
+// dialGateway opens a TCP+TLS connection to the gateway's control port: DNS is
+// re-resolved every call, Nagle is off, and the TLS config carries the shared
+// client-session cache so per-conn data connections can resume the control
+// session instead of doing a full handshake per player. Used by runSession for
+// the control conn and by dialBackData for each data conn.
+func (a *Agent) dialGateway(ctx context.Context) (*tls.Conn, error) {
 	addr := net.JoinHostPort(a.cfg.Agent.GatewayHost, strconv.Itoa(a.cfg.Agent.GatewayPort))
-	dialer := &net.Dialer{Timeout: dialTimeout}
-	rawConn, err := dialer.DialContext(ctx, "tcp", addr) // resolves DNS per attempt
+	rawConn, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return fmt.Errorf("dial gateway %s: %w", addr, err)
+		return nil, fmt.Errorf("dial gateway %s: %w", addr, err)
 	}
 	if tcp, ok := rawConn.(*net.TCPConn); ok {
 		tcp.SetNoDelay(true)
 	}
-	conn := tls.Client(rawConn, link.AgentTLSConfig(a.cfg.Agent.CertFingerprint))
+	cfg := link.AgentTLSConfig(a.cfg.Agent.CertFingerprint)
+	cfg.ClientSessionCache = a.sessionCache
+	return tls.Client(rawConn, cfg), nil
+}
+
+// runSession performs one full connect → serve cycle and returns why the
+// session ended.
+func (a *Agent) runSession(ctx context.Context) error {
+	conn, err := a.dialGateway(ctx)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 
 	// Hello exchange, pre-mux, under one deadline.
 	offer := a.offerCaps
 	if offer == nil {
-		offer = control.SupportedCapabilities
+		offer = a.defaultOffer()
 	}
 	conn.SetDeadline(time.Now().Add(helloTimeout))
 	hn, _ := os.Hostname()
@@ -318,7 +357,7 @@ func (a *Agent) runSession(ctx context.Context) error {
 		}
 		caps = control.NewCapSet(ok.Capabilities)
 		a.peer.Store(&peerIdentity{hostname: ok.Hostname, localIPs: ok.LocalIPs, observedIP: ok.ObservedIP})
-		a.logger.Info("connected to gateway", "gateway", addr, "generation", ok.Generation, "gateway_version", ok.AppVersion, "gateway_host", ok.Hostname, "observed_ip", ok.ObservedIP, "capabilities", ok.Capabilities)
+		a.logger.Info("connected to gateway", "gateway", conn.RemoteAddr().String(), "generation", ok.Generation, "gateway_version", ok.AppVersion, "gateway_host", ok.Hostname, "observed_ip", ok.ObservedIP, "capabilities", ok.Capabilities)
 	case control.TypeHelloErr:
 		he, err := control.Decode[control.HelloErr](env)
 		if err != nil {
@@ -357,7 +396,7 @@ func (a *Agent) runSession(ctx context.Context) error {
 	}
 	defer ctrl.Close()
 
-	sess := &session{agent: a, mux: mux, ctrl: ctrl, caps: caps, quality: linkquality.New(lossWindow)}
+	sess := &session{agent: a, mux: mux, ctrl: ctrl, caps: caps, quality: linkquality.New(lossWindow), linkCounters: sessCounters}
 	a.curSession.Store(sess)
 	defer a.curSession.Store(nil)
 	defer a.peer.Store(nil)
@@ -396,6 +435,11 @@ type session struct {
 	// probe, when non-nil, is an in-flight on-demand latency measurement that
 	// steals matching pongs; see probe.go.
 	probe atomic.Pointer[linkquality.ProbeCollector]
+
+	// linkCounters counts this session's link bytes — the control conn and
+	// every per-conn data conn — mirrored into a.linkTotals. Without counting
+	// the data conns the GUI's link card would under-report per-conn payload.
+	linkCounters *stats.LinkCounters
 }
 
 // Has reports whether the session negotiated a capability.
@@ -624,6 +668,16 @@ func (s *session) handleControlMsg(env *control.Envelope) error {
 		}
 		return nil
 
+	case control.TypeOpenData:
+		od, err := control.Decode[control.OpenData](env)
+		if err != nil {
+			return err
+		}
+		// Dial back a dedicated data connection for this player. Spawn it so a
+		// slow dial never blocks the control reader (which owns liveness).
+		go s.dialBackData(od.ConnID)
+		return nil
+
 	default:
 		s.agent.logger.Debug("ignoring unknown control message", "type", env.Type)
 		return nil
@@ -631,8 +685,10 @@ func (s *session) handleControlMsg(env *control.Envelope) error {
 }
 
 // handleDataStream serves one proxied client connection: read the OpenConn
-// header, dial the local backend, splice.
-func (s *session) handleDataStream(st transport.Stream) {
+// header, dial the local backend, splice. The leg is a relay.Conn — a mux
+// stream under mux transport, or a byte-counted per-conn data conn under
+// per-conn transport — acquired by the caller (accept loop or dialBackData).
+func (s *session) handleDataStream(st relay.Conn) {
 	defer st.Close()
 	st.SetReadDeadline(time.Now().Add(openConnTimeout))
 	env, err := control.ReadMsg(st, control.MaxFrame)
@@ -697,6 +753,45 @@ func (s *session) handleDataStream(st transport.Stream) {
 		s.agent.logger.Debug("splice ended with error", "client", oc.ClientAddr, "err", err)
 	}
 	s.agent.logger.Debug("client disconnected", "tunnel", tun.Name, "client", oc.ClientAddr)
+}
+
+// dialBackData opens a fresh KindData connection to the gateway for one player,
+// identified by connID, and serves it like any other data stream. The gateway
+// matches connID to the waiting player, then writes the OpenConn header this
+// reads via handleDataStream. No HelloOK is expected on a data conn — the agent
+// goes straight to reading OpenConn; a rejected dial-back simply fails that
+// read. Per-conn transport only; runs in its own goroutine off the control
+// reader.
+func (s *session) dialBackData(connID string) {
+	conn, err := s.agent.dialGateway(s.ctx)
+	if err != nil {
+		s.agent.logger.Debug("per-conn dial-back failed", "conn_id", connID, "err", err)
+		return
+	}
+	conn.SetDeadline(time.Now().Add(helloTimeout))
+	err = control.WriteMsg(conn, control.TypeHello, control.Hello{
+		ProtocolVersion: control.ProtocolVersion,
+		Kind:            control.KindData,
+		AgentID:         s.agent.cfg.Agent.AgentID,
+		Token:           s.agent.cfg.Agent.Token,
+		ConnID:          connID,
+	})
+	if err != nil {
+		s.agent.logger.Debug("per-conn data hello failed", "conn_id", connID, "err", err)
+		conn.Close()
+		return
+	}
+	conn.SetDeadline(time.Time{})
+	// Count this data conn's bytes into the session + process link totals, just
+	// as the counting conn under the control mux does. The wrapper preserves
+	// CloseWrite (the inner *tls.Conn has it), so it is a valid relay.Conn.
+	wrapped := stats.NewCountingConn(conn, &s.agent.linkTotals, s.linkCounters)
+	rc, ok := wrapped.(relay.Conn)
+	if !ok {
+		conn.Close()
+		return
+	}
+	s.handleDataStream(rc)
 }
 
 // writeProxyHeader prepends a PROXY protocol v2 header carrying the real

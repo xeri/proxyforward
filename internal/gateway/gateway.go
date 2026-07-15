@@ -99,8 +99,14 @@ type Gateway struct {
 	// is visible to anyone.
 	connSeq atomic.Uint64
 	// linkTotals counts raw control-link bytes across all agent sessions of
-	// this process.
+	// this process (control conns and per-conn data conns alike).
 	linkTotals stats.LinkCounters
+
+	// pendingData holds per-conn data connections the gateway has asked agents
+	// to dial back, keyed by the global connID, awaiting their match. Kept off
+	// the actor so the data accept path matches in O(1) without a lifecycle
+	// round-trip.
+	pendingData sync.Map
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -530,11 +536,18 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		conn.Close()
 		return
 	}
-	if hello.Kind != control.KindControl {
-		// KindData arrives with the per-conn transport mode (milestone 5).
+	switch hello.Kind {
+	case control.KindControl:
+		// Falls through to admission below.
+	case control.KindData:
+		// Per-conn data plane: this is a dial-back for a waiting player. Match
+		// it and hand off the raw conn; it never enters agent admission.
+		g.handleDataConn(conn, hello, identity)
+		return
+	default:
 		control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
 			Code:    control.ErrCodeVersion,
-			Message: fmt.Sprintf("connection kind %q not supported yet", hello.Kind),
+			Message: fmt.Sprintf("connection kind %q not supported", hello.Kind),
 		})
 		conn.Close()
 		return
@@ -906,13 +919,6 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 		g.serveOffline(clientConn, spec)
 		return
 	}
-	stream, err := mux.OpenStream()
-	if err != nil {
-		sess.logger.Debug("open stream for client failed", "client", clientConn.RemoteAddr().String(), "err", err)
-		g.serveOffline(clientConn, spec)
-		return
-	}
-	defer stream.Close()
 	tcp, ok := clientConn.(*net.TCPConn)
 	if !ok {
 		return
@@ -920,19 +926,50 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	// ConnID correlates this connection with the RTT reports the gateway sends
 	// the agent; the entry's own key lets the local recorder attribute gateway
 	// RTT samples. Issued before Open so the key is set before the entry is
-	// published (ConnKey is immutable after Open).
+	// published (ConnKey is immutable after Open). It also matches a per-conn
+	// dial-back to this player, so it must be minted before the data leg.
 	connID := strconv.FormatUint(g.connSeq.Add(1), 10)
 	// Splice(client, stream): AToB is client→server, so inIsAToB=true.
 	entry, closeEntry := g.Conns.Open(sess.agentID, spec.ID, spec.Name, clientConn.RemoteAddr().String(), connID, true)
 	defer closeEntry()
 
+	// Acquire the data leg. Per-conn transport signals the agent to dial back a
+	// dedicated TCP+TLS connection for this player (no cross-player head-of-line
+	// blocking on the gateway↔agent hop); mux transport opens a stream on the
+	// shared session. Either way the leg is a relay.Conn spliced identically
+	// below.
+	var stream relay.Conn
+	if sess.Has(control.CapPerConn) {
+		raw := g.openDataConn(sess, connID)
+		if raw == nil {
+			g.serveOffline(clientConn, spec)
+			return
+		}
+		rc, ok := raw.(relay.Conn)
+		if !ok {
+			raw.Close()
+			return
+		}
+		sess.dataConns.Store(connID, raw)
+		defer sess.dataConns.Delete(connID)
+		stream = rc
+	} else {
+		st, err := mux.OpenStream()
+		if err != nil {
+			sess.logger.Debug("open stream for client failed", "client", clientConn.RemoteAddr().String(), "err", err)
+			g.serveOffline(clientConn, spec)
+			return
+		}
+		stream = st
+	}
+	defer stream.Close()
+
 	stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
-	err = control.WriteMsg(stream, control.TypeOpenConn, control.OpenConn{
+	if err := control.WriteMsg(stream, control.TypeOpenConn, control.OpenConn{
 		TunnelID:   spec.ID,
 		ClientAddr: clientConn.RemoteAddr().String(),
 		ConnID:     connID,
-	})
-	if err != nil {
+	}); err != nil {
 		sess.logger.Debug("open_conn write failed", "err", err)
 		return
 	}

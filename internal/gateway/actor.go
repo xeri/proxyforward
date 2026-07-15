@@ -72,6 +72,14 @@ type agentSession struct {
 	// sampler: connID (string) → *rttConn. Populated by handleClient for the
 	// connection's lifetime.
 	rttConns sync.Map
+
+	// dataConns tracks this session's live per-conn data connections (connID →
+	// net.Conn) so eviction can close them. In per-conn transport the data
+	// splices ride dedicated conns, not the mux, so closing the mux alone can't
+	// tear them down — and an uncapped splice parked in Read only unblocks on
+	// conn close (the ctx cancel unblocks only throttled WaitN and the pending
+	// dial-back wait). Empty under mux transport.
+	dataConns sync.Map
 }
 
 // setCtrl publishes (or clears, with nil) the control stream for writers.
@@ -113,12 +121,18 @@ func (a *agentSession) session() transport.Session {
 }
 
 // closeAll tears down the underlying conn (which kills the mux, its streams,
-// and every splice riding them).
+// and every splice riding them) plus every per-conn data connection (whose
+// splices ride dedicated conns, not the mux). Together these drain exactly this
+// agent's connections and none of another's.
 func (a *agentSession) closeAll() {
 	if s := a.session(); s != nil {
 		s.Close()
 	}
 	a.conn.Close()
+	a.dataConns.Range(func(_, v any) bool {
+		v.(net.Conn).Close()
+		return true
+	})
 }
 
 // publicListener is one bound public port serving one tunnel of one session.

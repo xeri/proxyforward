@@ -143,7 +143,7 @@ func TestCapSet(t *testing.T) {
 
 func TestSupportedCapabilities(t *testing.T) {
 	s := NewCapSet(SupportedCapabilities)
-	if !s.Has(CapTunnelSync) || !s.Has(CapConnStats) {
+	if !s.Has(CapTunnelSync) || !s.Has(CapConnStats) || !s.Has(CapPerConn) {
 		t.Fatalf("supported set missing a built-in capability: %v", SupportedCapabilities)
 	}
 	// tunnel-udp is deliberately NOT advertised: it isn't implemented
@@ -151,12 +151,6 @@ func TestSupportedCapabilities(t *testing.T) {
 	// protocol lie.
 	if s.Has("tunnel-udp") {
 		t.Fatal("tunnel-udp must not be advertised until it is implemented")
-	}
-	// per-conn-data is likewise not advertised in this commit: this is the wire
-	// vocabulary only; the gateway data accept path lands in a later commit.
-	// Offering it before it works end-to-end would be the same protocol lie.
-	if s.Has(CapPerConn) {
-		t.Fatal("per-conn-data must not be advertised until the data plane is implemented")
 	}
 	// A sync-only peer (older build) must negotiate away conn-stats — an old
 	// agent that never offers conn-stats gets no RTT frames.

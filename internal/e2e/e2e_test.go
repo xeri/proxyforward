@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -101,6 +102,13 @@ type harnessOpts struct {
 	// bandwidthMbps/bandwidthScope cap the default tunnel (0 = uncapped).
 	bandwidthMbps  int
 	bandwidthScope string
+	// transport selects the agent's data-plane transport (config.TransportMux
+	// or config.TransportPerConn); empty leaves the config default (mux).
+	transport string
+	// interpose, if set, is called with the real gateway "host:port" and
+	// returns the address the agent should dial instead — e.g. a transparent
+	// TCP proxy that observes the agent→gateway connections.
+	interpose func(gwAddr string) string
 }
 
 func newHarness(t *testing.T, localAddr string) *harness {
@@ -135,10 +143,22 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 	agentCfg := config.Default()
 	agentCfg.Role = config.RoleAgent
 	agentCfg.Agent.AgentID = config.NewID()
-	agentCfg.Agent.GatewayHost = "127.0.0.1"
-	agentCfg.Agent.GatewayPort = gw.ControlAddr().(*net.TCPAddr).Port
+	dialAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(gw.ControlAddr().(*net.TCPAddr).Port))
+	if opts.interpose != nil {
+		dialAddr = opts.interpose(dialAddr)
+	}
+	dialHost, dialPortStr, err := net.SplitHostPort(dialAddr)
+	if err != nil {
+		t.Fatalf("interpose returned a bad address %q: %v", dialAddr, err)
+	}
+	dialPort, _ := strconv.Atoi(dialPortStr)
+	agentCfg.Agent.GatewayHost = dialHost
+	agentCfg.Agent.GatewayPort = dialPort
 	agentCfg.Agent.Token = gwCfg.Gateway.Token
 	agentCfg.Agent.CertFingerprint = gw.Fingerprint()
+	if opts.transport != "" {
+		agentCfg.Agent.Transport = opts.transport
+	}
 	agentCfg.Agent.Tunnels = []config.Tunnel{{
 		ID:         tunnelID,
 		Name:       "test",
@@ -221,6 +241,35 @@ func roundTrip(t *testing.T, addr string, payload []byte) {
 	if !bytes.Equal(got, payload) {
 		t.Fatal("echo mismatch")
 	}
+}
+
+// TestPerConnRoundTrip: the per-conn transport moves bytes end to end over a
+// dedicated, agent-dialed data connection, and that connection's payload is
+// counted into the agent's link totals (not just the control chatter) so the
+// GUI's link card stays honest.
+func TestPerConnRoundTrip(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportPerConn})
+	addr := h.waitPublicPort()
+
+	beforeIn, beforeOut := h.agent.LinkTotalBytes()
+	payload := bytes.Repeat([]byte("per-conn transport works "), 4096) // ~100 KiB
+	roundTrip(t, addr, payload)
+
+	// The data conn's bytes must land in the link totals; a control-only count
+	// would be far below the payload size.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		in, out := h.agent.LinkTotalBytes()
+		if in-beforeIn >= int64(len(payload)) && out-beforeOut >= int64(len(payload)) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	in, out := h.agent.LinkTotalBytes()
+	t.Fatalf("per-conn data bytes not counted: in delta %d, out delta %d, want ≥ %d each",
+		in-beforeIn, out-beforeOut, len(payload))
 }
 
 // TestHealthPropagates: the agent's local-target probe result reaches the
@@ -831,6 +880,42 @@ func TestEvictionIsolatesAndDrains(t *testing.T) {
 	roundTrip(t, addrB, []byte("B survives A eviction"))
 }
 
+// TestPerConnEvictionDrains: evicting a per-conn agent tears down its live
+// per-conn data connection. Under per-conn transport the mux is no longer the
+// whole drain boundary — the data splices ride dedicated conns — so closeAll
+// must also close them (an uncapped splice parked in Read only unblocks on
+// conn close). This is the per-conn twin of the drain half of T5.
+func TestPerConnEvictionDrains(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportPerConn})
+	addr := h.waitPublicPort()
+
+	// A long-lived connection with a confirmed echo, so its per-conn data conn
+	// is live and spliced.
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := conn.Write([]byte("live")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("echo before eviction: %v", err)
+	}
+
+	// Evict the agent; the live data connection must terminate, proving
+	// closeAll closed the dedicated data conn and not merely the mux.
+	h.stopAgent()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Read(buf); err == nil {
+		t.Fatal("per-conn data connection did not terminate on eviction")
+	}
+}
+
 // --- Bandwidth cap ---
 //
 // These assert the average download throughput over ~1s (far steadier than the
@@ -1035,14 +1120,35 @@ func TestBadTokenRejected(t *testing.T) {
 
 // TestBurstThroughputAndCrossStreamLatency pushes 64 MiB through one
 // connection while a second connection does small echo round-trips; the
-// burst must move fast and must not starve the small stream.
+// burst must move fast and must not starve the small stream. This is the
+// hot-path floor gate (mux transport); TestBurstThroughputPerConn is its
+// per-conn twin.
 func TestBurstThroughputAndCrossStreamLatency(t *testing.T) {
 	if testing.Short() {
 		t.Skip("burst benchmark skipped in -short")
 	}
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarness(t, echoAddr)
+	runBurst(t, newHarness(t, echoAddr))
+}
+
+// TestBurstThroughputPerConn is the per-conn transport twin of the burst floor
+// gate: dedicated per-player connections must clear the same throughput floor
+// and, having no shared mux, must not degrade cross-stream latency.
+func TestBurstThroughputPerConn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("burst benchmark skipped in -short")
+	}
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	runBurst(t, newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportPerConn}))
+}
+
+// runBurst drives the burst-and-probe floor check against a live harness:
+// ≥20 MiB/s round-trip and worst cross-stream RTT ≤500 ms (bounds in
+// docs/agent/architecture.md "The numbers").
+func runBurst(t *testing.T, h *harness) {
+	t.Helper()
 	addr := h.waitPublicPort()
 
 	const burstSize = 64 << 20
