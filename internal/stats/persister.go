@@ -8,8 +8,10 @@ package stats
 // TierSnapshot is one persisted tier's valid buckets plus the bookkeeping a
 // Persister needs to write incrementally and expire lapped slots.
 type TierSnapshot struct {
-	Tier  int   // index into the store's tier ladder
-	ResMs int64 // bucket resolution
+	// AgentID owns this tier's series; "" is the gateway-wide/global history.
+	AgentID string
+	Tier    int   // index into the store's tier ladder
+	ResMs   int64 // bucket resolution
 
 	// FloorT is the oldest bucket start still inside the ring window; rows
 	// with T < FloorT have lapped out and should be deleted by the persister.
@@ -28,6 +30,11 @@ type SnapshotData struct {
 	Lifetime Lifetime
 	Peers    []PeerStat
 	Tiers    []TierSnapshot
+
+	// DeleteAgents names agent histories evicted since the last save; the
+	// Persister must drop their rrd rows so a gateway that has cycled through
+	// many agent ids does not accumulate dead series on disk.
+	DeleteAgents []string
 }
 
 // Persister stores and restores snapshots. LoadStats returning (nil, nil)

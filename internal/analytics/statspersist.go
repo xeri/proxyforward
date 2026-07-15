@@ -12,7 +12,7 @@ import (
 	"proxyforward/internal/stats"
 )
 
-const rrdCols = `tier, t, inb, outb,
+const rrdCols = `agent_id, tier, t, inb, outb,
 	io, ih, il, ic, oo, oh, ol, oc,
 	co, ch, cl, cc, ro, rh, rl, rc,
 	po, ph, pl, pc, lo, lh, ll, lc`
@@ -50,24 +50,25 @@ func (d *DB) LoadStats() (*stats.SnapshotData, error) {
 		return nil, fmt.Errorf("load peers: %w", err)
 	}
 
-	brows, err := d.read.Query(`SELECT ` + rrdCols + ` FROM rrd ORDER BY tier, t`)
+	brows, err := d.read.Query(`SELECT ` + rrdCols + ` FROM rrd ORDER BY agent_id, tier, t`)
 	if err != nil {
 		return nil, fmt.Errorf("load rrd: %w", err)
 	}
 	defer brows.Close()
 	var cur *stats.TierSnapshot
 	for brows.Next() {
+		var agentID string
 		var tier int
 		var b stats.Bucket
-		if err := brows.Scan(&tier, &b.T, &b.In, &b.Out,
+		if err := brows.Scan(&agentID, &tier, &b.T, &b.In, &b.Out,
 			&b.InO, &b.InH, &b.InL, &b.InC, &b.OutO, &b.OutH, &b.OutL, &b.OutC,
 			&b.ConnO, &b.ConnH, &b.ConnL, &b.ConnC, &b.RttO, &b.RttH, &b.RttL, &b.RttC,
 			&b.PlayersO, &b.PlayersH, &b.PlayersL, &b.PlayersC,
 			&b.LossO, &b.LossH, &b.LossL, &b.LossC); err != nil {
 			return nil, fmt.Errorf("scan bucket: %w", err)
 		}
-		if cur == nil || cur.Tier != tier {
-			snap.Tiers = append(snap.Tiers, stats.TierSnapshot{Tier: tier})
+		if cur == nil || cur.Tier != tier || cur.AgentID != agentID {
+			snap.Tiers = append(snap.Tiers, stats.TierSnapshot{AgentID: agentID, Tier: tier})
 			cur = &snap.Tiers[len(snap.Tiers)-1]
 		}
 		cur.Buckets = append(cur.Buckets, b)
@@ -113,25 +114,31 @@ func (d *DB) SaveStats(snap *stats.SnapshotData) error {
 	}
 
 	bstmt, err := tx.Prepare(`INSERT OR REPLACE INTO rrd (` + rrdCols + `)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("save rrd: %w", err)
 	}
 	defer bstmt.Close()
+	// Drop the rrd rows of agent histories evicted since the last save.
+	for _, agentID := range snap.DeleteAgents {
+		if _, err := tx.Exec(`DELETE FROM rrd WHERE agent_id = ?`, agentID); err != nil {
+			return fmt.Errorf("delete agent %q rrd: %w", agentID, err)
+		}
+	}
 	for _, ts := range snap.Tiers {
-		if _, err := tx.Exec(`DELETE FROM rrd WHERE tier = ? AND t < ?`, ts.Tier, ts.FloorT); err != nil {
-			return fmt.Errorf("expire tier %d: %w", ts.Tier, err)
+		if _, err := tx.Exec(`DELETE FROM rrd WHERE agent_id = ? AND tier = ? AND t < ?`, ts.AgentID, ts.Tier, ts.FloorT); err != nil {
+			return fmt.Errorf("expire agent %q tier %d: %w", ts.AgentID, ts.Tier, err)
 		}
 		for _, b := range ts.Buckets {
 			if b.T < ts.DirtyFromT {
 				continue // unchanged since the last successful save
 			}
-			if _, err := bstmt.Exec(ts.Tier, b.T, b.In, b.Out,
+			if _, err := bstmt.Exec(ts.AgentID, ts.Tier, b.T, b.In, b.Out,
 				b.InO, b.InH, b.InL, b.InC, b.OutO, b.OutH, b.OutL, b.OutC,
 				b.ConnO, b.ConnH, b.ConnL, b.ConnC, b.RttO, b.RttH, b.RttL, b.RttC,
 				b.PlayersO, b.PlayersH, b.PlayersL, b.PlayersC,
 				b.LossO, b.LossH, b.LossL, b.LossC); err != nil {
-				return fmt.Errorf("save bucket tier=%d t=%d: %w", ts.Tier, b.T, err)
+				return fmt.Errorf("save bucket agent=%q tier=%d t=%d: %w", ts.AgentID, ts.Tier, b.T, err)
 			}
 		}
 	}
