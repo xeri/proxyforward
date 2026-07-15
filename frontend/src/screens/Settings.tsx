@@ -159,9 +159,10 @@ export function Settings({status}: {status: UIStatus}) {
                   onChange={v => patch(c => { c.Agent.GatewayPort = parseInt(v, 10) || 0 })} /></Field>
               </div>
               <div className="mt-3">
-                <Field label="Transport" hint="All player traffic is multiplexed over the single control connection.">
+                <Field label="Transport" hint="Multiplexed shares one gateway connection across all players; per-connection gives each player a dedicated connection, so one player's packet loss can't stall the others — at the cost of more connections.">
                   <Select value={cfg.Agent.Transport} onChange={v => patch(c => { c.Agent.Transport = v })} options={[
                     {value: 'mux', label: 'Multiplexed (default) — one connection'},
+                    {value: 'per-conn', label: 'Per-connection — one per player'},
                   ]} />
                 </Field>
               </div>
