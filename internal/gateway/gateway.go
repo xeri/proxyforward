@@ -198,10 +198,10 @@ func (g *Gateway) Tunnels() []TunnelSnapshot {
 	return a.tunnels()
 }
 
-// AgentConnected reports whether an agent session is currently admitted.
+// AgentConnected reports whether any agent session is currently admitted.
 func (g *Gateway) AgentConnected() bool {
 	a := g.act()
-	return a != nil && a.currentSession() != nil
+	return a != nil && len(a.sessions()) > 0
 }
 
 // AgentID reports the connected agent's identity, or "" when no agent is
@@ -360,27 +360,37 @@ func (g *Gateway) LinkTotalBytes() (in, out int64) { return g.linkTotals.Bytes()
 // act returns the running actor, or nil before Start has published it.
 func (g *Gateway) act() *actor { return g.actor.Load() }
 
-// session returns the current agent session, nil-safe before Start.
+// session returns the sole connected agent session, or nil when there are zero
+// or several. The coarse single-agent status accessors funnel through it, so
+// with several agents they read their "unknown" sentinels rather than name an
+// arbitrary agent — honest until Phase 3's Status.Agents carries per-agent
+// fidelity. Nil-safe before Start.
 func (g *Gateway) session() *agentSession {
 	a := g.act()
 	if a == nil {
 		return nil
 	}
-	return a.currentSession()
+	ss := a.sessions()
+	if len(ss) == 1 {
+		return ss[0]
+	}
+	return nil
 }
 
-// TunnelLocalUp reports the agent's last word on a tunnel's local backend;
-// known is false when no agent is connected or it has not reported yet.
+// TunnelLocalUp reports an agent's last word on a tunnel's local backend,
+// scanning every connected agent for the tunnelID (globally-unique in
+// practice); known is false when no agent has reported it yet.
 func (g *Gateway) TunnelLocalUp(tunnelID string) (up, known bool) {
-	sess := g.session()
-	if sess == nil {
+	a := g.act()
+	if a == nil {
 		return false, false
 	}
-	v, ok := sess.health.Load(tunnelID)
-	if !ok {
-		return false, false
+	for _, sess := range a.sessions() {
+		if v, ok := sess.health.Load(tunnelID); ok {
+			return v.(bool), true
+		}
 	}
-	return v.(bool), true
+	return false, false
 }
 
 func (g *Gateway) acceptControl(ctx context.Context) {
@@ -472,7 +482,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	// --- Admission: supersede same agent, reject a second distinct agent. ---
+	// --- Admission: supersede same agentID, admit distinct agents alongside. ---
 	negotiated := control.IntersectCaps(hello.Capabilities, control.SupportedCapabilities)
 	sess := &agentSession{
 		agentID:     hello.AgentID,
@@ -487,11 +497,12 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 	}
 	gen, err := g.act().admit(sess)
 	if err != nil {
-		logger.Warn("agent rejected", "agent", hello.AgentID, "err", err)
-		control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
-			Code:    control.ErrCodeAgentConflict,
-			Message: err.Error(),
-		})
+		// The only admission refusals left are transient — anti-flap dampening
+		// of a same-agentID contest, or a shutting-down gateway. Neither is
+		// fatal: close the connection without a HelloOK so the agent sees a
+		// read error and retries with backoff, rather than stopping. (A fatal
+		// HelloErr like agent_conflict would tell it to give up.)
+		logger.Warn("agent admission deferred", "agent", hello.AgentID, "err", err)
 		conn.Close()
 		return
 	}

@@ -54,8 +54,11 @@ const (
 // Fatal configuration errors: retrying cannot fix these, so Run returns
 // instead of hammering the gateway.
 var (
-	ErrBadToken      = errors.New("gateway rejected our token — re-pair with the gateway's current pairing code")
-	ErrAgentConflict = errors.New("gateway already has a different agent connected — each gateway serves one agent identity")
+	ErrBadToken = errors.New("gateway rejected our token — re-pair with the gateway's current pairing code")
+	// ErrAgentConflict is retained for back-compat: a current gateway admits
+	// several agents and never sends agent_conflict, but a legacy single-agent
+	// gateway still can, and the agent must treat it as fatal rather than retry.
+	ErrAgentConflict = errors.New("this gateway (older build) already serves a different agent — use a distinct gateway or agent identity")
 	ErrVersion       = errors.New("protocol version mismatch — update the older side")
 )
 
