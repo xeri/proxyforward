@@ -658,6 +658,8 @@ export namespace app {
 	    publicPort: number;
 	    localUp: boolean;
 	    localKnown: boolean;
+	    bandwidthLimitMbps: number;
+	    bandwidthLimitScope: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TunnelUI(source);
@@ -671,6 +673,8 @@ export namespace app {
 	        this.publicPort = source["publicPort"];
 	        this.localUp = source["localUp"];
 	        this.localKnown = source["localKnown"];
+	        this.bandwidthLimitMbps = source["bandwidthLimitMbps"];
+	        this.bandwidthLimitScope = source["bandwidthLimitScope"];
 	    }
 	}
 	export class UIStatus {
@@ -783,6 +787,7 @@ export namespace config {
 	    ProxyProtocolV2: boolean;
 	    OfflineMOTD: string;
 	    BandwidthLimitMbps: number;
+	    BandwidthLimitScope: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TunnelOptions(source);
@@ -794,6 +799,7 @@ export namespace config {
 	        this.ProxyProtocolV2 = source["ProxyProtocolV2"];
 	        this.OfflineMOTD = source["OfflineMOTD"];
 	        this.BandwidthLimitMbps = source["BandwidthLimitMbps"];
+	        this.BandwidthLimitScope = source["BandwidthLimitScope"];
 	    }
 	}
 	export class Tunnel {
