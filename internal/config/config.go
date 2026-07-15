@@ -40,6 +40,20 @@ const (
 	TunnelUDP = "udp"
 )
 
+// Bandwidth-cap scope values (options.bandwidth_limit_scope), selecting what a
+// tunnel's cap applies to. Empty normalizes to combined. Enforcement semantics
+// live in internal/bwcap.
+const (
+	// BandwidthScopeCombined shares one bucket across both directions and all
+	// of the tunnel's connections.
+	BandwidthScopeCombined = "combined"
+	// BandwidthScopePerDirection caps inbound and outbound independently, each
+	// summed across the tunnel's connections.
+	BandwidthScopePerDirection = "per-direction"
+	// BandwidthScopePerConnection gives every connection its own bucket.
+	BandwidthScopePerConnection = "per-connection"
+)
+
 type Config struct {
 	Role      Role            `toml:"role"`
 	Agent     AgentConfig     `toml:"agent"`
@@ -86,6 +100,9 @@ type TunnelOptions struct {
 	OfflineMOTD string `toml:"offline_motd"`
 	// BandwidthLimitMbps caps this tunnel's throughput; 0 = unlimited.
 	BandwidthLimitMbps int `toml:"bandwidth_limit_mbps"`
+	// BandwidthLimitScope selects what the cap applies to: combined (default),
+	// per-direction, or per-connection. Ignored when the cap is 0.
+	BandwidthLimitScope string `toml:"bandwidth_limit_scope"`
 }
 
 type GatewayConfig struct {
@@ -359,9 +376,25 @@ func (c *Config) validateAgent() []error {
 		}
 		if t.Options.BandwidthLimitMbps < 0 {
 			errs = append(errs, fmt.Errorf("%s: bandwidth_limit_mbps: must be >= 0", where))
+		} else if t.Options.BandwidthLimitMbps > 0 && !validBandwidthScope(t.Options.BandwidthLimitScope) {
+			// Scope is meaningless without a cap, so it is only checked when one
+			// is set; the gateway normalizes whatever arrives on the wire.
+			errs = append(errs, fmt.Errorf("%s: bandwidth_limit_scope: must be %q, %q, or %q (empty = %q), got %q",
+				where, BandwidthScopeCombined, BandwidthScopePerDirection, BandwidthScopePerConnection, BandwidthScopeCombined, t.Options.BandwidthLimitScope))
 		}
 	}
 	return errs
+}
+
+// validBandwidthScope reports whether s is an accepted options.bandwidth_limit_scope
+// value. Empty is accepted (normalizes to combined at enforcement time).
+func validBandwidthScope(s string) bool {
+	switch s {
+	case "", BandwidthScopeCombined, BandwidthScopePerDirection, BandwidthScopePerConnection:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Config) validateGateway() []error {
