@@ -19,7 +19,7 @@ func TestRecordRTTAggregates(t *testing.T) {
 		nil,
 		func(e *conntrack.Entry) { rec.RecordRTT(e, e.RTT()) },
 	)
-	e, closeEntry := reg.Open("t1", "mc", "203.0.113.9:5555", "", true)
+	e, closeEntry := reg.Open("", "t1", "mc", "203.0.113.9:5555", "", true)
 	d.Barrier()
 
 	// Three samples within one minute: avg 20, min 10, max 30.
@@ -70,7 +70,7 @@ func TestRecordRTTIgnoresUnknown(t *testing.T) {
 		nil, nil,
 		func(e *conntrack.Entry) { rec.RecordRTT(e, e.RTT()) },
 	)
-	e, _ := reg.Open("t1", "mc", "203.0.113.9:5555", "", true)
+	e, _ := reg.Open("", "t1", "mc", "203.0.113.9:5555", "", true)
 	d.Barrier()
 	e.SetRTT(-1) // unknown — must not record
 	d.Barrier()

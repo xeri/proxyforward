@@ -656,7 +656,7 @@ func (s *session) handleDataStream(st transport.Stream) {
 	// connection for control-link RTT reports; an old gateway sends "" and
 	// EntryByConnKey("") already guards. Passed into Open (never written
 	// post-hoc) because the control goroutine reads ConnKey concurrently.
-	entry, closeEntry := s.agent.Conns.Open(tun.ID, tun.Name, oc.ClientAddr, oc.ConnID, false)
+	entry, closeEntry := s.agent.Conns.Open(s.agent.cfg.Agent.AgentID, tun.ID, tun.Name, oc.ClientAddr, oc.ConnID, false)
 	defer closeEntry()
 
 	// Minecraft-aware tunnels sniff the client's login handshake (which flows

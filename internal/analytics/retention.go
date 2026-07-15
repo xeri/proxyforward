@@ -48,9 +48,9 @@ func (d *DB) prune(now time.Time) {
 		// state on a synthetic row at the cutoff: uptime over any window then
 		// still knows the state entering it. (Bare `up` rides SQLite's
 		// MAX()-row rule in the subquery.)
-		{"event carriers", `INSERT INTO events (t, kind, tunnel_id, up)
-			SELECT ?, kind, tunnel_id, up FROM
-				(SELECT kind, tunnel_id, up, MAX(t) FROM events WHERE t < ? GROUP BY kind, tunnel_id)`,
+		{"event carriers", `INSERT INTO events (t, agent_id, kind, tunnel_id, up)
+			SELECT ?, agent_id, kind, tunnel_id, up FROM
+				(SELECT agent_id, kind, tunnel_id, up, MAX(t) FROM events WHERE t < ? GROUP BY agent_id, kind, tunnel_id)`,
 			[]any{cutoff, cutoff}},
 		{"events", `DELETE FROM events WHERE t < ?`, []any{cutoff}},
 		{"geo_cache", `DELETE FROM geo_cache WHERE resolved_ms < ?`, []any{geoCutoff}},
