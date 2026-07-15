@@ -495,12 +495,14 @@ func (a *actor) session(agentID string) *agentSession {
 
 // TunnelSnapshot is one registered tunnel's live state, for status surfaces.
 type TunnelSnapshot struct {
-	AgentID    string // the agent that registered this tunnel
-	ID         string
-	Name       string
-	PublicPort int  // actual bound port
-	LocalUp    bool // agent's last reported backend health
-	LocalKnown bool
+	AgentID             string // the agent that registered this tunnel
+	ID                  string
+	Name                string
+	PublicPort          int  // actual bound port
+	LocalUp             bool // agent's last reported backend health
+	LocalKnown          bool
+	BandwidthLimitMbps  int    // configured cap (0 = unlimited)
+	BandwidthLimitScope string // combined | per-direction | per-connection
 }
 
 // tunnels snapshots every registered tunnel and its bound port, joined with
@@ -511,10 +513,12 @@ func (a *actor) tunnels() []TunnelSnapshot {
 		for _, subtree := range a.listeners {
 			for _, pl := range subtree {
 				ts := TunnelSnapshot{
-					AgentID:    pl.owner.agentID,
-					ID:         pl.spec.ID,
-					Name:       pl.spec.Name,
-					PublicPort: pl.ln.Addr().(*net.TCPAddr).Port,
+					AgentID:             pl.owner.agentID,
+					ID:                  pl.spec.ID,
+					Name:                pl.spec.Name,
+					PublicPort:          pl.ln.Addr().(*net.TCPAddr).Port,
+					BandwidthLimitMbps:  pl.spec.BandwidthLimitMbps,
+					BandwidthLimitScope: pl.spec.BandwidthLimitScope,
 				}
 				if v, ok := pl.owner.health.Load(pl.spec.ID); ok {
 					ts.LocalUp, ts.LocalKnown = v.(bool), true

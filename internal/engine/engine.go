@@ -410,7 +410,11 @@ func (e *Engine) Status() ipc.Status {
 		st.PeerPublicIP = e.cfg.Agent.GatewayHost
 		st.HealthScore = healthScore(st.LinkUp, st.JitterMillis, st.PacketLossPct, st.LinkUpSinceMs)
 		for _, t := range e.Agent.Tunnels() {
-			ts := ipc.TunnelStatus{ID: t.ID, Name: t.Name}
+			ts := ipc.TunnelStatus{
+				ID: t.ID, Name: t.Name,
+				BandwidthLimitMbps:  t.Options.BandwidthLimitMbps,
+				BandwidthLimitScope: t.Options.BandwidthLimitScope,
+			}
 			ts.PublicPort, _ = e.Agent.TunnelPublicPort(t.ID)
 			ts.LocalUp, ts.LocalKnown = e.Agent.LocalUp(t.ID)
 			st.Tunnels = append(st.Tunnels, ts)
@@ -440,6 +444,8 @@ func (e *Engine) Status() ipc.Status {
 				AgentID: t.AgentID,
 				ID:      t.ID, Name: t.Name, PublicPort: t.PublicPort,
 				LocalUp: t.LocalUp, LocalKnown: t.LocalKnown,
+				BandwidthLimitMbps:  t.BandwidthLimitMbps,
+				BandwidthLimitScope: t.BandwidthLimitScope,
 			})
 		}
 		// Per-agent link records for the multi-agent dashboard. Tunnel counts

@@ -267,12 +267,14 @@ type UIStatus struct {
 
 // TunnelUI is one tunnel's live state for the frontend.
 type TunnelUI struct {
-	AgentID    string `json:"agentId,omitempty"` // owning agent (gateway role)
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	PublicPort int    `json:"publicPort"`
-	LocalUp    bool   `json:"localUp"`
-	LocalKnown bool   `json:"localKnown"`
+	AgentID             string `json:"agentId,omitempty"` // owning agent (gateway role)
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	PublicPort          int    `json:"publicPort"`
+	LocalUp             bool   `json:"localUp"`
+	LocalKnown          bool   `json:"localKnown"`
+	BandwidthLimitMbps  int    `json:"bandwidthLimitMbps"`  // configured cap (0 = unlimited)
+	BandwidthLimitScope string `json:"bandwidthLimitScope"` // combined | per-direction | per-connection
 }
 
 // ConnUI is one live connection for the frontend.
@@ -359,6 +361,8 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 			AgentID: t.AgentID,
 			ID:      t.ID, Name: t.Name, PublicPort: t.PublicPort,
 			LocalUp: t.LocalUp, LocalKnown: t.LocalKnown,
+			BandwidthLimitMbps:  t.BandwidthLimitMbps,
+			BandwidthLimitScope: t.BandwidthLimitScope,
 		})
 	}
 	st.ConnectionsTruncated = s.ConnectionsTruncated
