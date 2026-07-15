@@ -12,7 +12,7 @@ import {
 } from '../components/icons'
 import {HistoryResult, RANGES, RangeKey} from '../history'
 import {usePolled} from '../hooks'
-import {fmtBytes, fmtUptime, hasRtt, UIStatus, worstHealth} from '../state'
+import {fmtBytes, fmtUptime, hasRtt, scopeLabel, UIStatus, worstHealth} from '../state'
 
 type AgentUI = app.AgentUI
 type Seg = 'good' | 'warn' | 'bad' | 'unknown'
@@ -405,18 +405,25 @@ function AgentTunnels({tunnels}: {tunnels: app.TunnelUI[]}) {
           hint="This agent hasn't registered any ports yet." /></div>
       ) : (
         <div className="divide-y divide-[var(--border)]">
-          {tunnels.map(t => (
-            <div key={t.id} className="flex items-center gap-3 px-5 py-2.5">
-              <div className="pf-control grid h-8 w-8 shrink-0 place-items-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-2)]"><IconServer size={15} /></div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{t.name}</div>
-                <div className="truncate font-mono text-[11px] text-[var(--text-3)]">port {t.publicPort > 0 ? t.publicPort : '—'}</div>
+          {tunnels.map(t => {
+            const capped = (t.bandwidthLimitMbps ?? 0) > 0
+            const scoped = capped && (t.bandwidthLimitScope || 'combined') !== 'combined'
+            const sub = `port ${t.publicPort > 0 ? t.publicPort : '—'}`
+              + (capped ? ` · ${t.bandwidthLimitMbps} Mbps` : '')
+              + (scoped ? ` · ${scopeLabel(t.bandwidthLimitScope)}` : '')
+            return (
+              <div key={t.id} className="flex items-center gap-3 px-5 py-2.5">
+                <div className="pf-control grid h-8 w-8 shrink-0 place-items-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-2)]"><IconServer size={15} /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{t.name}</div>
+                  <div className="truncate font-mono text-[11px] text-[var(--text-3)]" title={sub}>{sub}</div>
+                </div>
+                <Badge tone={t.localKnown ? (t.localUp ? 'good' : 'bad') : 'neutral'}>
+                  {t.localKnown ? (t.localUp ? 'Server up' : 'Server down') : 'Unknown'}
+                </Badge>
               </div>
-              <Badge tone={t.localKnown ? (t.localUp ? 'good' : 'bad') : 'neutral'}>
-                {t.localKnown ? (t.localUp ? 'Server up' : 'Server down') : 'Unknown'}
-              </Badge>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </Card>

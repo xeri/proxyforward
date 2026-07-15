@@ -58,6 +58,18 @@ export function fmtRate(bytesPerSec: number): string {
   return `${fmtBytes(bytesPerSec)}/s`
 }
 
+// Bandwidth-cap scope options and their labels — shared by the agent Tunnels
+// editor (select + summary chip) and the gateway Agents drill-in. Values match
+// config.go's BandwidthScope* constants; empty normalizes to combined.
+export const BANDWIDTH_SCOPES = [
+  {value: 'combined', label: 'Combined'},
+  {value: 'per-direction', label: 'Per-direction'},
+  {value: 'per-connection', label: 'Per-connection'},
+]
+export function scopeLabel(s: string): string {
+  return BANDWIDTH_SCOPES.find(o => o.value === (s || 'combined'))?.label ?? 'Combined'
+}
+
 export function fmtDuration(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
   const h = Math.floor(s / 3600)

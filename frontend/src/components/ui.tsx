@@ -354,8 +354,8 @@ export function Checkbox({checked, onChange, label}: {
  * options need a near-solid fill to stay legible over whatever they cover.
  * It anchors to the trigger, tracks scroll/resize, and flips upward when the
  * viewport below is tight. */
-export function Select({value, onChange, options}: {
-  value: string; onChange: (v: string) => void; options: {value: string; label: string}[]
+export function Select({value, onChange, options, disabled}: {
+  value: string; onChange: (v: string) => void; options: {value: string; label: string}[]; disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const btnRef = useRef<HTMLButtonElement>(null)
@@ -404,9 +404,9 @@ export function Select({value, onChange, options}: {
     <>
       <button
         ref={btnRef}
-        type="button" onClick={toggle} aria-haspopup="listbox" aria-expanded={open}
+        type="button" onClick={toggle} disabled={disabled} aria-haspopup="listbox" aria-expanded={open}
         data-open={open}
-        className={`pf-control relative flex h-[var(--control-h)] w-full items-center justify-between gap-2 rounded-[var(--r-md)] px-3 text-left text-sm text-[var(--text)] outline-none transition-[background-color,box-shadow] duration-200 hover:bg-[var(--input-bg-hover)] ${
+        className={`pf-control relative flex h-[var(--control-h)] w-full items-center justify-between gap-2 rounded-[var(--r-md)] px-3 text-left text-sm text-[var(--text)] outline-none transition-[background-color,box-shadow] duration-200 hover:bg-[var(--input-bg-hover)] disabled:opacity-50 disabled:pointer-events-none ${
           open
             ? 'bg-[var(--input-bg-hover)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)]'
             : 'bg-[var(--input-bg)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot)]'

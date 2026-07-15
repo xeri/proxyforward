@@ -246,7 +246,7 @@ export function installDevMock() {
       lan: ['10.0.0.9'], remote: '198.51.100.7', upSinceMs: NOW0 - 42 * 60_000,
       jitter: 41, loss: 1.3, rtt: 74, factor: 0.4,
       tunnels: [
-        {id: 'bb11223344556677889900aabbccddee', name: 'Survival', port: 25566, localUp: true},
+        {id: 'bb11223344556677889900aabbccddee', name: 'Survival', port: 25566, localUp: true, bandwidthLimitMbps: 100, bandwidthLimitScope: 'combined'},
         {id: 'cc22334455667788990011aabbccddff', name: 'Lobby', port: 25567, localUp: false},
       ],
       conns: [{
@@ -277,7 +277,7 @@ export function installDevMock() {
       agentId: 'f0e1d2c3b4a5968778695a4b3c2d1e0f', hostname: 'SKYBLOCK-BOX',
       lan: ['192.168.0.20'], remote: '51.68.220.14', upSinceMs: NOW0 - 95 * 60_000,
       jitter: 34, loss: 0.4, rtt: 55, factor: 0.25,
-      tunnels: [{id: 'c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f', name: 'Skyblock', port: 25570, localUp: true}],
+      tunnels: [{id: 'c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f', name: 'Skyblock', port: 25570, localUp: true, bandwidthLimitMbps: 20, bandwidthLimitScope: 'per-connection'}],
       conns: [{
         id: 8821, tunnelName: 'Skyblock', clientAddr: '203.0.113.77:52210',
         startedAt: NOW0 - 300_000, bytesIn: 420_000, bytesOut: 2_100_000,
@@ -305,7 +305,7 @@ export function installDevMock() {
     Role: state.role,
     Agent: {AgentID: 'agentid', GatewayHost: 'play.example.com', GatewayPort: 8474, Token: 'tok', CertFingerprint: 'sha256:ab', Transport: 'mux',
       Tunnels: [{ID: tunnelID, Name: 'Minecraft', Type: 'tcp', LocalAddr: '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
-        Options: {MinecraftAware: true, ProxyProtocolV2: false, OfflineMOTD: 'Server is offline — back soon', BandwidthLimitMbps: 0}}]},
+        Options: {MinecraftAware: true, ProxyProtocolV2: false, OfflineMOTD: 'Server is offline — back soon', BandwidthLimitMbps: 40, BandwidthLimitScope: 'per-direction'}}]},
     Gateway: {BindAddr: '0.0.0.0', ControlPort: 8474, Token: 'tok', PublicHost: 'play.example.com', PortAllowlist: [],
       MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10},
     Metrics: {PrometheusEnabled: false, PrometheusAddr: '127.0.0.1:9464'},
@@ -370,9 +370,10 @@ export function installDevMock() {
     const rosterOld = gw && axisFleet === 'old'
     const gwTunnels = gw
       ? (state.linkUp
-        ? [{id: tunnelID, name: 'Minecraft', publicPort: 25565, localUp: true, localKnown: true, agentId: 'agentid'},
-          ...fleetExtras.flatMap(a => a.tunnels.map(t => ({
+        ? [{id: tunnelID, name: 'Minecraft', publicPort: 25565, localUp: true, localKnown: true, agentId: 'agentid', bandwidthLimitMbps: 40, bandwidthLimitScope: 'per-direction'},
+          ...fleetExtras.flatMap(a => a.tunnels.map((t: any) => ({
             id: t.id, name: t.name, publicPort: t.port, localUp: t.localUp, localKnown: true, agentId: a.agentId,
+            bandwidthLimitMbps: t.bandwidthLimitMbps ?? 0, bandwidthLimitScope: t.bandwidthLimitScope ?? '',
           })))]
         : [])
       : [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true}]
