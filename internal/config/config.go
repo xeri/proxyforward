@@ -35,8 +35,8 @@ const (
 
 const (
 	TunnelTCP = "tcp"
-	// TunnelUDP relays datagrams for Bedrock/Geyser (RakNet). Requires the
-	// tunnel-udp capability on both peers.
+	// TunnelUDP relays datagrams for Bedrock/Geyser (RakNet). Not yet
+	// implemented — config accepts it but the gateway rejects type:"udp".
 	TunnelUDP = "udp"
 )
 

@@ -61,8 +61,8 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   arms in both `agent.go` and `gateway.go`). Replies that can grow are chunked or
   clamped under the frame cap (`MaxConnStatsPerFrame`, `ipc.MaxStatusConns`) —
   never raise the cap itself.
-- Never advertise a capability that isn't implemented end-to-end. (Currently violated
-  by `CapTunnelUDP` — see Reality check. Don't repeat this.)
+- Never advertise a capability that isn't implemented end-to-end — the peer acts on
+  the offer, then fails. (`tunnel-udp` violated this until it was un-advertised.)
 
 ### Security (`internal/link/`, `internal/gateway/`)
 - TLS 1.3 only, both sides (`cert.go GatewayTLSConfig` / `AgentTLSConfig`). Trust =
@@ -155,7 +155,7 @@ The README and the Settings/Tunnels UI **oversell**. Ground truth at 4a8b0c9:
 |---|---|
 | Offline MOTD responder | `mc.ServeOffline` built + fuzzed, **never called**; gateway closes dead-session conns (`gateway.go handleClient`). |
 | `per-conn` transport | Config-valid only; agent never reads it, gateway rejects `KindData` (`handleControlConn`). |
-| UDP tunnels | No UDP socket code; `validateSpec` rejects `type:"udp"` — yet `CapTunnelUDP` is **advertised** (live protocol-bug risk). |
+| UDP tunnels | Not implemented: no UDP socket code, `validateSpec` rejects `type:"udp"`. No longer advertised (the `tunnel-udp` capability was removed); config still accepts `type:"udp"` but the gateway rejects it — a latent gap, not an oversell. |
 | Bandwidth cap | `BandwidthLimitMbps` stored, never enforced. |
 | Prometheus `/metrics` | `MetricsConfig` stored, no server exists. |
 | MC status polling (MOTD/players) | Only login sniffing (`mcsniff/`); the health probe is a bare TCP dial (`health.go probeOnce`). |
