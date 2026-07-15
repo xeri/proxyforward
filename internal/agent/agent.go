@@ -400,16 +400,19 @@ func (s *session) write(msgType string, payload any) error {
 	return control.WriteMsg(s.ctrl, msgType, payload)
 }
 
-// specFromTunnel builds the wire spec the gateway needs; agent-side options
-// (PP2, Minecraft awareness, bandwidth caps) stay local.
+// specFromTunnel builds the wire spec the gateway needs; the bandwidth cap
+// travels so the gateway can throttle its half too, while purely agent-local
+// options (PP2) stay local.
 func specFromTunnel(t config.Tunnel) control.TunnelSpec {
 	return control.TunnelSpec{
-		ID:             t.ID,
-		Name:           t.Name,
-		Type:           t.Type,
-		PublicPort:     t.PublicPort,
-		OfflineMOTD:    t.Options.OfflineMOTD,
-		MinecraftAware: t.Options.MinecraftAware,
+		ID:                  t.ID,
+		Name:                t.Name,
+		Type:                t.Type,
+		PublicPort:          t.PublicPort,
+		OfflineMOTD:         t.Options.OfflineMOTD,
+		MinecraftAware:      t.Options.MinecraftAware,
+		BandwidthLimitMbps:  t.Options.BandwidthLimitMbps,
+		BandwidthLimitScope: t.Options.BandwidthLimitScope,
 	}
 }
 

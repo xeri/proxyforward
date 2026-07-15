@@ -170,8 +170,9 @@ type HelloErr struct {
 	Message string `json:"message"`
 }
 
-// TunnelSpec is what the gateway needs to know about a tunnel; agent-side
-// options (PP2, Minecraft awareness, bandwidth caps) stay on the agent.
+// TunnelSpec is what the gateway needs to know about a tunnel. The bandwidth cap
+// rides along so the gateway can throttle its half of the splice too; purely
+// agent-local options (PP2) stay on the agent.
 type TunnelSpec struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -185,6 +186,12 @@ type TunnelSpec struct {
 	// attribute connections to player names. omitempty keeps frames to legacy
 	// gateways byte-identical to v1.
 	MinecraftAware bool `json:"minecraftAware,omitempty"`
+	// BandwidthLimitMbps caps this tunnel at the gateway; 0 = unlimited. omitempty
+	// keeps frames to legacy gateways byte-identical (0 = a legacy/uncapped peer).
+	BandwidthLimitMbps int `json:"bandwidthLimitMbps,omitempty"`
+	// BandwidthLimitScope selects what the cap applies to (combined | per-direction
+	// | per-connection); "" = combined, and a legacy peer sends nothing.
+	BandwidthLimitScope string `json:"bandwidthLimitScope,omitempty"`
 }
 
 type Register struct {
