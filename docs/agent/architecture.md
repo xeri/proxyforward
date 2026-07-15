@@ -53,6 +53,16 @@ Counters: per-conn `conntrack.Entry` (atomics) → 2 Hz status + 10 Hz `stats.Sa
 → SQLite via the 45 s flush; gateway samples kernel RTT per conn every 5 s and ships
 it over `conn_stats` so both ends attribute per-player ping.
 
+**Bandwidth cap** (`internal/bwcap`): a tunnel's `BandwidthLimitMbps` (+ scope: combined
+| per-direction | per-connection) throttles the splice on **both** sides via
+`golang.org/x/time/rate` — one token = one byte, rate = `Mbps × 125_000` (decimal), burst
+= `relay.BufSize`, so `WaitN(n)` with n ≤ that never trips the burst. Buckets are keyed
+per **`(agentID, tunnelID)`**: the gateway hangs the `bwcap.LimiterSet` on the tunnel's
+`publicListener` (two agents' same-named tunnels cap independently), the agent keys a
+`bwcap.Registry` by tunnel ID. `mbps ≤ 0` is the byte-identical uncapped fast path (nil
+`relay.Limiter`, no per-iteration cost, no per-splice context). A throttled `WaitN`
+unblocks on the session ctx, cancelled by gateway `evict` / agent session teardown.
+
 **Go↔JS boundary**: methods on `app.App` (promise-returning bindings) + the 2 Hz
 `tick` event; attached mode proxies the same data over the pipe, analytics on its own
 pipe conn so slow queries never stall the tick (`app/analytics.go`). The Wails
@@ -74,7 +84,8 @@ persisted to config.
 | Pre-auth prologue deadline | 10 s | `gateway.go:43` |
 | Heartbeat / idle deadline / ctrl write | 5 s / 15 s / 10 s | `agent.go:38-43`, `gateway.go:45-53` |
 | yamux window / conn-write timeout | 1 MiB / 30 s | `transport/yamux.go` |
-| Splice buffer / write-stall deadline | 128 KiB pooled / 2 min | `relay.go:23-28` |
+| Splice buffer / write-stall deadline | 128 KiB pooled / 2 min | `relay.go` (`BufSize` / `WriteStallTimeout`) |
+| Bandwidth cap unit / burst | `Mbps × 125_000` B/s / `relay.BufSize` | `bwcap.go` |
 | Backoff | 1 s → 60 s full jitter, reset after 60 s stable | `link/backoff.go` |
 | Abuse defaults | 4096 global / 32 per-IP conns; 10 auth fails/min/IP | `config.go Default` |
 | Loss window / ping-loss timeout | 32 heartbeats / 2×interval | `agent.go:50-51`, `linkquality.go` |
