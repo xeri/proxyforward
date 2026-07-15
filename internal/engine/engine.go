@@ -305,6 +305,20 @@ func (e *Engine) runSampler(ctx context.Context) {
 			}
 			players := e.conns().PlayerCount()
 			e.Stats.Sample(now, appIn, appOut, linkIn, linkOut, conns, players, rtt, loss)
+			// Gateway: also feed each connected agent's own bandwidth history so
+			// the dashboard can scope the chart per agent. Per-agent byte totals
+			// are monotonic (conntrack folds closed conns per agent), and rtt/loss
+			// come from that agent's link. The agent role has a single series
+			// (itself) and needs no per-agent split.
+			if e.Gateway != nil {
+				for agentID, at := range e.Gateway.Conns.AgentTotals() {
+					if agentID == "" {
+						continue
+					}
+					aRtt, aLoss := e.Gateway.AgentQuality(agentID)
+					e.Stats.SampleAgent(agentID, now, at.BytesIn, at.BytesOut, at.Conns, at.Players, aRtt, aLoss)
+				}
+			}
 			// A change in upSince marks a control-link session boundary: fold it
 			// into the lifetime counter and journal the up/down transition.
 			if upSince != prevUpSince {
