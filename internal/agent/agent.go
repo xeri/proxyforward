@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"proxyforward/internal/bwcap"
 	"proxyforward/internal/config"
 	"proxyforward/internal/conntrack"
 	"proxyforward/internal/control"
@@ -108,10 +109,14 @@ type Agent struct {
 
 	// Conns tracks live proxied connections for the GUI.
 	Conns *conntrack.Registry
+
+	// bwLimiters holds each tunnel's shared bandwidth-cap limiters, keyed by
+	// tunnel ID (unique within one agent). Uncapped tunnels resolve to nil.
+	bwLimiters *bwcap.Registry
 }
 
 func New(cfg *config.Config, logger *slog.Logger) *Agent {
-	return &Agent{cfg: cfg, logger: logger, Conns: conntrack.NewRegistry()}
+	return &Agent{cfg: cfg, logger: logger, Conns: conntrack.NewRegistry(), bwLimiters: bwcap.NewRegistry()}
 }
 
 // SetCapabilityOffer overrides the capabilities offered in the hello
@@ -373,6 +378,10 @@ type session struct {
 	agent *Agent
 	mux   transport.Session
 	ctrl  transport.Stream
+	// ctx is the session's serve ctx, cancelled when the session dies. Each
+	// splice is parented on it so a throttled WaitN unblocks promptly on
+	// teardown instead of waiting out its rate delay.
+	ctx context.Context
 	// caps is the capability set negotiated in the hello exchange; immutable
 	// for the session's lifetime.
 	caps control.CapSet
@@ -452,6 +461,12 @@ func (s *session) registerTunnels() error {
 // serve pumps the session until it dies: a reader goroutine dispatches
 // control frames, the main loop drives pings and accepts data streams.
 func (s *session) serve(ctx context.Context) error {
+	// Parent each splice on a ctx cancelled when this session ends, so a
+	// throttled WaitN unblocks promptly on teardown instead of waiting out its
+	// rate delay.
+	sctx, cancel := context.WithCancel(ctx)
+	s.ctx = sctx
+	defer cancel()
 	errCh := make(chan error, 3)
 
 	// Route health transitions to the gateway for this session's lifetime,
@@ -673,7 +688,12 @@ func (s *session) handleDataStream(st transport.Stream) {
 	if tun.Options.MinecraftAware {
 		src = mcsniff.Tap(st, entry)
 	}
-	if err := relay.Splice(tcp, src, entry.Counters, relay.SpliceOpts{}); err != nil {
+	// Splice(local, stream): AToB is local→client (outbound), BToA is
+	// client→local (inbound). Parent on the session ctx so teardown cancels a
+	// throttled WaitN.
+	inbound, outbound := s.agent.bwLimiters.Resolve(tun.ID, tun.Options.BandwidthLimitMbps, tun.Options.BandwidthLimitScope)
+	opts := relay.SpliceOpts{Ctx: s.ctx, LimitAToB: outbound, LimitBToA: inbound}
+	if err := relay.Splice(tcp, src, entry.Counters, opts); err != nil {
 		s.agent.logger.Debug("splice ended with error", "client", oc.ClientAddr, "err", err)
 	}
 	s.agent.logger.Debug("client disconnected", "tunnel", tun.Name, "client", oc.ClientAddr)

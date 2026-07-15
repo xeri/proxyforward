@@ -28,6 +28,7 @@ func (a *Agent) ApplyTunnels(tunnels []config.Tunnel) {
 		if _, ok := newEnabled[id]; !ok {
 			a.publicPorts.Delete(id)
 			a.localUp.Delete(id)
+			a.bwLimiters.Release(id)
 		}
 	}
 

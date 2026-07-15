@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"proxyforward/internal/bwcap"
 	"proxyforward/internal/control"
 	"proxyforward/internal/linkquality"
 	"proxyforward/internal/portowner"
@@ -42,6 +43,13 @@ type agentSession struct {
 
 	sess    atomic.Pointer[sessionBox]
 	evicted atomic.Bool
+
+	// ctx is a child of the gateway's serving ctx, cancelled when this session
+	// is evicted (and on shutdown). handleClient parents each splice on it so a
+	// throttled WaitN unblocks promptly and per-agent on eviction — closing the
+	// mux alone can't unblock a copy parked in a limiter's WaitN.
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// The gateway runs its own ping loop toward the agent (bidirectional
 	// heartbeat) so it reports the same RTT/jitter/loss stats the agent does.
@@ -119,6 +127,11 @@ type publicListener struct {
 	owner *agentSession
 	ln    net.Listener
 	done  chan struct{} // closed when the accept loop has fully exited
+	// limiters holds this tunnel's bandwidth cap, keyed structurally by
+	// (agentID, tunnelID) via the nested listeners map. Read off-actor by
+	// handleClient (hence atomic); written by bind/reconcile on the actor. nil
+	// pointer / uncapped set = the relay fast path.
+	limiters atomic.Pointer[bwcap.LimiterSet]
 }
 
 // actor owns all session/listener lifecycle state. Every mutation runs on
@@ -291,6 +304,9 @@ func (a *actor) disconnected(sess *agentSession) {
 func (a *actor) evict(sess *agentSession, reason string) {
 	delete(a.agents, sess.agentID)
 	sess.evicted.Store(true)
+	if sess.cancel != nil {
+		sess.cancel() // unblock any throttled WaitN riding this agent's splices
+	}
 	if subtree := a.listeners[sess.agentID]; subtree != nil {
 		for id, pl := range subtree {
 			pl.ln.Close()
@@ -308,7 +324,7 @@ func (a *actor) evict(sess *agentSession, reason string) {
 // nested map keys by agentID first, so a re-register can only replace the SAME
 // agent's listener — agent B can never steal agent A's. A public-port clash
 // across agents is caught by net.Listen (global FCFS).
-func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr string, handle func(*agentSession, control.TunnelSpec, net.Conn)) (int, error) {
+func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr string, handle func(*publicListener, net.Conn)) (int, error) {
 	subtree := a.listeners[sess.agentID]
 	if old, ok := subtree[spec.ID]; ok {
 		old.ln.Close()
@@ -320,6 +336,7 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr
 		return 0, portowner.DecorateBindError(spec.PublicPort, err)
 	}
 	pl := &publicListener{spec: spec, owner: sess, ln: ln, done: make(chan struct{})}
+	pl.limiters.Store(bwcap.BuildSet(spec.BandwidthLimitMbps, spec.BandwidthLimitScope))
 	if subtree == nil {
 		subtree = make(map[string]*publicListener)
 		a.listeners[sess.agentID] = subtree
@@ -347,7 +364,7 @@ func (a *actor) unbindLocked(sess *agentSession, tunnelID string) {
 
 // bindTunnel opens the public listener for a tunnel spec. Runs net.Listen on
 // the actor goroutine — binds are rare and this keeps port state serialized.
-func (a *actor) bindTunnel(sess *agentSession, spec control.TunnelSpec, bindAddr string, handle func(*agentSession, control.TunnelSpec, net.Conn)) (int, error) {
+func (a *actor) bindTunnel(sess *agentSession, spec control.TunnelSpec, bindAddr string, handle func(*publicListener, net.Conn)) (int, error) {
 	var (
 		port   int
 		outErr error
@@ -385,7 +402,7 @@ type reconcileOutcome struct {
 // the *requested* spec, so PublicPort-0 ephemeral tunnels stay stable) is
 // left untouched: live client connections survive re-syncs of identical
 // state. The bool result is false when the gateway is shutting down.
-func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, bindAddr string, handle func(*agentSession, control.TunnelSpec, net.Conn)) ([]reconcileOutcome, bool) {
+func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, bindAddr string, handle func(*publicListener, net.Conn)) ([]reconcileOutcome, bool) {
 	outcomes := make([]reconcileOutcome, 0, len(desired))
 	ran := a.do(func() {
 		if a.agents[sess.agentID] != sess || sess.evicted.Load() {
@@ -413,9 +430,18 @@ func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, bind
 			a.logger.Debug("reconcile: tunnel removed", "tunnel_id", id)
 		}
 		for _, spec := range desired {
-			if pl, ok := a.listeners[sess.agentID][spec.ID]; ok && pl.spec == spec {
-				// Identical desired state: keep the listener and its live
-				// connections.
+			if pl, ok := a.listeners[sess.agentID][spec.ID]; ok && sameListener(pl.spec, spec) {
+				// Same public listener. If only the bandwidth cap changed, apply
+				// it to the existing limiter set (rate-only in place, scope/flip
+				// swaps the pointer) and keep the listener and its live
+				// connections — no rebind, no drop. pl.spec is left untouched
+				// (handleClient reads it off-actor); the limiter set is the live
+				// cap.
+				if pl.spec != spec {
+					if set, swapped := bwcap.Reconcile(pl.limiters.Load(), spec.BandwidthLimitMbps, spec.BandwidthLimitScope); swapped {
+						pl.limiters.Store(set)
+					}
+				}
 				outcomes = append(outcomes, reconcileOutcome{ID: spec.ID, Port: pl.ln.Addr().(*net.TCPAddr).Port})
 				continue
 			}
@@ -428,7 +454,7 @@ func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, bind
 
 // acceptClients is the per-listener accept loop (not on the actor
 // goroutine); it must close done on exit — eviction blocks on it.
-func (a *actor) acceptClients(pl *publicListener, handle func(*agentSession, control.TunnelSpec, net.Conn)) {
+func (a *actor) acceptClients(pl *publicListener, handle func(*publicListener, net.Conn)) {
 	defer close(pl.done)
 	for {
 		conn, err := pl.ln.Accept()
@@ -438,9 +464,19 @@ func (a *actor) acceptClients(pl *publicListener, handle func(*agentSession, con
 		a.clientWG.Add(1)
 		go func() {
 			defer a.clientWG.Done()
-			handle(pl.owner, pl.spec, conn)
+			handle(pl, conn)
 		}()
 	}
+}
+
+// sameListener reports whether two specs describe the same public listener —
+// everything the bound port, accept loop, and login sniffer depend on. It
+// excludes the bandwidth fields, which the pl's limiter set enforces and which
+// can change (rate in place, scope by swap) without rebinding the listener.
+func sameListener(a, b control.TunnelSpec) bool {
+	return a.ID == b.ID && a.Name == b.Name && a.Type == b.Type &&
+		a.PublicPort == b.PublicPort && a.OfflineMOTD == b.OfflineMOTD &&
+		a.MinecraftAware == b.MinecraftAware
 }
 
 // sessions returns every connected agent session.

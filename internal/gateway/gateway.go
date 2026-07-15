@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"proxyforward/internal/bwcap"
 	"proxyforward/internal/config"
 	"proxyforward/internal/conntrack"
 	"proxyforward/internal/control"
@@ -532,6 +533,9 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 
 	// --- Admission: supersede same agentID, admit distinct agents alongside. ---
 	negotiated := control.IntersectCaps(hello.Capabilities, control.SupportedCapabilities)
+	// Session ctx: a child of the serving ctx, cancelled on eviction so throttled
+	// splices unblock per-agent (evict) and on shutdown (parent).
+	sctx, cancel := context.WithCancel(ctx)
 	sess := &agentSession{
 		agentID:     hello.AgentID,
 		conn:        conn,
@@ -542,6 +546,8 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		localIPs:    hello.LocalIPs,
 		caps:        control.NewCapSet(negotiated),
 		quality:     linkquality.New(lossWindow),
+		ctx:         sctx,
+		cancel:      cancel,
 	}
 	gen, err := g.act().admit(sess)
 	if err != nil {
@@ -551,6 +557,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		// read error and retries with backoff, rather than stopping. (A fatal
 		// HelloErr like agent_conflict would tell it to give up.)
 		logger.Warn("agent admission deferred", "agent", hello.AgentID, "err", err)
+		cancel() // never entered the map, so evict won't cancel it
 		conn.Close()
 		return
 	}
@@ -873,7 +880,8 @@ func (g *Gateway) syncTunnels(sess *agentSession, sync *control.SyncTunnels) con
 // agent, send the OpenConn header, splice. When there is no live session or the
 // agent reports the local backend down, it answers with the tunnel's offline
 // MOTD (when configured) instead of dropping the connection.
-func (g *Gateway) handleClient(sess *agentSession, spec control.TunnelSpec, clientConn net.Conn) {
+func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
+	sess, spec := pl.owner, pl.spec
 	defer clientConn.Close()
 	ip := remoteIP(clientConn)
 	if !g.gate.admit(ip) {
@@ -932,7 +940,12 @@ func (g *Gateway) handleClient(sess *agentSession, spec control.TunnelSpec, clie
 	if spec.MinecraftAware {
 		client = mcsniff.Tap(tcp, entry)
 	}
-	if err := relay.Splice(client, stream, entry.Counters, relay.SpliceOpts{}); err != nil {
+	// Splice(client, stream): AToB is client→server (inbound), BToA is
+	// server→client (outbound). Parent on the session ctx so eviction cancels a
+	// throttled WaitN.
+	inbound, outbound := bwcap.Resolve(pl.limiters.Load())
+	opts := relay.SpliceOpts{Ctx: sess.ctx, LimitAToB: inbound, LimitBToA: outbound}
+	if err := relay.Splice(client, stream, entry.Counters, opts); err != nil {
 		sess.logger.Debug("splice ended with error", "client", clientConn.RemoteAddr().String(), "err", err)
 	}
 }

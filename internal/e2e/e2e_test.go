@@ -98,6 +98,9 @@ type harnessOpts struct {
 	mcAware bool
 	// offlineMOTD, when set, configures the tunnel's offline responder message.
 	offlineMOTD string
+	// bandwidthMbps/bandwidthScope cap the default tunnel (0 = uncapped).
+	bandwidthMbps  int
+	bandwidthScope string
 }
 
 func newHarness(t *testing.T, localAddr string) *harness {
@@ -143,7 +146,12 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 		LocalAddr:  localAddr,
 		PublicPort: 0, // gateway picks
 		Enabled:    true,
-		Options:    config.TunnelOptions{MinecraftAware: opts.mcAware, OfflineMOTD: opts.offlineMOTD},
+		Options: config.TunnelOptions{
+			MinecraftAware:      opts.mcAware,
+			OfflineMOTD:         opts.offlineMOTD,
+			BandwidthLimitMbps:  opts.bandwidthMbps,
+			BandwidthLimitScope: opts.bandwidthScope,
+		},
 	}}
 
 	h := &harness{t: t, gw: gw, gwCancel: gwCancel, agentCfg: agentCfg, tunnelID: tunnelID, offerCaps: opts.offerCaps}
@@ -821,6 +829,186 @@ func TestEvictionIsolatesAndDrains(t *testing.T) {
 
 	// Agent B is unharmed.
 	roundTrip(t, addrB, []byte("B survives A eviction"))
+}
+
+// --- Bandwidth cap ---
+//
+// These assert the average download throughput over ~1s (far steadier than the
+// burst test's tail-RTT metric), so they run under -short/-race with generous
+// bounds. The precise unit (Mbps*125000, burst = relay.BufSize) is proven in
+// internal/bwcap; here we prove the cap bites end to end and is per-agent.
+const (
+	capMbps    = 40      // 5 MB/s: ~1.3% of uncapped loopback, so the cap is the bottleneck
+	capPayload = 5 << 20 // ~1s at 40 Mbps; burst (128 KiB) is <3% of this
+)
+
+// sourceServer accepts connections and streams payloadSize bytes to each, then
+// half-closes. Measured at the receiver, its throughput reflects the download
+// (server→client) direction's cap.
+func sourceServer(t *testing.T, payloadSize int) (addr string, closeFn func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			wg.Add(1)
+			go func(c net.Conn) {
+				defer wg.Done()
+				defer c.Close()
+				buf := make([]byte, 128*1024)
+				for sent := 0; sent < payloadSize; {
+					n := len(buf)
+					if payloadSize-sent < n {
+						n = payloadSize - sent
+					}
+					if _, err := c.Write(buf[:n]); err != nil {
+						return
+					}
+					sent += n
+				}
+				if tc, ok := c.(*net.TCPConn); ok {
+					tc.CloseWrite()
+				}
+			}(c)
+		}
+	}()
+	return ln.Addr().String(), func() {
+		ln.Close()
+		wg.Wait()
+	}
+}
+
+// downloadMbps drains expectBytes from addr and returns the observed decimal
+// Mbps. It returns an error (never t.Fatal) so it is safe to call from a
+// goroutine for concurrent-stream tests.
+func downloadMbps(addr string, expectBytes int) (float64, error) {
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	start := time.Now()
+	got, err := io.CopyN(io.Discard, conn, int64(expectBytes))
+	elapsed := time.Since(start)
+	if err != nil {
+		return 0, fmt.Errorf("read %d/%d bytes: %w", got, expectBytes, err)
+	}
+	return float64(got) * 8 / 1e6 / elapsed.Seconds(), nil
+}
+
+// cappedTunnel is tcpTunnel with a bandwidth cap, for the two-agent tests.
+func cappedTunnel(id, localAddr string, mbps int, scope string) config.Tunnel {
+	tun := tcpTunnel(id, localAddr, 0)
+	tun.Options.BandwidthLimitMbps = mbps
+	tun.Options.BandwidthLimitScope = scope
+	return tun
+}
+
+// checkCapped asserts a stream's throughput bracket: throttled (not uncapped)
+// yet not throttled below ~half the cap (which would signal a shared bucket).
+func checkCapped(t *testing.T, label string, mbps float64) {
+	t.Helper()
+	t.Logf("%s: %.1f Mbps (cap %d)", label, mbps, capMbps)
+	if mbps < capMbps*0.6 {
+		t.Errorf("%s throttled to %.1f Mbps (< %.0f): cap too aggressive / bucket shared?", label, mbps, capMbps*0.6)
+	}
+	if mbps > capMbps*1.4 {
+		t.Errorf("%s ran at %.1f Mbps (> %.0f): cap not enforced", label, mbps, capMbps*1.4)
+	}
+}
+
+// TestBandwidthCapThrottlesDownload: a capped tunnel throttles a single stream
+// to ~cap, in both combined and per-direction scope (a single direction is
+// capped identically by either).
+func TestBandwidthCapThrottlesDownload(t *testing.T) {
+	for _, scope := range []string{config.BandwidthScopeCombined, config.BandwidthScopePerDirection} {
+		t.Run(scope, func(t *testing.T) {
+			srcAddr, closeSrc := sourceServer(t, capPayload)
+			defer closeSrc()
+			h := newHarnessWith(t, srcAddr, harnessOpts{bandwidthMbps: capMbps, bandwidthScope: scope})
+			addr := h.waitPublicPort()
+			mbps, err := downloadMbps(addr, capPayload)
+			if err != nil {
+				t.Fatalf("download: %v", err)
+			}
+			checkCapped(t, scope, mbps)
+		})
+	}
+}
+
+// TestBandwidthCapPerConnectionScope: per-connection scope gives each connection
+// its own bucket, so two concurrent streams each sustain ~cap (a shared bucket
+// would halve them).
+func TestBandwidthCapPerConnectionScope(t *testing.T) {
+	srcAddr, closeSrc := sourceServer(t, capPayload)
+	defer closeSrc()
+	h := newHarnessWith(t, srcAddr, harnessOpts{bandwidthMbps: capMbps, bandwidthScope: config.BandwidthScopePerConnection})
+	addr := h.waitPublicPort()
+
+	type res struct {
+		mbps float64
+		err  error
+	}
+	ch := make(chan res, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			mbps, err := downloadMbps(addr, capPayload)
+			ch <- res{mbps, err}
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		r := <-ch
+		if r.err != nil {
+			t.Fatalf("download: %v", r.err)
+		}
+		checkCapped(t, "per-connection stream", r.mbps)
+	}
+}
+
+// TestBandwidthCapPerAgentIsolation guards the (agentID, tunnelID) keying: two
+// agents share the SAME tunnelID, each capped at cap. Correct per-agent
+// bucketing lets each sustain ~cap concurrently; a tunnelID-only key would make
+// them share one bucket (~cap/2 each).
+func TestBandwidthCapPerAgentIsolation(t *testing.T) {
+	srcA, closeA := sourceServer(t, capPayload)
+	defer closeA()
+	srcB, closeB := sourceServer(t, capPayload)
+	defer closeB()
+
+	h := newHarnessWith(t, srcA, harnessOpts{bandwidthMbps: capMbps, bandwidthScope: config.BandwidthScopeCombined})
+	addrA := h.waitPublicPort()
+
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{cappedTunnel(h.tunnelID, srcB, capMbps, config.BandwidthScopeCombined)})
+	addrB := waitPublicPortOf(t, agB, h.tunnelID)
+
+	type res struct {
+		mbps float64
+		err  error
+	}
+	ch := make(chan res, 2)
+	for _, addr := range []string{addrA, addrB} {
+		go func() {
+			mbps, err := downloadMbps(addr, capPayload)
+			ch <- res{mbps, err}
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		r := <-ch
+		if r.err != nil {
+			t.Fatalf("download: %v", r.err)
+		}
+		checkCapped(t, "per-agent stream", r.mbps)
+	}
 }
 
 // TestBadTokenRejected: wrong token → fatal ErrBadToken.
