@@ -153,6 +153,7 @@ type Status struct {
 
 // TunnelStatus is one tunnel's live state.
 type TunnelStatus struct {
+	AgentID    string `json:"agentId,omitempty"` // owning agent (gateway role)
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	PublicPort int    `json:"publicPort,omitempty"` // confirmed bound port

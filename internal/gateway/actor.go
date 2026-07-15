@@ -373,6 +373,7 @@ func (a *actor) currentSession() *agentSession {
 
 // TunnelSnapshot is one registered tunnel's live state, for status surfaces.
 type TunnelSnapshot struct {
+	AgentID    string // the agent that registered this tunnel
 	ID         string
 	Name       string
 	PublicPort int  // actual bound port
@@ -387,6 +388,7 @@ func (a *actor) tunnels() []TunnelSnapshot {
 	a.do(func() {
 		for _, pl := range a.listeners {
 			ts := TunnelSnapshot{
+				AgentID:    pl.owner.agentID,
 				ID:         pl.spec.ID,
 				Name:       pl.spec.Name,
 				PublicPort: pl.ln.Addr().(*net.TCPAddr).Port,
