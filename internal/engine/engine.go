@@ -210,6 +210,15 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.resolver.Run(runCtx)
 	}()
 
+	// The Prometheus endpoint (if enabled) lives exactly as long as Run and is
+	// best-effort: a bind failure never stops proxying. It must release its
+	// listener before Run returns so a restart can re-bind the same port.
+	metricsDone := make(chan struct{})
+	go func() {
+		defer close(metricsDone)
+		e.serveMetrics(runCtx)
+	}()
+
 	// First non-nil error (or first exit) wins; stop the other side, drain.
 	err := <-errCh
 	cancel()
@@ -218,6 +227,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 	<-samplerDone
 	<-resolverDone
+	<-metricsDone
 	// The sampler's final flush has landed and the resolver has stopped
 	// enqueuing; record the graceful stop and close. Close drains the writer,
 	// so this last event still commits.
