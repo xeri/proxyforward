@@ -12,6 +12,7 @@ import (
 	"proxyforward/internal/engine"
 	"proxyforward/internal/geo"
 	"proxyforward/internal/ipc"
+	"proxyforward/internal/stats"
 )
 
 // analyticsCall runs one analytics op in whichever mode this GUI is in and
@@ -273,6 +274,27 @@ func (a *App) GeoSnapshot(rangeMs int64) []analytics.CountryAgg {
 		return []analytics.CountryAgg{}
 	}
 	return rows
+}
+
+// AgentBandwidthHistory returns one agent's bandwidth history over the trailing
+// windowMs (0 = everything), aggregated to at most maxBuckets buckets — the
+// gateway drill-in chart scoped to a selected agent. Empty on any error or an
+// unknown/evicted agent.
+func (a *App) AgentBandwidthHistory(agentID string, windowMs int64, maxBuckets int) stats.HistoryResult {
+	empty := stats.HistoryResult{Buckets: []stats.Bucket{}}
+	req := struct {
+		AgentID    string `json:"agentId"`
+		WindowMs   int64  `json:"windowMs"`
+		MaxBuckets int    `json:"maxBuckets"`
+	}{AgentID: agentID, WindowMs: windowMs, MaxBuckets: maxBuckets}
+	var res stats.HistoryResult
+	if err := a.analyticsCall(engine.OpAgentHistory, req, &res); err != nil {
+		return empty
+	}
+	if res.Buckets == nil {
+		res.Buckets = []stats.Bucket{}
+	}
+	return res
 }
 
 // BrowseMMDB opens a file picker for a MaxMind .mmdb database and returns the

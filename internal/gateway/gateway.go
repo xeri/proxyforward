@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -270,6 +271,53 @@ func (g *Gateway) PacketLossPct() float64 {
 		return sess.quality.LossPct()
 	}
 	return -1
+}
+
+// AgentLink is one connected agent's link state for the multi-agent status
+// surface. The engine maps it to ipc.AgentStatus (adding health + counts).
+type AgentLink struct {
+	AgentID       string
+	Hostname      string
+	LANIPs        []string
+	RemoteIP      string
+	LinkUpSinceMs int64
+	RTTMillis     int64
+	JitterMillis  float64
+	PacketLossPct float64
+	LinkBytesIn   int64
+	LinkBytesOut  int64
+}
+
+// Agents returns every connected agent's link state, sorted by agentID so the
+// status surface (and any legacy first-agent fallback) is deterministic.
+func (g *Gateway) Agents() []AgentLink {
+	a := g.act()
+	if a == nil {
+		return nil
+	}
+	sessions := a.sessions()
+	out := make([]AgentLink, 0, len(sessions))
+	for _, s := range sessions {
+		in, outB := s.link.Bytes()
+		jitter, loss := -1.0, -1.0
+		if s.quality != nil {
+			jitter, loss = s.quality.JitterMillis(), s.quality.LossPct()
+		}
+		out = append(out, AgentLink{
+			AgentID:       s.agentID,
+			Hostname:      s.hostname,
+			LANIPs:        s.localIPs,
+			RemoteIP:      s.remoteIP,
+			LinkUpSinceMs: s.connectedAt.UnixMilli(),
+			RTTMillis:     s.rttMillis.Load(),
+			JitterMillis:  jitter,
+			PacketLossPct: loss,
+			LinkBytesIn:   in,
+			LinkBytesOut:  outB,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].AgentID < out[j].AgentID })
+	return out
 }
 
 // AgentQuality reports one agent's link RTT (ms, -1 unknown) and packet loss
