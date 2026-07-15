@@ -26,7 +26,11 @@ type PlayerInfo struct {
 // Entry is one live proxied connection. Counter direction is explicit:
 // In = client → server bytes, Out = server → client bytes.
 type Entry struct {
-	ID         uint64
+	ID uint64
+	// AgentID owns this connection's tunnel. On a multi-agent gateway two
+	// agents may serve the same TunnelID, so attribution needs both. Fixed at
+	// Open, before the entry is published. Empty on legacy/single-agent paths.
+	AgentID    string
 	TunnelID   string
 	TunnelName string
 	ClientAddr string
@@ -107,6 +111,7 @@ func (e *Entry) bytesOut() int64 {
 // Snapshot is the GUI-facing view of one connection.
 type Snapshot struct {
 	ID         uint64 `json:"id"`
+	AgentID    string `json:"agentId,omitempty"`
 	TunnelID   string `json:"tunnelId"`
 	TunnelName string `json:"tunnelName"`
 	ClientAddr string `json:"clientAddr"`
@@ -153,13 +158,15 @@ func (r *Registry) SetHooks(onOpen func(e *Entry), onClose func(e *Entry, bytesI
 }
 
 // Open registers a connection and returns its entry plus a close func to
-// call when the splice ends. connKey is the control-link correlation id (""
-// when the transport assigns none) and is fixed here, before the entry is
-// published, so it is never written after another goroutine can see it.
+// call when the splice ends. agentID is the owning agent ("" on the agent
+// side / single-agent legacy paths). connKey is the control-link correlation
+// id ("" when the transport assigns none) and is fixed here, before the entry
+// is published, so it is never written after another goroutine can see it.
 // inIsAToB declares counter orientation: true when the splice's first
 // argument is the client-facing leg.
-func (r *Registry) Open(tunnelID, tunnelName, clientAddr, connKey string, inIsAToB bool) (*Entry, func()) {
+func (r *Registry) Open(agentID, tunnelID, tunnelName, clientAddr, connKey string, inIsAToB bool) (*Entry, func()) {
 	e := &Entry{
+		AgentID:    agentID,
 		TunnelID:   tunnelID,
 		TunnelName: tunnelName,
 		ClientAddr: clientAddr,
@@ -206,6 +213,7 @@ func (r *Registry) Snapshot() []Snapshot {
 	for _, e := range r.conns {
 		s := Snapshot{
 			ID:         e.ID,
+			AgentID:    e.AgentID,
 			TunnelID:   e.TunnelID,
 			TunnelName: e.TunnelName,
 			ClientAddr: e.ClientAddr,

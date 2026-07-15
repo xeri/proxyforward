@@ -117,7 +117,7 @@ func New(cfg *config.Config, configDir, configPath string, logger *slog.Logger) 
 	// and does not probe, so it records only link events.)
 	if e.Agent != nil {
 		e.Agent.SetHealthObserver(func(tunnelID string, up bool) {
-			e.rec.RecordEvent(analytics.EventTunnelLocal, tunnelID, up)
+			e.rec.RecordEvent(analytics.EventTunnelLocal, e.cfg.Agent.AgentID, tunnelID, up)
 		})
 	}
 	return e, nil
@@ -172,7 +172,7 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	// Bracket this run in the uptime journal so the uptime queries can treat
 	// time between a graceful shutdown and the next start as unknown, not down.
-	e.rec.RecordEvent(analytics.EventEngine, "", true)
+	e.rec.RecordEvent(analytics.EventEngine, "", "", true)
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -231,7 +231,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	// The sampler's final flush has landed and the resolver has stopped
 	// enqueuing; record the graceful stop and close. Close drains the writer,
 	// so this last event still commits.
-	e.rec.RecordEvent(analytics.EventEngine, "", false)
+	e.rec.RecordEvent(analytics.EventEngine, "", "", false)
 	if e.DB != nil {
 		if cerr := e.DB.Close(); cerr != nil {
 			e.logger.Warn("analytics: close failed", "err", cerr)
@@ -244,6 +244,16 @@ func (e *Engine) Run(ctx context.Context) error {
 	return err
 }
 
+// linkAgentID identifies the agent on the far side of the control link, for
+// attributing link-uptime events. On the agent it is our own identity; on the
+// gateway it is the connected agent's. Empty when no agent is connected.
+func (e *Engine) linkAgentID() string {
+	if e.Agent != nil {
+		return e.cfg.Agent.AgentID
+	}
+	return e.Gateway.AgentID()
+}
+
 // runSampler feeds the stats store: byte totals at 10 Hz, periodic flushes,
 // link-session-start detection, and one final flush on shutdown.
 func (e *Engine) runSampler(ctx context.Context) {
@@ -254,6 +264,10 @@ func (e *Engine) runSampler(ctx context.Context) {
 	sessionSample := time.NewTicker(sessionSampleInterval)
 	defer sessionSample.Stop()
 	var prevUpSince int64
+	// linkAgentID is the agent that owned the current link session, captured at
+	// the up transition so the matching down event attributes to the same agent
+	// even after it has disconnected.
+	var linkAgentID string
 	for {
 		select {
 		case <-ctx.Done():
@@ -295,11 +309,12 @@ func (e *Engine) runSampler(ctx context.Context) {
 			// into the lifetime counter and journal the up/down transition.
 			if upSince != prevUpSince {
 				if prevUpSince != 0 {
-					e.rec.RecordEvent(analytics.EventLink, "", false)
+					e.rec.RecordEvent(analytics.EventLink, linkAgentID, "", false)
 				}
 				if upSince != 0 {
+					linkAgentID = e.linkAgentID()
 					e.Stats.LinkSessionStarted()
-					e.rec.RecordEvent(analytics.EventLink, "", true)
+					e.rec.RecordEvent(analytics.EventLink, linkAgentID, "", true)
 				}
 			}
 			prevUpSince = upSince

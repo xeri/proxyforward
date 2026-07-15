@@ -75,21 +75,23 @@ func (d *DB) Summary(sinceMs, nowMs int64) (Summary, error) {
 		return s, err
 	}
 
+	// Bandwidth/gauge tiles are gateway-wide: read the global rollup series
+	// (agent_id '') so per-agent rows never double-count into the totals.
 	if err := d.read.QueryRow(`SELECT
 			COALESCE(SUM(bytes_in), 0), COALESCE(SUM(bytes_out), 0),
 			COALESCE(AVG(CASE WHEN rtt_avg >= 0 THEN rtt_avg END), -1),
 			COALESCE(AVG(CASE WHEN loss_avg >= 0 THEN loss_avg END), -1)
-		FROM `+table+` WHERE `+timeCol+` >= ?`, sinceBucket).
+		FROM `+table+` WHERE `+timeCol+` >= ? AND agent_id = ''`, sinceBucket).
 		Scan(&s.BytesIn, &s.BytesOut, &s.AvgRttMs, &s.AvgLossPct); err != nil {
 		return s, err
 	}
 
-	// Range peaks with the bucket they occurred in.
+	// Range peaks with the bucket they occurred in (global series only).
 	peakAt := func(col, guard string) (float64, int64, error) {
 		var v float64
 		var at int64
 		err := d.read.QueryRow(`SELECT `+col+`, `+timeCol+` FROM `+table+`
-			WHERE `+timeCol+` >= ? `+guard+` ORDER BY `+col+` DESC, `+timeCol+` ASC LIMIT 1`, sinceBucket).Scan(&v, &at)
+			WHERE `+timeCol+` >= ? AND agent_id = '' `+guard+` ORDER BY `+col+` DESC, `+timeCol+` ASC LIMIT 1`, sinceBucket).Scan(&v, &at)
 		if err == sql.ErrNoRows {
 			return 0, 0, nil
 		}
@@ -187,7 +189,7 @@ func (d *DB) PeakMatrix(weeks int, nowMs int64, loc *time.Location) (PeakMatrix,
 	}
 	since := nowMs - int64(weeks)*7*dayMillis
 	rows, err := d.read.Query(`SELECT hour_ms, avg_players, peak_players
-		FROM rollup_hourly WHERE hour_ms >= ?`, since)
+		FROM rollup_hourly WHERE hour_ms >= ? AND agent_id = ''`, since)
 	if err != nil {
 		return m, err
 	}

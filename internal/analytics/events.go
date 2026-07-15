@@ -19,24 +19,26 @@ const (
 	EventEngine      = "engine"
 )
 
-// RecordEvent journals one up/down transition at the current time. Nil-safe
-// (persistence unavailable) so callers can fire unconditionally.
-func (r *Recorder) RecordEvent(kind, tunnelID string, up bool) {
+// RecordEvent journals one up/down transition at the current time. agentID
+// owns the link/tunnel_local transition ("" for engine-lifecycle, or a
+// single-agent gateway). Nil-safe (persistence unavailable) so callers can fire
+// unconditionally.
+func (r *Recorder) RecordEvent(kind, agentID, tunnelID string, up bool) {
 	if r == nil {
 		return
 	}
-	r.db.recordEventAt(time.Now().UnixMilli(), kind, tunnelID, up)
+	r.db.recordEventAt(time.Now().UnixMilli(), kind, agentID, tunnelID, up)
 }
 
 // recordEventAt is the injectable-clock core; tests call it directly.
-func (d *DB) recordEventAt(t int64, kind, tunnelID string, up bool) {
+func (d *DB) recordEventAt(t int64, kind, agentID, tunnelID string, up bool) {
 	upVal := 0
 	if up {
 		upVal = 1
 	}
 	d.Enqueue("event", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`INSERT INTO events (t, kind, tunnel_id, up) VALUES (?, ?, ?, ?)`,
-			t, kind, tunnelID, upVal)
+		_, err := tx.Exec(`INSERT INTO events (t, agent_id, kind, tunnel_id, up) VALUES (?, ?, ?, ?, ?)`,
+			t, agentID, kind, tunnelID, upVal)
 		return err
 	})
 }

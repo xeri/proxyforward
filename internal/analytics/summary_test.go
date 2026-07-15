@@ -25,8 +25,8 @@ func TestSummary(t *testing.T) {
 	mk(3, hB+1000, steveUUID)
 
 	// Link up the whole window, engine covering it.
-	d.recordEventAt(hA-minuteMs, EventEngine, "", true)
-	d.recordEventAt(hA-minuteMs, EventLink, "", true)
+	d.recordEventAt(hA-minuteMs, EventEngine, "", "", true)
+	d.recordEventAt(hA-minuteMs, EventLink, "", "", true)
 	d.Barrier()
 
 	d.runRollup(time.UnixMilli(now))
@@ -80,13 +80,13 @@ func TestTunnelUptime(t *testing.T) {
 	start := now - 4*hourMillis
 
 	// Engine up for the whole window.
-	d.recordEventAt(start, EventEngine, "", true)
+	d.recordEventAt(start, EventEngine, "", "", true)
 	// Link: up at start, one 1-hour outage in the middle → ~75%.
-	d.recordEventAt(start, EventLink, "", true)
-	d.recordEventAt(start+hourMillis, EventLink, "", false)
-	d.recordEventAt(start+2*hourMillis, EventLink, "", true)
+	d.recordEventAt(start, EventLink, "", "", true)
+	d.recordEventAt(start+hourMillis, EventLink, "", "", false)
+	d.recordEventAt(start+2*hourMillis, EventLink, "", "", true)
 	// Tunnel t1: up the whole window → 100%.
-	d.recordEventAt(start, EventTunnelLocal, "t1", true)
+	d.recordEventAt(start, EventTunnelLocal, "", "t1", true)
 	d.Barrier()
 
 	rep, err := d.TunnelUptime(start, now)
@@ -117,7 +117,7 @@ func TestTunnelUptimeClamped(t *testing.T) {
 	// 30 tunnels, each with a distinct last-activity hour; t29 is the most
 	// recent, t0 the stalest.
 	for i := range 30 {
-		d.recordEventAt(start+int64(i)*hourMillis, EventTunnelLocal, fmt.Sprintf("t%d", i), true)
+		d.recordEventAt(start+int64(i)*hourMillis, EventTunnelLocal, "", fmt.Sprintf("t%d", i), true)
 	}
 	d.Barrier()
 

@@ -204,6 +204,15 @@ func (g *Gateway) AgentConnected() bool {
 	return a != nil && a.currentSession() != nil
 }
 
+// AgentID reports the connected agent's identity, or "" when no agent is
+// connected. Used to attribute link/uptime events to their agent.
+func (g *Gateway) AgentID() string {
+	if sess := g.session(); sess != nil {
+		return sess.agentID
+	}
+	return ""
+}
+
 // AgentLinkUpSinceMs reports when the current agent session was admitted
 // (unix millis), or 0 when no agent is connected.
 func (g *Gateway) AgentLinkUpSinceMs() int64 {
@@ -819,7 +828,7 @@ func (g *Gateway) handleClient(sess *agentSession, spec control.TunnelSpec, clie
 	// published (ConnKey is immutable after Open).
 	connID := strconv.FormatUint(g.connSeq.Add(1), 10)
 	// Splice(client, stream): AToB is client→server, so inIsAToB=true.
-	entry, closeEntry := g.Conns.Open(spec.ID, spec.Name, clientConn.RemoteAddr().String(), connID, true)
+	entry, closeEntry := g.Conns.Open(sess.agentID, spec.ID, spec.Name, clientConn.RemoteAddr().String(), connID, true)
 	defer closeEntry()
 
 	stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))

@@ -73,13 +73,13 @@ func (r *Recorder) SessionOpened(e *conntrack.Entry) {
 	id := r.nextID.Add(1)
 	r.live.Store(e.ID, &liveSession{id: id})
 	ip, port := splitAddr(e.ClientAddr)
-	connKey, tunnelID, tunnelName := e.ConnKey, e.TunnelID, e.TunnelName
+	agentID, connKey, tunnelID, tunnelName := e.AgentID, e.ConnKey, e.TunnelID, e.TunnelName
 	started := e.StartedAt.UnixMilli()
 	r.db.Enqueue("session-open", func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`INSERT INTO sessions
-			(id, conn_key, tunnel_id, tunnel_name, client_ip, client_port, started_ms)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			id, connKey, tunnelID, tunnelName, ip, port, started); err != nil {
+			(id, agent_id, conn_key, tunnel_id, tunnel_name, client_ip, client_port, started_ms)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, agentID, connKey, tunnelID, tunnelName, ip, port, started); err != nil {
 			return err
 		}
 		return r.stampGeo(tx, id, ip, started)
