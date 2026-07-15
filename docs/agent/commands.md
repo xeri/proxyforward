@@ -27,7 +27,7 @@ build/bin/proxyforward.exe --version  # verify the stamp
 
 `http://localhost:5173/?mock=agent` — scenarios `agent|gateway|wizard`, plus
 composable axes `&link=down &mode=attached &fatal=1 &fresh=1 &analytics=off
-&paired=0 &geo=off|empty|error|pending &fx=low|high`. Axis semantics are documented in
+&paired=0 &geo=off|empty|error|pending &fx=low|high &fleet=multi|old`. Axis semantics are documented in
 `docs/agent/architecture.md` ("devmock axes") and the `devmock.ts` header. This is
 the UI state-matrix test harness — walk the relevant axes before calling UI work
 done, then spot-check in `wails dev` (WebView2 ≠ your browser).

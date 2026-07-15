@@ -14,6 +14,11 @@
 //   &fx=high         — high-fx glass: refraction filter on the palette
 //   &fx=low          — low-fx glass: solid cards, no caustics/chart glow
 //   &analytics=off   — daemon without the analytics store (unsupported state)
+//   &fleet=multi|old — gateway only. multi: a five-agent fleet (good/fair/poor
+//                      health spread) instead of the default single agent, to
+//                      exercise the Agents roster, its sort/filter, and drill-in.
+//                      old: a pre-roster daemon (no agents array) → the Agents
+//                      screen's honest-unavailable state
 //   &paired=0        — this machine has never been paired to a gateway, so the
 //                      sidebar's role switcher can't become the agent and must
 //                      route to setup instead (pair with ?mock=gateway)
@@ -38,6 +43,7 @@ export function installDevMock() {
   const axisAnalyticsOff = params.get('analytics') === 'off'
   const axisUnpaired = params.get('paired') === '0'
   const axisGeo = params.get('geo') || '' // off | empty | error | pending
+  const axisFleet = params.get('fleet') || '' // '' (single agent) | multi
   const fx = params.get('fx')
   if (fx) document.documentElement.dataset.fx = fx // &fx=high | &fx=low
 
@@ -169,6 +175,39 @@ export function installDevMock() {
     return {windowMs, bucketMs, buckets}
   }
 
+  // Per-agent bandwidth (Agents drill-in): the gateway-wide history scaled to
+  // each agent's share, with the RTT overlay shifted to that agent's baseline,
+  // so every agent's chart looks distinct and agrees with its roster card.
+  const AGENT_SCALE: Record<string, {factor: number; rtt: number}> = {
+    agentid: {factor: 1, rtt: 24},
+    '7788990011223344aabbccddeeff0011': {factor: 0.4, rtt: 74},
+    ccddeeff001122334455667788990011: {factor: 0.06, rtt: 180},
+    aa00bb11cc22dd33ee44ff5566778899: {factor: 0.6, rtt: 30},
+    f0e1d2c3b4a5968778695a4b3c2d1e0f: {factor: 0.25, rtt: 55},
+  }
+  const agentBandwidth = (agentId: string, windowMs: number, maxBuckets: number) => {
+    const {factor, rtt} = AGENT_SCALE[agentId] ?? {factor: 0.25, rtt: 40}
+    const h = bandwidthHistory(windowMs, maxBuckets)
+    const k = rtt / 24
+    // Scale the byte/candle series by the agent's share and the connections and
+    // players gauges too, so each agent's overlay is genuinely its own (the -1
+    // "unknown" sentinel is preserved). RTT shifts to the agent's baseline; loss
+    // is a rate, not volume, so it rides the shared curve.
+    const g = (v: number): number => (v >= 0 ? Math.round(v * factor) : -1)
+    return {
+      ...h,
+      buckets: h.buckets.map((b: any) => ({
+        ...b,
+        out: Math.round(b.out * factor), in: Math.round(b.in * factor),
+        oo: b.oo * factor, oh: b.oh * factor, ol: b.ol * factor, oc: b.oc * factor,
+        io: b.io * factor, ih: b.ih * factor, il: b.il * factor, ic: b.ic * factor,
+        co: g(b.co), ch: g(b.ch), cl: g(b.cl), cc: g(b.cc),
+        po: g(b.po), ph: g(b.ph), pl: g(b.pl), pc: g(b.pc),
+        ...(b.ro >= 0 ? {ro: b.ro * k, rh: b.rh * k, rl: b.rl * k, rc: b.rc * k} : {}),
+      })),
+    }
+  }
+
   // Lifetime peer records; the first two are the live connections' IPs.
   const now0 = Date.now()
   const peerSeeds = [
@@ -192,6 +231,63 @@ export function installDevMock() {
 
   // ---- mutable world state ----
   const tunnelID = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
+
+  // Extra agents for the multi-agent gateway fleet (?mock=gateway&fleet=multi).
+  // Each carries its own tunnels, live sessions, health, and remote identity so
+  // the roster, its sort axes, the hostname filter, and the drill-in all have
+  // real spread to render. With agent0 the fleet is five machines whose health
+  // spans good / fair (jitter>30) / poor (loss>5). `upSinceMs` is stamped ONCE
+  // here (a fixed epoch), never recomputed per tick, so the uptime readouts
+  // actually advance like agent0's.
+  const NOW0 = Date.now()
+  const extraAgents = [
+    {
+      agentId: '7788990011223344aabbccddeeff0011', hostname: 'SURVIVAL-RIG',
+      lan: ['10.0.0.9'], remote: '198.51.100.7', upSinceMs: NOW0 - 42 * 60_000,
+      jitter: 41, loss: 1.3, rtt: 74, factor: 0.4,
+      tunnels: [
+        {id: 'bb11223344556677889900aabbccddee', name: 'Survival', port: 25566, localUp: true},
+        {id: 'cc22334455667788990011aabbccddff', name: 'Lobby', port: 25567, localUp: false},
+      ],
+      conns: [{
+        id: 8801, tunnelName: 'Survival', clientAddr: '92.99.11.4:53001',
+        startedAt: NOW0 - 600_000, bytesIn: 900_000, bytesOut: 5_400_000,
+        playerName: 'DiggerDan', playerUuid: '11112222-3333-4444-5555-666677778888', rttMs: 76,
+      }] as any[],
+    },
+    {
+      agentId: 'ccddeeff001122334455667788990011', hostname: 'MINIGAMES-PI',
+      lan: ['192.168.1.30'], remote: '92.184.100.23', upSinceMs: NOW0 - 12 * 60_000,
+      jitter: 22, loss: 7.5, rtt: 180, factor: 0.06,
+      tunnels: [{id: 'dd33445566778899001122aabbccdd00', name: 'Minigames', port: 25568, localUp: true}],
+      conns: [] as any[],
+    },
+    {
+      agentId: 'aa00bb11cc22dd33ee44ff5566778899', hostname: 'CREATIVE-HUB',
+      lan: ['10.0.0.12'], remote: '84.113.9.201', upSinceMs: NOW0 - 6 * 3_600_000,
+      jitter: 5, loss: 0, rtt: 30, factor: 0.6,
+      tunnels: [{id: 'ab00cd11ef22ab33cd44ef5566778890', name: 'Creative', port: 25569, localUp: true}],
+      conns: [{
+        id: 8811, tunnelName: 'Creative', clientAddr: '176.10.44.8:51900',
+        startedAt: NOW0 - 1_800_000, bytesIn: 1_400_000, bytesOut: 9_800_000,
+        playerName: 'BuilderBeth', playerUuid: '22223333-4444-5555-6666-777788889999', rttMs: 31,
+      }] as any[],
+    },
+    {
+      agentId: 'f0e1d2c3b4a5968778695a4b3c2d1e0f', hostname: 'SKYBLOCK-BOX',
+      lan: ['192.168.0.20'], remote: '51.68.220.14', upSinceMs: NOW0 - 95 * 60_000,
+      jitter: 34, loss: 0.4, rtt: 55, factor: 0.25,
+      tunnels: [{id: 'c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f', name: 'Skyblock', port: 25570, localUp: true}],
+      conns: [{
+        id: 8821, tunnelName: 'Skyblock', clientAddr: '203.0.113.77:52210',
+        startedAt: NOW0 - 300_000, bytesIn: 420_000, bytesOut: 2_100_000,
+        playerName: 'IslandIvy', playerUuid: '33334444-5555-6666-7777-88889999aaaa', rttMs: 57,
+      }] as any[],
+    },
+  ]
+  const agentHealthOf = (jitter: number, loss: number): string =>
+    loss > 5 || jitter > 100 ? 'bad' : loss > 1 || jitter > 30 ? 'warn' : 'good'
+
   const up = !isWizard && !axisLinkDown && !axisFatal
   const state = {
     role: isGateway ? 'gateway' : 'agent',
@@ -244,6 +340,49 @@ export function installDevMock() {
     // flips state.role, and every identity below has to follow it or the app
     // would keep wearing the old role's peer after a switch.
     const gw = state.role === 'gateway'
+
+    // Gateway fleet: agent0 is the always-present peer (its identity mirrors the
+    // coarse peer* fields so the other gateway screens stay populated); the
+    // extras appear only under &fleet=multi. Tunnels and connections flatten
+    // across the fleet, each stamped with its agentId so the Agents drill-in can
+    // scope them. A downed gateway link means zero agents. The agent role sends
+    // no roster at all (undefined), like the real backend.
+    const agent0 = {
+      agentId: 'agentid', hostname: 'DESKTOP-DEV', lanIps: ['10.0.0.5'], remoteIp: '84.23.101.7',
+      linkUpSinceMs: LINK_UP_SINCE, rttMillis: state.rtt, jitterMillis: jitter, packetLossPct: loss,
+      healthScore: healthOf(jitter, loss),
+      linkBytesIn: Math.round(state.bytesIn * 1.06) + 2_400_000,
+      linkBytesOut: Math.round(state.bytesOut * 1.06) + 3_100_000,
+      tunnels: 1, players: state.conns.length,
+    }
+    const fleetExtras = gw && state.linkUp && axisFleet === 'multi' ? extraAgents : []
+    const gwAgents = gw && state.linkUp ? [agent0, ...fleetExtras.map(a => ({
+      agentId: a.agentId, hostname: a.hostname, lanIps: a.lan, remoteIp: a.remote,
+      linkUpSinceMs: a.upSinceMs, rttMillis: a.rtt, jitterMillis: a.jitter, packetLossPct: a.loss,
+      healthScore: agentHealthOf(a.jitter, a.loss),
+      linkBytesIn: Math.round(a.factor * (state.bytesIn * 1.06 + 2_400_000) * 0.7),
+      linkBytesOut: Math.round(a.factor * (state.bytesOut * 1.06 + 3_100_000)),
+      tunnels: a.tunnels.length, players: a.conns.length,
+    }))] : []
+    // &fleet=old simulates a pre-roster background service: the gateway reports
+    // no agents array at all, so the Agents screen shows its honest-unavailable
+    // state (told apart from a live gateway with zero agents connected).
+    const rosterOld = gw && axisFleet === 'old'
+    const gwTunnels = gw
+      ? (state.linkUp
+        ? [{id: tunnelID, name: 'Minecraft', publicPort: 25565, localUp: true, localKnown: true, agentId: 'agentid'},
+          ...fleetExtras.flatMap(a => a.tunnels.map(t => ({
+            id: t.id, name: t.name, publicPort: t.port, localUp: t.localUp, localKnown: true, agentId: a.agentId,
+          })))]
+        : [])
+      : [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true}]
+    const gwConns = gw
+      ? (state.linkUp
+        ? [...state.conns.map((c: any) => ({...c, agentId: 'agentid'})),
+          ...fleetExtras.flatMap(a => a.conns.map(c => ({...c, agentId: a.agentId})))]
+        : [])
+      : (state.linkUp ? state.conns : [])
+
     return {
     mode: isWizard ? 'wizard' : axisAttached ? 'attached' : 'engine',
     role: isWizard ? '' : state.role,
@@ -259,8 +398,9 @@ export function installDevMock() {
     peerPublicIp: isWizard ? '' : gw ? '84.23.101.7' : 'play.example.com',
     localLanIps: isWizard ? [] : gw ? ['10.0.0.5'] : ['192.168.1.24'],
     peerLanIps: isWizard ? [] : gw ? ['192.168.1.24'] : ['10.0.0.5'],
-    tunnels: [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true}],
-    connections: state.linkUp ? state.conns : [],
+    agents: gw ? (rosterOld ? undefined : gwAgents) : undefined,
+    tunnels: gwTunnels,
+    connections: gwConns,
     totalBytesIn: state.bytesIn, totalBytesOut: state.bytesOut,
     linkUpSinceMs: isWizard || !state.linkUp ? 0 : LINK_UP_SINCE,
     processStartMs: isWizard ? 0 : PROCESS_START,
@@ -627,6 +767,7 @@ export function installDevMock() {
   const App: Record<string, AnyFn> = {
     Status: () => ok(status()),
     BandwidthHistory: (windowMs: number, maxBuckets: number) => ok(bandwidthHistory(windowMs, maxBuckets)),
+    AgentBandwidthHistory: (agentId: string, windowMs: number, maxBuckets: number) => ok(agentBandwidth(agentId, windowMs, maxBuckets)),
     PeerStats: () => ok(isWizard || axisFresh ? [] : peerStats()),
     // Analytics reads work in attached mode too (they ride the IPC envelope).
     Players: (q: any) => ok(playersPage(q)),
