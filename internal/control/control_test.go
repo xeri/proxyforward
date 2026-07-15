@@ -152,11 +152,36 @@ func TestSupportedCapabilities(t *testing.T) {
 	if s.Has("tunnel-udp") {
 		t.Fatal("tunnel-udp must not be advertised until it is implemented")
 	}
+	// per-conn-data is likewise not advertised in this commit: this is the wire
+	// vocabulary only; the gateway data accept path lands in a later commit.
+	// Offering it before it works end-to-end would be the same protocol lie.
+	if s.Has(CapPerConn) {
+		t.Fatal("per-conn-data must not be advertised until the data plane is implemented")
+	}
 	// A sync-only peer (older build) must negotiate away conn-stats — an old
 	// agent that never offers conn-stats gets no RTT frames.
 	got := IntersectCaps(SupportedCapabilities, []string{CapTunnelSync})
 	if !reflect.DeepEqual(got, []string{CapTunnelSync}) {
 		t.Fatalf("against a sync-only peer: got %v want [tunnel-sync]", got)
+	}
+}
+
+func TestOpenDataRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	in := OpenData{ConnID: "12345"}
+	if err := WriteMsg(&buf, TypeOpenData, in); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	env, err := ReadMsg(&buf, MaxFrame)
+	if err != nil || env.Type != TypeOpenData {
+		t.Fatalf("read: %v type=%q", err, env.Type)
+	}
+	got, err := Decode[OpenData](env)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if *got != in {
+		t.Fatalf("round trip: got %+v want %+v", *got, in)
 	}
 }
 

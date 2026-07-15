@@ -37,6 +37,14 @@ const (
 	// player. Gateway → agent only; a legacy agent that never offers it simply
 	// receives no frames.
 	CapConnStats = "conn-stats"
+	// CapPerConn: the peer runs the data plane as one dedicated, agent-dialed
+	// TCP+TLS connection per proxied client instead of a shared mux stream,
+	// eliminating cross-player head-of-line blocking on the gateway↔agent hop.
+	// The gateway signals TypeOpenData over the control stream; the agent dials
+	// back a KindData hello carrying the matching ConnID. The agent offers it
+	// only when configured for per-conn transport; the gateway advertises it
+	// only once it can serve the data accept path end-to-end.
+	CapPerConn = "per-conn-data"
 )
 
 // SupportedCapabilities is everything this build implements, both roles.
@@ -103,6 +111,10 @@ const (
 	TypeSyncResult  = "sync_result"  // gateway → agent: per-tunnel outcomes
 	// Per-connection RTT report, gateway → agent (requires CapConnStats).
 	TypeConnStats = "conn_stats"
+	// Per-conn data-plane setup, gateway → agent control stream (requires
+	// CapPerConn): asks the agent to dial back a fresh KindData connection
+	// carrying this ConnID so the gateway can match it to the waiting player.
+	TypeOpenData = "open_data"
 )
 
 // Hello error codes.
@@ -271,6 +283,15 @@ type OpenConn struct {
 	// and always set otherwise so the agent can correlate later TypeConnStats
 	// RTT reports (stored as the entry's ConnKey).
 	ConnID string `json:"connId,omitempty"`
+}
+
+// OpenData asks the agent to dial back a fresh KindData TCP+TLS connection
+// carrying this ConnID, so the gateway can match it to a pending player.
+// Gateway → agent on the control stream, only under CapPerConn. Routing
+// (tunnelId, clientAddr) still travels in the OpenConn header written on the
+// data connection itself, so the agent's data handler is reused unchanged.
+type OpenData struct {
+	ConnID string `json:"connId"`
 }
 
 // ConnStat is one connection's measured round-trip time. ConnID matches the
