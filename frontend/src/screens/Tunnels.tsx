@@ -267,7 +267,7 @@ function TunnelEditor({title, initial, onSave, onCancel}: {
             <div className="divide-y divide-[var(--border)] rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] px-4 py-1">
               <Toggle checked={opt.MinecraftAware} onChange={v => setOpt({MinecraftAware: v})}
                 label="Minecraft-aware"
-                hint="Poll the server for MOTD, player count and version; sniff usernames for the traffic view." />
+                hint="Sniff player usernames from the login handshake for the traffic and players views." />
               <Toggle checked={opt.ProxyProtocolV2} onChange={v => setOpt({ProxyProtocolV2: v})}
                 label="PROXY protocol v2"
                 hint={<>Send the real client IP to the local server (Paper/Velocity). <b>Mutually exclusive</b> with BungeeCord/Velocity IP-forwarding — enabling both causes ghost errors.</>} />

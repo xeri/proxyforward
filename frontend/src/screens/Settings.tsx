@@ -51,7 +51,6 @@ export function Settings({status}: {status: UIStatus}) {
 
   const sections: SectionDef[] = [
     {id: 'appearance', label: 'Appearance'},
-    {id: 'behavior', label: 'Behavior'},
     {id: 'connection', label: 'Connection'},
     ...(!isAgent ? [{id: 'security', label: 'Security'}] : []),
     {id: 'analytics', label: 'Analytics'},
@@ -149,13 +148,6 @@ export function Settings({status}: {status: UIStatus}) {
             <FxRow />
           </Section>
 
-          <Section id="behavior" title="Behavior" subtitle="How the app lives on this machine.">
-            <Toggle checked={cfg.UI.MinimizeToTray} onChange={v => patch(c => { c.UI.MinimizeToTray = v })}
-              label="Minimize to tray" hint="Keep running in the background when the window closes." />
-            <Toggle checked={cfg.UI.Autostart} onChange={v => patch(c => { c.UI.Autostart = v })}
-              label="Start on login" hint="Launch proxyforward when you sign in to Windows." />
-          </Section>
-
           {isAgent ? (
             <Section id="connection" title="Gateway connection" subtitle="Editable without re-pairing — DNS re-resolves on every reconnect.">
               <div className="grid grid-cols-3 gap-3">
@@ -167,10 +159,9 @@ export function Settings({status}: {status: UIStatus}) {
                   onChange={v => patch(c => { c.Agent.GatewayPort = parseInt(v, 10) || 0 })} /></Field>
               </div>
               <div className="mt-3">
-                <Field label="Transport" hint="Per-connection avoids TCP head-of-line blocking on lossy links, at the cost of more outbound connections.">
+                <Field label="Transport" hint="All player traffic is multiplexed over the single control connection.">
                   <Select value={cfg.Agent.Transport} onChange={v => patch(c => { c.Agent.Transport = v })} options={[
                     {value: 'mux', label: 'Multiplexed (default) — one connection'},
-                    {value: 'per-conn', label: 'Per-connection — one outbound conn per player'},
                   ]} />
                 </Field>
               </div>
