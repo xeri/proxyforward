@@ -2,6 +2,7 @@ package app
 
 import (
 	"archive/zip"
+	"bufio"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -51,11 +52,13 @@ func testReachability(host string, port int) (string, error) {
 	return fmt.Sprintf("Reachable: %s answered in %s — players can connect.", addr, time.Since(start).Round(time.Millisecond)), nil
 }
 
-// writeDiagnostics builds the support bundle: version, a fully redacted config,
-// a health summary, the recent in-memory log lines, the persisted stats (peer
-// IPs pseudonymized), and every on-disk log file (rotated + crash + wails).
-// Everything that could identify a host, network, or client is masked so the
-// bundle is safe to share.
+// writeDiagnostics builds the support bundle: version, a fully redacted config, a
+// health summary, the recent in-memory log lines, the persisted stats (peer IPs
+// pseudonymized), and every on-disk log file (rotated + crash + wails). Everything
+// that could identify a host, network, or client is masked so the bundle is safe to
+// share — logs included, via logScrubber: they are shipped, so redacting only the
+// config would leave the same secrets in cleartext one file over.
+// Leak-tested by TestWriteDiagnosticsNoLeaks, which seeds every channel here.
 func writeDiagnostics(path string, cfg *config.Config, configDir, health string, ring *logging.Ring) error {
 	f, err := os.Create(path)
 	if err != nil {
@@ -93,11 +96,17 @@ func writeDiagnostics(path string, cfg *config.Config, configDir, health string,
 		}
 	}
 
+	// Logs ship with the config's own secrets masked. Without this the redaction
+	// above is theatre: config.redacted.toml hides Gateway.Token while a log line
+	// three files over spells it out.
+	scrub := newLogScrubber(cfg)
+
 	// logs-recent.txt — the GUI ring (what the user was just looking at).
 	if ring != nil {
 		if w, err := zw.Create("logs-recent.txt"); err == nil {
 			for _, e := range ring.EntriesSince(0) {
-				fmt.Fprintf(w, "%s %-5s %s %s\n", time.UnixMilli(e.TimeMs).Format(time.RFC3339), e.Level, e.Msg, e.Attrs)
+				line := fmt.Sprintf("%s %-5s %s %s\n", time.UnixMilli(e.TimeMs).Format(time.RFC3339), e.Level, e.Msg, e.Attrs)
+				io.WriteString(w, scrub.clean(line))
 			}
 		}
 	}
@@ -114,21 +123,86 @@ func writeDiagnostics(path string, cfg *config.Config, configDir, health string,
 		filepath.Join(logDir, "wails.log"),
 	}
 	for _, p := range logFiles {
-		copyIntoZip(zw, filepath.Base(p), p)
+		copyScrubbedIntoZip(zw, filepath.Base(p), p, scrub)
 	}
 	return nil
 }
 
-// copyIntoZip streams src into the archive under nameInZip; missing files are
-// skipped without error (a diagnostics bundle is best-effort).
-func copyIntoZip(zw *zip.Writer, nameInZip, src string) {
+// logScrubber replaces the exact secret values this bundle already knows — the ones
+// redactConfig masks in config.redacted.toml — wherever they appear in shipped log
+// text. It is the reason the bundle can claim to be shareable at all: redacting the
+// config is worth nothing if the same token is sitting in a log line two files over,
+// which is exactly how the pairing code used to escape (gateway.go RunStarted).
+//
+// Exact-value replacement, never pattern-guessing: every entry is a literal read out
+// of the live config, so this cannot pass off a guess as a guarantee. It is a net,
+// not a licence — secrets still must not be logged in the first place, because this
+// only knows the values config holds. Values shorter than minScrubLen are skipped:
+// they carry little entropy and would smear over unrelated log text.
+type logScrubber struct{ pairs []string } // old1, new1, old2, new2 … for strings.NewReplacer
+
+// minScrubLen is the shortest value worth exact-matching in log text. Below this a
+// "secret" is more likely to collide with ordinary words than to be the secret.
+const minScrubLen = 4
+
+func newLogScrubber(cfg *config.Config) *logScrubber {
+	const secret = "[redacted]"
+	const host = "[redacted-host]"
+	s := &logScrubber{}
+	add := func(val, with string) {
+		if len(val) >= minScrubLen {
+			s.pairs = append(s.pairs, val, with)
+		}
+	}
+	// Mirrors redactConfig field for field: whatever is a secret in the config is a
+	// secret in the logs. If a field is added there, add it here.
+	add(cfg.Gateway.Token, secret)
+	add(cfg.Agent.Token, secret)
+	add(cfg.Agent.AgentID, secret)
+	add(cfg.Agent.CertFingerprint, secret)
+	add(cfg.Gateway.PublicHost, host)
+	add(cfg.Gateway.BindAddr, host)
+	add(cfg.Agent.GatewayHost, host)
+	add(cfg.Metrics.PrometheusAddr, host)
+	for _, t := range cfg.Agent.Tunnels {
+		add(t.LocalAddr, host)
+	}
+	return s
+}
+
+// clean returns line with every known secret replaced.
+func (s *logScrubber) clean(line string) string {
+	if len(s.pairs) == 0 {
+		return line
+	}
+	return strings.NewReplacer(s.pairs...).Replace(line)
+}
+
+// copyScrubbedIntoZip streams src into the archive under nameInZip with every known
+// secret masked. Line-oriented, so memory stays bounded on a rotated log and a secret
+// (which never spans a newline) can't slip through a chunk boundary. Missing files
+// are skipped without error — a diagnostics bundle is best-effort.
+func copyScrubbedIntoZip(zw *zip.Writer, nameInZip, src string, s *logScrubber) {
 	lf, err := os.Open(src)
 	if err != nil {
 		return
 	}
 	defer lf.Close()
-	if w, err := zw.Create(nameInZip); err == nil {
-		io.Copy(w, lf)
+	w, err := zw.Create(nameInZip)
+	if err != nil {
+		return
+	}
+	br := bufio.NewReader(lf)
+	for {
+		// ReadString, not bufio.Scanner: a single pathological log line must not hit
+		// Scanner's 64 KiB token cap and silently truncate the rest of the file.
+		line, err := br.ReadString('\n')
+		if line != "" {
+			io.WriteString(w, s.clean(line))
+		}
+		if err != nil {
+			return
+		}
 	}
 }
 
