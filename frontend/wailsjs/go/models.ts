@@ -1032,6 +1032,71 @@ export namespace config {
 
 }
 
+export namespace gateway {
+	
+	export class AgentView {
+	    agentId: string;
+	    nickname: string;
+	    enrolled: boolean;
+	    revoked: boolean;
+	    scopePorts: number[];
+	    scopeTunnels: string[];
+	    issuedAtMs: number;
+	    connected: boolean;
+	    hostname: string;
+	    remoteIp: string;
+	    linkUpSinceMs: number;
+	    tunnels: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agentId = source["agentId"];
+	        this.nickname = source["nickname"];
+	        this.enrolled = source["enrolled"];
+	        this.revoked = source["revoked"];
+	        this.scopePorts = source["scopePorts"];
+	        this.scopeTunnels = source["scopeTunnels"];
+	        this.issuedAtMs = source["issuedAtMs"];
+	        this.connected = source["connected"];
+	        this.hostname = source["hostname"];
+	        this.remoteIp = source["remoteIp"];
+	        this.linkUpSinceMs = source["linkUpSinceMs"];
+	        this.tunnels = source["tunnels"];
+	    }
+	}
+	export class GatewayEvent {
+	    seq: number;
+	    timeMs: number;
+	    kind: string;
+	    agentId?: string;
+	    tunnelId?: string;
+	    message: string;
+	    requestedPort?: number;
+	    actualPort?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new GatewayEvent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.seq = source["seq"];
+	        this.timeMs = source["timeMs"];
+	        this.kind = source["kind"];
+	        this.agentId = source["agentId"];
+	        this.tunnelId = source["tunnelId"];
+	        this.message = source["message"];
+	        this.requestedPort = source["requestedPort"];
+	        this.actualPort = source["actualPort"];
+	    }
+	}
+
+}
+
 export namespace geo {
 	
 	export class Status {

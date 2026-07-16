@@ -547,8 +547,18 @@ func (a *App) SetupAgent(pairingCode, localAddr string, publicPort int) error {
 	}
 	a.cfg.Agent.GatewayHost = code.Host
 	a.cfg.Agent.GatewayPort = code.Port
-	a.cfg.Agent.Token = code.Token
 	a.cfg.Agent.CertFingerprint = code.Fingerprint
+	// The code's token is self-describing: a tkt_ ticket enrolls a per-agent
+	// identity (the default), a bare-hex token is legacy shared-token auth. Route it
+	// to exactly one field — the composite validator treats a failed enrollment as
+	// definitive (no shared-token fallback), so the two must never both be set.
+	if link.IsEnrollTicket(code.Token) {
+		a.cfg.Agent.EnrollTicket = code.Token
+		a.cfg.Agent.Token = ""
+	} else {
+		a.cfg.Agent.Token = code.Token
+		a.cfg.Agent.EnrollTicket = ""
+	}
 	if localAddr == "" {
 		localAddr = "127.0.0.1:25565"
 	}

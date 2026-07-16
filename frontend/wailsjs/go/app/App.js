@@ -46,6 +46,10 @@ export function FirewallStatus() {
   return window['go']['app']['App']['FirewallStatus']();
 }
 
+export function GatewayEvents(arg1) {
+  return window['go']['app']['App']['GatewayEvents'](arg1);
+}
+
 export function GeoSnapshot(arg1) {
   return window['go']['app']['App']['GeoSnapshot'](arg1);
 }
@@ -68,6 +72,14 @@ export function ImportSetup(arg1, arg2) {
 
 export function InstallService() {
   return window['go']['app']['App']['InstallService']();
+}
+
+export function IssuePairingCode(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['IssuePairingCode'](arg1, arg2, arg3, arg4);
+}
+
+export function ListAgents() {
+  return window['go']['app']['App']['ListAgents']();
 }
 
 export function LogsSince(arg1) {
@@ -126,8 +138,16 @@ export function RegenerateToken() {
   return window['go']['app']['App']['RegenerateToken']();
 }
 
+export function RenameAgent(arg1, arg2) {
+  return window['go']['app']['App']['RenameAgent'](arg1, arg2);
+}
+
 export function RestartEngine() {
   return window['go']['app']['App']['RestartEngine']();
+}
+
+export function RevokeAgent(arg1) {
+  return window['go']['app']['App']['RevokeAgent'](arg1);
 }
 
 export function SaveSettings(arg1) {
@@ -148,6 +168,10 @@ export function SessionTimeline(arg1) {
 
 export function Sessions(arg1) {
   return window['go']['app']['App']['Sessions'](arg1);
+}
+
+export function SetAgentScope(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SetAgentScope'](arg1, arg2, arg3);
 }
 
 export function SetTheme(arg1) {

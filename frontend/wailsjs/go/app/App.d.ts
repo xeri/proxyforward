@@ -3,6 +3,7 @@
 import {stats} from '../models';
 import {http} from '../models';
 import {app} from '../models';
+import {gateway} from '../models';
 import {analytics} from '../models';
 import {geo} from '../models';
 import {config} from '../models';
@@ -30,6 +31,8 @@ export function FirewallRepair():Promise<void>;
 
 export function FirewallStatus():Promise<boolean>;
 
+export function GatewayEvents(arg1:number):Promise<Array<gateway.GatewayEvent>>;
+
 export function GeoSnapshot(arg1:number):Promise<Array<analytics.CountryAgg>>;
 
 export function GeoStatus():Promise<geo.Status>;
@@ -41,6 +44,10 @@ export function HandleDeepLink(arg1:string):Promise<void>;
 export function ImportSetup(arg1:string,arg2:string):Promise<void>;
 
 export function InstallService():Promise<void>;
+
+export function IssuePairingCode(arg1:boolean,arg2:number,arg3:Array<number>,arg4:Array<string>):Promise<string>;
+
+export function ListAgents():Promise<Array<gateway.AgentView>>;
 
 export function LogsSince(arg1:number):Promise<Array<logging.Entry>>;
 
@@ -70,7 +77,11 @@ export function Players(arg1:analytics.PlayersQuery):Promise<analytics.PlayersPa
 
 export function RegenerateToken():Promise<void>;
 
+export function RenameAgent(arg1:string,arg2:string):Promise<void>;
+
 export function RestartEngine():Promise<void>;
+
+export function RevokeAgent(arg1:string):Promise<void>;
 
 export function SaveSettings(arg1:config.Config):Promise<void>;
 
@@ -81,6 +92,8 @@ export function ServiceStatus():Promise<string>;
 export function SessionTimeline(arg1:number):Promise<analytics.SessionTimeline>;
 
 export function Sessions(arg1:analytics.SessionsQuery):Promise<analytics.SessionsPage>;
+
+export function SetAgentScope(arg1:string,arg2:Array<number>,arg3:Array<string>):Promise<void>;
 
 export function SetTheme(arg1:string):Promise<void>;
 

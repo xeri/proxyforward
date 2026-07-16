@@ -12,7 +12,6 @@ package gateway
 // data path — so the coarse lock is fine.
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -23,6 +22,7 @@ import (
 	"time"
 
 	"proxyforward/internal/control"
+	"proxyforward/internal/link"
 )
 
 const agentStoreFile = "gateway_agents.json"
@@ -149,11 +149,10 @@ func (s *AgentStore) save() error {
 // single-use (the safe default); a zero exp never expires. Returns the opaque
 // ticket nonce for embedding in the pairing code.
 func (s *AgentStore) IssueEnrollment(reusable bool, exp time.Time, scope Scope) (string, error) {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", fmt.Errorf("generate pairing ticket: %w", err)
+	ticket, err := link.NewEnrollTicket()
+	if err != nil {
+		return "", err
 	}
-	ticket := hex.EncodeToString(raw[:])
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.nonces[ticket] = enrollNonce{Exp: exp, Reusable: reusable, Scope: scope}

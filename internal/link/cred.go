@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base32"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -20,6 +21,30 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+// EnrollTicketPrefix marks a pairing code's token as a single-use enrollment
+// ticket, as opposed to the legacy shared gateway token (bare hex). The token is
+// thus self-describing — the agent routes a pasted code to per-identity enrollment
+// or shared-token auth without a second field in the code — mirroring the typed
+// agt_/gw_/tnl_ ids above. It must stay distinct from a 32-hex shared token.
+const EnrollTicketPrefix = "tkt_"
+
+// NewEnrollTicket mints a random single-use enrollment ticket (128-bit nonce)
+// carrying the tkt_ prefix. The gateway stores it and embeds it in a pairing code;
+// the agent replays it once to join the allowlist.
+func NewEnrollTicket() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate enrollment ticket: %w", err)
+	}
+	return EnrollTicketPrefix + hex.EncodeToString(raw[:]), nil
+}
+
+// IsEnrollTicket reports whether a pairing-code token is an enrollment ticket
+// rather than a legacy shared token, so a pasted code routes to the right auth.
+func IsEnrollTicket(token string) bool {
+	return strings.HasPrefix(token, EnrollTicketPrefix)
+}
 
 // crockfordLower is Crockford base32 (no confusable i/l/o/u) lowercased, so derived
 // IDs read like modern API keys. It is frozen: changing the alphabet would silently
