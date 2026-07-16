@@ -65,6 +65,15 @@ func fingerprint(seed []byte) string {
 	return idEncoding.EncodeToString(sum[:5])
 }
 
+// AgentIDPrefix marks an agentID as *derived from an Ed25519 public key*. The
+// prefix is a reserved namespace, not decoration: a legacy shared-token agent
+// self-asserts its agentID (config.NewID gives it bare 32-hex), so anything wearing
+// this prefix must have been minted by AgentID from a key the gateway verified. The
+// shared-token path therefore refuses to assert it (gateway/auth.go
+// sharedTokenValidator) — otherwise a mere token holder could name itself an
+// enrolled agent and inherit its session, ports, and scope.
+const AgentIDPrefix = "agt_"
+
 // agentFingerprintBytes is how much of sha256(pubkey) an agentID carries. It is a
 // security parameter, not a display choice: the gateway keys supersede, revocation,
 // scope, and gateway-authoritative config on this label, so anyone who can find a
@@ -80,7 +89,14 @@ const agentFingerprintBytes = 10
 // re-derives the same ID and no two keys render alike.
 func AgentID(pub ed25519.PublicKey) string {
 	sum := sha256.Sum256(pub)
-	return "agt_" + idEncoding.EncodeToString(sum[:agentFingerprintBytes])
+	return AgentIDPrefix + idEncoding.EncodeToString(sum[:agentFingerprintBytes])
+}
+
+// IsDerivedAgentID reports whether s claims the key-derived agent namespace. Only
+// AgentID mints these; a self-asserted one is a peer claiming an identity it did not
+// prove, which is why the shared-token validator rejects it outright.
+func IsDerivedAgentID(s string) bool {
+	return strings.HasPrefix(s, AgentIDPrefix)
 }
 
 // GatewayID derives the gateway's display identity from its (pinned) certificate

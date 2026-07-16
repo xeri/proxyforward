@@ -27,6 +27,8 @@ func TestSharedTokenValidator(t *testing.T) {
 		{"wrong token", control.Hello{Token: "nope", AgentID: "agent-1"}, "", ErrBadToken},
 		{"empty token", control.Hello{Token: "", AgentID: "agent-1"}, "", ErrBadToken},
 		{"good token but empty agentID", control.Hello{Token: "s3cret", AgentID: ""}, "", ErrMissingAgentID},
+		// The agt_ namespace belongs to proved keys; a token holder may not wear it.
+		{"good token but derived agentID", control.Hello{Token: "s3cret", AgentID: "agt_10524h9zg1n66yk1"}, "", ErrReservedAgentID},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -38,6 +40,64 @@ func TestSharedTokenValidator(t *testing.T) {
 				t.Fatalf("identity agentID = %q, want %q", id.AgentID, tc.wantID)
 			}
 		})
+	}
+}
+
+// TestSharedTokenCannotClaimDerivedAgentID is the regression for the shared-token
+// identity takeover: the legacy path authenticates a gateway-wide bearer token and
+// then believes whatever agentID the peer names. Since the gateway keys supersede,
+// per-conn delivery, scope, and gateway-config on that label, a token holder allowed
+// to name itself agt_<victim> would evict the enrolled agent, inherit its ports,
+// and — a shared-token identity carrying no Scope, and an empty Scope meaning
+// unrestricted — escape the victim's grant. Revoking the victim would not help: the
+// impersonator never presents the revoked key, so identityValidator's Revoked check
+// is never reached. Reserving the agt_ namespace is what keeps the documented
+// promise that enrolled agents are protected by their key and by revocation. (D7)
+func TestSharedTokenCannotClaimDerivedAgentID(t *testing.T) {
+	const fp = "sha256:deadbeef"
+	vpub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := LoadAgentStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := store.IssueEnrollment(false, time.Time{}, Scope{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.Enroll(vpub, link.AgentID(vpub), ticket, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	victimID := rec.AgentID
+	store.SetScope(victimID, Scope{Ports: []int{25565}, TunnelIDs: []string{"tnl_victim"}})
+
+	v := compositeValidator{
+		identity: identityValidator{store: store, now: time.Now},
+		shared:   &sharedTokenValidator{token: "s3cret"},
+	}
+
+	// An attacker holding only the shared token, presenting no key at all.
+	if _, err := v.Validate(&control.Hello{Token: "s3cret", AgentID: victimID}, fp); !errors.Is(err, ErrReservedAgentID) {
+		t.Fatalf("shared-token peer claiming enrolled id %q: err = %v, want ErrReservedAgentID", victimID, err)
+	}
+
+	// Same after the victim is revoked, so revocation cannot be walked around by
+	// dropping the key and falling back to the token.
+	if !store.Revoke(victimID) {
+		t.Fatal("revoke failed")
+	}
+	if _, err := v.Validate(&control.Hello{Token: "s3cret", AgentID: victimID}, fp); !errors.Is(err, ErrReservedAgentID) {
+		t.Fatalf("revoked identity %q re-admitted via shared token: err = %v", victimID, err)
+	}
+
+	// A genuinely legacy agent (bare 32-hex id from config.NewID) still pairs, so
+	// the migration path this fallback exists for is untouched.
+	const legacyID = "9f86d081884c7d659a2feaa0c55ad015"
+	if id, err := v.Validate(&control.Hello{Token: "s3cret", AgentID: legacyID}, fp); err != nil || id.AgentID != legacyID {
+		t.Fatalf("legacy agent must still authenticate: id=%+v err=%v", id, err)
 	}
 }
 
