@@ -108,6 +108,11 @@ persisted to config.
 | Pipe | 5 s request / 2 min idle timeouts; ACL BA+SY+IU | `ipc/server_windows.go` |
 | Cert | ECDSA P-256, 20-year validity (trust = pin, not expiry) | `link/cert.go:86` |
 | Key exchange | X25519MLKEM768 (PQ hybrid, Go default; `CurvePreferences` unset) | `link/cert.go`, `link/pq_test.go` |
+| Agent identity | Ed25519 (`agent_identity.key`, PKCS#8 PEM, `0600`); `agentID` = `agt_` + 8-char Crockford base32 of sha256(pubkey)[:5] = 40 bits | `link/cred.go LoadOrCreateIdentity fingerprint` |
+| Enrollment ticket | `tkt_` + 128-bit nonce; single-use default, reusable optional; TTL caller-set, 0 = never (UI single-use default 10 min) | `link/cred.go NewEnrollTicket`, `gateway/agentstore.go IssueEnrollment` |
+| Agent allowlist | `gateway_agents.json` (`0600`, atomic write + AV-retry): identity + scope + desired config per agent | `gateway/agentstore.go AgentStore` |
+| Pairing code | `pxf://host:port/v1/pair/<tkt>#sha256:<64hex>`, ≤ 512 B before parse | `link/pairing.go ParsePairingCode` |
+| Agent auth | Ed25519 proof-of-possession over `proxyforward-agent-auth-v1` + gateway cert FP — no bearer token in steady state | `link/cred.go AgentAuthMessage` |
 | Perf floor | ≥20 MiB/s, worst cross-stream RTT ≤500 ms (64 MiB loopback burst); per-transport twins `TestBurstThroughputPerConn` / `TestBurstThroughputQUIC` | `e2e_test.go:716,719` |
 | Blur ladder | control 10, Signal Glass 20, card frost 30, chrome 36, island 40, float 48, pop 56 px | `tokens.css` |
 | Switch geometry | 40×22 track, 1px rim + 2px seat → 16px knob (7px radius), 18px travel; ×`--ui-scale` | `tokens.css`, `ui.tsx Switch` |
@@ -179,6 +184,101 @@ immediately. A failed rung is cooled (`transportReprobeAfter`, cleared on `netno
 change) only once a later rung succeeds — the "UDP blocked" tell; if every rung fails the
 link is simply down, so nothing is cooled. The rung that connects is reported to the GUI as
 `ActiveTransport` (tick `Status.Transport`) so a user can see what auto settled on.
+
+## Per-agent identity, enrollment & revocation (`internal/link/cred.go`, `internal/gateway/agentstore.go`, `internal/gateway/auth.go`)
+
+The trust root is still the gateway's pinned self-signed cert (`link/cert.go`); layered on
+top is a per-agent cryptographic identity so agents are told apart, scoped, and revoked
+individually rather than sharing one bearer token.
+
+**Identity.** On first run the agent generates a long-term Ed25519 keypair and persists the
+PKCS#8 private key `0600` beside its config (`link/cred.go LoadOrCreateIdentity`); the private
+half never leaves the machine, and a corrupt/non-Ed25519 file is a fatal, actionable error,
+never a silent regeneration (which would orphan the allowlist entry). The **canonical
+identity is the raw public key** — the gateway allowlist is keyed by it. The human-facing
+`agentID` is *derived*: `agt_` + an 8-char Crockford-base32 fingerprint (no confusable
+`i/l/o/u`) of the first 40 bits of sha256(pubkey) (`link/cred.go AgentID fingerprint`).
+Derived, so it is stable (the same machine always re-derives it; re-pairing never dupes) and
+unforgeable (bound to a private key nobody else holds). The ID grammar is
+`<type>_<fingerprint>`: `gw_` over the cert DER, `agt_` over the pubkey, `tnl_` a slug of the
+tunnel name with a `-2` collision suffix (`link/cred.go GatewayID TunnelID`). A freely-editable
+nickname layers on top as display sugar.
+
+**Steady-state auth is proof-of-possession, not a bearer token.** In the hello the agent
+sends `AgentPubKey` plus an Ed25519 `AgentSig` over `AgentAuthMessage` = the constant
+`proxyforward-agent-auth-v1` joined to the *pinned gateway cert fingerprint* (`link/cred.go
+AgentAuthMessage SignAgentAuth`). The gateway verifies the signature, checks the pubkey is
+allowlisted and not revoked (`gateway/auth.go identityValidator`), and admits — no extra
+round-trip, and the agent still speaks first, so hello frames to a legacy gateway stay
+byte-identical (all new fields `omitempty`). Binding to the cert fingerprint (rather than the
+originally-specced per-session TLS exporter) means a signature made for one gateway can never
+be replayed to another; same-gateway replay resistance rests on TLS 1.3 confidentiality —
+only the real gateway or the agent itself ever sees the signature and either already holds the
+private key — so the signature is static per (agent, gateway) pair and the identical message
+works over both TCP and QUIC. The bearer token now survives only as the enrollment ticket.
+
+**Enrollment.** The gateway mints a single-use ticket `tkt_` + 128-bit nonce (`link/cred.go
+NewEnrollTicket`) and embeds it in a pairing code. On first contact the agent replays it in
+`Hello.EnrollTicket`; the gateway validates-and-consumes it under one lock (a spent single-use
+ticket is refused — `ErrTicketConsumed`), records the pubkey, derives and stores the
+`agentID`, and returns it in `HelloOK.AssignedAgentID` alongside `GatewayID`. Single-use is
+the default; a **reusable** ticket (enrolls many agents until revoked) and an optional expiry
+(zero = never) are the flagged alternatives. Enrollment is **field-driven, not a capability**
+— acted on before capability negotiation, so there is deliberately no `CapEnroll`.
+
+**AgentStore.** The allowlist and outstanding tickets persist to `gateway_agents.json` (`0600`,
+single writer, atomic temp+rename with the AV-retry of `setup.atomicWrite`) — deliberately
+*not* in `analytics.db`, which is role-blind history (`gateway/agentstore.go AgentStore
+LoadAgentStore`). Each record carries identity, nickname, scope, and the gateway-authoritative
+desired tunnel set (see "Control-plane message flow").
+
+**Validators.** A `compositeValidator` tries the identity path first, then — only while
+`Gateway.AcceptSharedToken` is on (a migration default) — falls back to the legacy shared token
+(`gateway/auth.go compositeValidator sharedTokenValidator`; token and fingerprint still compare
+in constant time). Every accept path (TCP control, QUIC, per-conn data) funnels through the one
+`Validator.Validate` seam, so identity is enforced uniformly.
+
+**Revocation.** `Gateway.RevokeAgent` removes the pubkey from the allowlist and evicts any live
+session at once; the next connect is a fatal `ErrCodeRevoked`, which the agent classifies as
+fatal (`agent.go isFatal`) and stops on rather than retry-hammering — surfaced in the GUI via
+`EngineFatal`. Regression: e2e `TestEnrollAndRevoke`.
+
+**Scope.** A ticket/record carries `Scope{Ports, TunnelIDs}` (empty = unrestricted), enforced
+at bind in `validateSpec` — an out-of-scope port is `ErrCodePortNotAllowed`, an out-of-scope
+tunnel `ErrCodeBadTunnel` — on *both* the register path and the gateway-config push/adopt path,
+so a scoped agent can never bind outside its grant by any route (`gateway/agentstore.go Scope`;
+`gateway/gateway.go validSpecs`). Regressions: `TestGatewayConfigScopeNarrowingHidesTunnel`,
+`gateway/scope_test.go`.
+
+**Pairing scheme & click-to-pair.** The pairing code is `pxf://host:port/v1/pair/<tkt>#sha256:<hex>`
+(`link/pairing.go PairingCode`). `pxf` is a permanent brand *and* the OS deep-link scheme
+(`wails.json` registers it via the NSIS macros); the `/v1/` segment versions the code's *shape*
+independently of the wire `ProtocolVersion`; the `/pair/` segment is a role/kind marker so a
+wrong-kind link fails loudly instead of half-parsing (`link/pairing.go tokenFromV1Path`). The
+parser caps input at 512 bytes before parsing and validates host, port, and the 64-hex
+fingerprint; it is fuzzed (`link/pairing_fuzz_test.go FuzzParsePairingCode`). A clicked `pxf://`
+link reaches the app as `os.Args` on a cold launch or via single-instance forwarding on a warm
+one (`main.go deepLinkArg`, `app/app.go HandleDeepLink TakePendingDeepLink`); the frontend drains
+it on mount and opens the wizard straight onto the agent paste step with the code prefilled —
+confirm-to-connect, never auto-connect (`frontend/src/App.tsx`, `frontend/src/screens/Wizard.tsx`).
+
+**Version axes** (independent, so any one evolves alone):
+
+| Axis | Where | Bumps when |
+|---|---|---|
+| Scheme | `pxf` | Never (permanent brand) |
+| Pairing format | the `/v1/` path segment | The code's shape changes |
+| Protocol | `Hello.ProtocolVersion` (stays 1) | The hello exchange itself breaks |
+| Config authority | `Hello.ConfigGeneration` (per-agent, monotonic) | The gateway adopts a new desired set |
+| Crypto suite | TLS-negotiated (`X25519MLKEM768` today) | An algorithm is added/retired |
+
+**Deferred (honest state).** Per-agent **key rotation** ("old key signs new") and PQ
+*signatures* are roadmap, not shipped (the KEM is already PQ; forging Ed25519 needs a quantum
+computer at attack time, so there is no harvest-now risk). There is no on-disk `config_version`
+schema field yet — there are no config migrations and the local config dir is disposable. The
+`pf1://` scheme was dropped outright rather than kept as a compat parser (pre-release, no codes
+in the wild). Several agent-management surfaces are backend-complete but not yet fully exposed in
+the GUI — tracked in `docs/agent/polish-backlog.md`.
 
 ## Analytics data model (`internal/analytics/schema.go`)
 
