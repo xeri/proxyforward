@@ -57,6 +57,16 @@ const (
 	// reconciles it via TypePushConfig/TypeProposeConfig against the agent's
 	// reported ConfigHash. NOT advertised until implemented end-to-end.
 	CapGatewayConfig = "gateway-config"
+	// CapConfigConsent layers mutual consent on CapGatewayConfig: authored
+	// config-content edits (either party editing tunnel definitions) travel as
+	// TypeConfigProposal and apply only after the other side answers with an
+	// approving TypeConfigDecision. TypePushConfig keeps its exact meaning —
+	// immediate auto-apply of the adopted truth (connect-sync, drift
+	// correction, port reclaim) — because resource arbitration is gateway
+	// authority, not a negotiation. A peer with only CapGatewayConfig keeps
+	// the propose_config auto-adopt path. NOT advertised until implemented
+	// end-to-end.
+	CapConfigConsent = "config-consent"
 )
 
 // SupportedCapabilities is everything this build implements, both roles.
@@ -131,6 +141,10 @@ const (
 	TypePushConfig    = "push_config"    // gateway → agent: authoritative tunnel set
 	TypeProposeConfig = "propose_config" // agent → gateway: promote a local edit
 	TypeConfigAck     = "config_ack"     // agent → gateway: applied generation/hash
+	// Mutual-consent config editing (requires CapConfigConsent). Both flow in
+	// both directions: whoever authored the edit proposes, the other side decides.
+	TypeConfigProposal = "config_proposal" // proposer → approver: authored tunnel-set edit
+	TypeConfigDecision = "config_decision" // approver → proposer: the verdict
 )
 
 // Hello error codes.
@@ -385,6 +399,34 @@ type ProposeConfig struct {
 type ConfigAck struct {
 	Generation uint64 `json:"generation"`
 	Hash       string `json:"hash"`
+}
+
+// ConfigProposal carries an authored tunnel-set edit awaiting the other side's
+// approval (CapConfigConsent). Nothing applies until the approver answers.
+// ProposalID correlates the eventual ConfigDecision. BaseGen is the
+// authoritative generation the proposer edited against, so the approver can
+// spot a proposal built on stale truth; a proposer that holds no adopted
+// config yet sends 0 (omitempty — indistinguishable from "before generation
+// tracking", which reads the same). Hash is HashTunnels(Tunnels), letting the
+// approver verify the set decoded intact. Tunnel counts are small, so — like
+// PushConfig — this rides a single frame.
+type ConfigProposal struct {
+	ProposalID string       `json:"proposalId"`
+	BaseGen    uint64       `json:"baseGen,omitempty"`
+	Tunnels    []TunnelSpec `json:"tunnels"`
+	Hash       string       `json:"hash,omitempty"`
+}
+
+// ConfigDecision answers a ConfigProposal (CapConfigConsent), approver →
+// proposer. Reason is surfaced verbatim in the proposer's UI on rejection.
+// Generation and Hash are set only when approved — they name the newly adopted
+// authoritative config so both sides converge without another round-trip.
+type ConfigDecision struct {
+	ProposalID string `json:"proposalId"`
+	Approved   bool   `json:"approved"`
+	Reason     string `json:"reason,omitempty"`
+	Generation uint64 `json:"generation,omitempty"`
+	Hash       string `json:"hash,omitempty"`
 }
 
 // MaxConnStatsPerFrame bounds one conn_stats frame. Each entry is a short id

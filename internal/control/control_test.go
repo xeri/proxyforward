@@ -232,6 +232,62 @@ func TestConnStatsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConfigConsentRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	prop := ConfigProposal{
+		ProposalID: "prp_1",
+		BaseGen:    4,
+		Tunnels:    []TunnelSpec{{ID: "tnl_mc", Name: "mc", Type: "tcp", PublicPort: 25565}},
+	}
+	prop.Hash = HashTunnels(prop.Tunnels)
+	if err := WriteMsg(&buf, TypeConfigProposal, prop); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+	dec := ConfigDecision{ProposalID: "prp_1", Approved: true, Generation: 5, Hash: prop.Hash}
+	if err := WriteMsg(&buf, TypeConfigDecision, dec); err != nil {
+		t.Fatalf("write decision: %v", err)
+	}
+	env, err := ReadMsg(&buf, MaxFrame)
+	if err != nil || env.Type != TypeConfigProposal {
+		t.Fatalf("read proposal: %v type=%q", err, env.Type)
+	}
+	gotProp, err := Decode[ConfigProposal](env)
+	if err != nil {
+		t.Fatalf("decode proposal: %v", err)
+	}
+	if !reflect.DeepEqual(*gotProp, prop) {
+		t.Fatalf("proposal round trip: %+v != %+v", *gotProp, prop)
+	}
+	env, err = ReadMsg(&buf, MaxFrame)
+	if err != nil || env.Type != TypeConfigDecision {
+		t.Fatalf("read decision: %v type=%q", err, env.Type)
+	}
+	gotDec, err := Decode[ConfigDecision](env)
+	if err != nil {
+		t.Fatalf("decode decision: %v", err)
+	}
+	if *gotDec != dec {
+		t.Fatalf("decision round trip: %+v != %+v", *gotDec, dec)
+	}
+	// A rejection is all zero values plus the reason — it must survive the wire
+	// unchanged (approved=false is a real verdict, not an omitted field).
+	reject := ConfigDecision{ProposalID: "prp_2", Reason: "port 25565 is reserved"}
+	if err := WriteMsg(&buf, TypeConfigDecision, reject); err != nil {
+		t.Fatalf("write rejection: %v", err)
+	}
+	env, err = ReadMsg(&buf, MaxFrame)
+	if err != nil {
+		t.Fatalf("read rejection: %v", err)
+	}
+	gotRej, err := Decode[ConfigDecision](env)
+	if err != nil {
+		t.Fatalf("decode rejection: %v", err)
+	}
+	if *gotRej != reject || gotRej.Approved {
+		t.Fatalf("rejection round trip: %+v != %+v", *gotRej, reject)
+	}
+}
+
 func TestMultipleFramesSequential(t *testing.T) {
 	var buf bytes.Buffer
 	for seq := uint64(1); seq <= 3; seq++ {
