@@ -1324,6 +1324,46 @@ func TestEnrollAndRevoke(t *testing.T) {
 	h.agentStop = nil // we already drained agentDone; keep cleanup from blocking
 }
 
+// TestSetAgentScopeEvictsLiveSession: narrowing an agent's scope must bind now, not
+// eventually. A session captures identity.Scope at admission and validateSpec reads
+// that copy for the session's whole life, so writing the store alone left an agent
+// the operator had just narrowed serving its old grant — holding the very ports the
+// operator was taking away — until it happened to reconnect, which a misbehaving
+// agent has no reason to do. Narrowing is the urgent case: it is how you contain an
+// agent. RevokeAgent already evicts to make its guarantee land; this is the same
+// guarantee for scope. (identity)
+func TestSetAgentScopeEvictsLiveSession(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{enroll: true})
+	addr := h.waitPublicPort()
+
+	// The agent is enrolled and serving on its granted (unrestricted) scope.
+	agents := h.gw.ListAgents()
+	if len(agents) != 1 {
+		t.Fatalf("want 1 enrolled agent, got %d: %+v", len(agents), agents)
+	}
+	rec := agents[0]
+	roundTrip(t, addr, []byte("in scope"))
+
+	// Narrow the grant so the tunnel it is currently serving is no longer allowed.
+	if !h.gw.SetAgentScope(rec.AgentID, gateway.Scope{TunnelIDs: []string{"tnl_something-else"}}) {
+		t.Fatal("SetAgentScope reported the agent was not found")
+	}
+
+	// The listener must go away on its own. The agent stays up and reconnects, but
+	// every bind is now re-checked against the narrowed scope, so it never comes
+	// back — without the eviction the old session keeps serving here indefinitely.
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := h.gw.TunnelPort(h.tunnelID); !ok {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("narrowed scope never took effect: the tunnel is still bound, so the agent kept the port the operator took away")
+}
+
 // TestBurstThroughputAndCrossStreamLatency pushes 64 MiB through one
 // connection while a second connection does small echo round-trips; the
 // burst must move fast and must not starve the small stream. This is the
