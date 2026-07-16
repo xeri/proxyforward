@@ -68,6 +68,15 @@ type agentSession struct {
 	appVersion string
 	transport  string
 
+	// pendingInbound holds an agent-authored config proposal awaiting the gateway
+	// operator's decision; pendingOutbound a gateway-authored one awaiting the
+	// agent's (control.CapConfigConsent, see consent.go). Session-scoped by design:
+	// both die with the session and the proposer re-proposes on reconnect. Atomics
+	// because the control read loop and the GUI ops race on them — they never touch
+	// actor-owned state.
+	pendingInbound  atomic.Pointer[pendingProposal]
+	pendingOutbound atomic.Pointer[pendingProposal]
+
 	sess    atomic.Pointer[sessionBox]
 	evicted atomic.Bool
 

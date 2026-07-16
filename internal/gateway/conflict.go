@@ -25,6 +25,10 @@ const (
 	// the two above it is a completed action, not an open conflict — it lands in the
 	// event log for the record, never as a resolvable card.
 	EventPortReclaimed = "port-reclaimed"
+	// EventProposalDeclined: a gateway-authored config proposal did not apply — the
+	// agent declined it (Message carries its reason) or the config moved while the
+	// decision was pending. A completed outcome like port-reclaimed: event log only.
+	EventProposalDeclined = "proposal-declined"
 )
 
 // GatewayEvent is one notable, user-facing thing the gateway did or noticed —

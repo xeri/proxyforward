@@ -361,6 +361,11 @@ type AgentView struct {
 	// data plane (quic | per-conn | mux) shown in the drill-in.
 	Version   string `json:"version"`
 	Transport string `json:"transport"`
+	// PendingInbound / PendingOutbound flag session-scoped consent proposals
+	// awaiting a decision (agent-authored / gateway-authored) — the roster's
+	// "needs your review" / "awaiting agent" badges. Always false when offline.
+	PendingInbound  bool `json:"pendingInbound"`
+	PendingOutbound bool `json:"pendingOutbound"`
 }
 
 // ListAgentViews joins the enrollment allowlist with live sessions and tunnel
@@ -392,6 +397,7 @@ func (g *Gateway) ListAgentViews() []AgentView {
 		if l, ok := live[r.AgentID]; ok {
 			v.Connected, v.Hostname, v.RemoteIP, v.LinkUpSinceMs = true, l.Hostname, l.RemoteIP, l.LinkUpSinceMs
 			v.Version, v.Transport = l.Version, l.Transport
+			v.PendingInbound, v.PendingOutbound = l.PendingInbound, l.PendingOutbound
 		}
 		out = append(out, v)
 	}
@@ -418,18 +424,33 @@ type AgentConfigView struct {
 	Generation uint64               `json:"generation"`
 	Tunnels    []control.TunnelSpec `json:"tunnels"`
 	Enrolled   bool                 `json:"enrolled"`
+	// ConsentActive reports whether the live session negotiated config-consent —
+	// the editor's gate between "save proposes to the agent" and an honest
+	// "offline / legacy build" unavailable state. PendingInbound is an
+	// agent-authored edit awaiting this operator's decision; PendingOutbound this
+	// gateway's own proposal awaiting the agent's. All three read the live session,
+	// so they are false/nil for an offline agent (pending is session-scoped).
+	ConsentActive   bool          `json:"consentActive"`
+	PendingInbound  *ProposalView `json:"pendingInbound,omitempty"`
+	PendingOutbound *ProposalView `json:"pendingOutbound,omitempty"`
 }
 
-// AgentDesiredConfig returns the gateway-held desired config for an agent (read only;
-// the editing/promote path is Batch B). Enrolled=false means the agent isn't in the
-// allowlist — a shared-token agent pushes its own config, so there is nothing
-// gateway-authoritative to show.
+// AgentDesiredConfig returns the gateway-held desired config for an agent, plus the
+// live session's consent state and any pending proposals. Enrolled=false means the
+// agent isn't in the allowlist — a shared-token agent pushes its own config, so
+// there is nothing gateway-authoritative to show.
 func (g *Gateway) AgentDesiredConfig(agentID string) AgentConfigView {
 	if g.agents == nil {
 		return AgentConfigView{}
 	}
 	tunnels, gen, ok := g.agents.DesiredConfig(agentID)
-	return AgentConfigView{Generation: gen, Tunnels: tunnels, Enrolled: ok}
+	view := AgentConfigView{Generation: gen, Tunnels: tunnels, Enrolled: ok}
+	if sess := g.liveSession(agentID); sess != nil {
+		view.ConsentActive = sess.enrolled && sess.Has(control.CapConfigConsent)
+		view.PendingInbound = proposalView(sess.pendingInbound.Load())
+		view.PendingOutbound = proposalView(sess.pendingOutbound.Load())
+	}
+	return view
 }
 
 // ReclaimPort gives public port `port` to requesterID's tunnel, bumping whatever
@@ -514,22 +535,8 @@ func (g *Gateway) rewriteTunnelPort(sess *agentSession, tunnelID string, port in
 	if !found {
 		return false
 	}
-	valid := g.validSpecs(sess, next)
-	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
-	if !ran {
-		return false
-	}
-	resolved := resolvePorts(valid, outcomes)
-	gen, ok := g.agents.AdoptConfig(sess.agentID, resolved)
-	if !ok {
-		return false
-	}
-	sess.agentConfigGen.Store(gen)
-	hash := control.HashTunnels(resolved)
-	if err := sess.writeControl(control.TypePushConfig, control.PushConfig{Generation: gen, Hash: hash, Tunnels: resolved}); err != nil {
-		sess.logger.Warn("push_config after port reclaim failed", "err", err)
-	}
-	return true
+	_, _, ok = g.adoptAndPush(sess, next)
+	return ok
 }
 
 // TunnelPort reports the actual bound public port of a tunnel (0, false if
@@ -653,6 +660,11 @@ type AgentLink struct {
 	// (quic | per-conn | mux) — read-only surfacing carried onto AgentView.
 	Version   string
 	Transport string
+	// PendingInbound / PendingOutbound flag session-scoped consent proposals
+	// awaiting a decision (agent-authored / gateway-authored), for roster badges;
+	// the full proposals ride AgentConfigView.
+	PendingInbound  bool
+	PendingOutbound bool
 }
 
 // Agents returns every connected agent's link state, sorted by agentID so the
@@ -671,18 +683,20 @@ func (g *Gateway) Agents() []AgentLink {
 			jitter, loss = s.quality.JitterMillis(), s.quality.LossPct()
 		}
 		out = append(out, AgentLink{
-			AgentID:       s.agentID,
-			Hostname:      s.hostname,
-			LANIPs:        s.localIPs,
-			RemoteIP:      s.remoteIP,
-			LinkUpSinceMs: s.connectedAt.UnixMilli(),
-			RTTMillis:     s.rttMillis.Load(),
-			JitterMillis:  jitter,
-			PacketLossPct: loss,
-			LinkBytesIn:   in,
-			LinkBytesOut:  outB,
-			Version:       s.appVersion,
-			Transport:     s.transport,
+			AgentID:         s.agentID,
+			Hostname:        s.hostname,
+			LANIPs:          s.localIPs,
+			RemoteIP:        s.remoteIP,
+			LinkUpSinceMs:   s.connectedAt.UnixMilli(),
+			RTTMillis:       s.rttMillis.Load(),
+			JitterMillis:    jitter,
+			PacketLossPct:   loss,
+			LinkBytesIn:     in,
+			LinkBytesOut:    outB,
+			Version:         s.appVersion,
+			Transport:       s.transport,
+			PendingInbound:  s.pendingInbound.Load() != nil,
+			PendingOutbound: s.pendingOutbound.Load() != nil,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].AgentID < out[j].AgentID })
@@ -1396,7 +1410,44 @@ func (g *Gateway) handleControlMsg(sess *agentSession, ctrl transport.Stream, en
 		if err != nil {
 			return err
 		}
+		if sess.Has(control.CapConfigConsent) {
+			// Under consent the only propose_config left is the first-contact seed
+			// (the gateway asked for it via ConfigSeedNeeded). An authored edit must
+			// ride config_proposal — auto-adopting it here would bypass the
+			// operator's approval — so anything past the seed is refused, not applied.
+			if _, gen, ok := g.agents.DesiredConfig(sess.agentID); ok && gen > 0 {
+				sess.logger.Warn("ignoring propose_config on a consent session: authored edits need config_proposal")
+				return nil
+			}
+		}
 		g.adoptProposal(sess, prop.Tunnels)
+		return nil
+
+	case control.TypeConfigProposal:
+		// An agent-authored config edit awaiting the operator's consent; held on the
+		// session, never auto-adopted (see consent.go).
+		if !sess.enrolled || !sess.Has(control.CapConfigConsent) {
+			sess.logger.Warn("ignoring config_proposal: not a consent session")
+			return nil
+		}
+		prop, err := control.Decode[control.ConfigProposal](env)
+		if err != nil {
+			return err
+		}
+		g.holdInboundProposal(sess, *prop)
+		return nil
+
+	case control.TypeConfigDecision:
+		// The agent's verdict on a gateway-authored proposal (see consent.go).
+		if !sess.enrolled || !sess.Has(control.CapConfigConsent) {
+			sess.logger.Warn("ignoring config_decision: not a consent session")
+			return nil
+		}
+		dec, err := control.Decode[control.ConfigDecision](env)
+		if err != nil {
+			return err
+		}
+		g.resolveOutboundDecision(sess, *dec)
 		return nil
 
 	case control.TypeConfigAck:
@@ -1572,6 +1623,33 @@ func (g *Gateway) pushConfigOnConnect(sess *agentSession) {
 	sess.logger.Info("pushed authoritative config", "generation", gen, "tunnels", len(valid))
 }
 
+// adoptAndPush is the single tail every authoritative-config change runs: validate
+// against the agent's scope/policy, reconcile listeners on the actor, adopt the
+// resolved set (bumping the generation), and push the new truth to the agent. The
+// push — auto-applied adopted truth — is what applies the change agent-side, so
+// every path (auto-adopt, consent approval, port reclaim) converges identically. A
+// failed push is not fatal: the config is adopted either way and
+// pushConfigOnConnect re-pushes on the next connect. ok=false means the gateway is
+// shutting down or the agent left the store — nothing was adopted.
+func (g *Gateway) adoptAndPush(sess *agentSession, specs []control.TunnelSpec) (gen uint64, hash string, ok bool) {
+	valid := g.validSpecs(sess, specs)
+	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
+	if !ran {
+		return 0, "", false
+	}
+	resolved := resolvePorts(valid, outcomes)
+	gen, ok = g.agents.AdoptConfig(sess.agentID, resolved)
+	if !ok {
+		return 0, "", false
+	}
+	sess.agentConfigGen.Store(gen)
+	hash = control.HashTunnels(resolved)
+	if err := sess.writeControl(control.TypePushConfig, control.PushConfig{Generation: gen, Hash: hash, Tunnels: resolved}); err != nil {
+		sess.logger.Warn("push_config failed; will re-push on reconnect", "err", err)
+	}
+	return gen, hash, true
+}
+
 // adoptProposal handles a propose_config from an enrolled gateway-config agent: a
 // promoted local edit, or the seed on first contact. The gateway is authoritative,
 // so a proposal is adopted only when it is based on the current generation (or the
@@ -1589,23 +1667,9 @@ func (g *Gateway) adoptProposal(sess *agentSession, proposed []control.TunnelSpe
 		_ = sess.writeControl(control.TypePushConfig, control.PushConfig{Generation: storedGen, Hash: hash, Tunnels: stored})
 		return
 	}
-	valid := g.validSpecs(sess, proposed)
-	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
-	if !ran {
-		return // gateway shutting down
+	if gen, _, ok := g.adoptAndPush(sess, proposed); ok {
+		sess.logger.Info("adopted proposed config", "generation", gen, "tunnels", len(proposed))
 	}
-	resolved := resolvePorts(valid, outcomes)
-	gen, ok := g.agents.AdoptConfig(sess.agentID, resolved)
-	if !ok {
-		return
-	}
-	sess.agentConfigGen.Store(gen)
-	hash := control.HashTunnels(resolved)
-	if err := sess.writeControl(control.TypePushConfig, control.PushConfig{Generation: gen, Hash: hash, Tunnels: resolved}); err != nil {
-		sess.logger.Warn("push_config after propose failed", "err", err)
-		return
-	}
-	sess.logger.Info("adopted proposed config", "generation", gen, "tunnels", len(resolved))
 }
 
 // handleClient runs per accepted public connection: open a stream to the

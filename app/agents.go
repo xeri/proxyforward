@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"proxyforward/internal/control"
 	"proxyforward/internal/engine"
 	"proxyforward/internal/gateway"
 )
@@ -108,6 +109,47 @@ func (a *App) ReclaimPort(agentID, tunnelID string, port int) error {
 		return ErrReclaimUnsupported
 	}
 	return nil
+}
+
+// ApproveAgentProposal adopts an agent-authored config proposal held for this
+// operator's decision: the gateway validates, bumps the generation, pushes the new
+// truth, and answers the agent with an approving decision. Errors are honest
+// refusals to surface verbatim (agent offline, proposal gone, config moved).
+func (a *App) ApproveAgentProposal(agentID, proposalID string) error {
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	return a.analyticsCall(engine.OpApproveProposal, struct {
+		AgentID    string `json:"agentId"`
+		ProposalID string `json:"proposalId"`
+	}{agentID, proposalID}, &resp)
+}
+
+// RejectAgentProposal declines an agent-authored config proposal; the reason is
+// carried back to the agent's UI verbatim (empty gets a neutral default).
+func (a *App) RejectAgentProposal(agentID, proposalID, reason string) error {
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	return a.analyticsCall(engine.OpRejectProposal, struct {
+		AgentID    string `json:"agentId"`
+		ProposalID string `json:"proposalId"`
+		Reason     string `json:"reason"`
+	}{agentID, proposalID, reason}, &resp)
+}
+
+// ProposeAgentConfig submits the gateway-side tunnel editor's edit as a consent
+// proposal to the agent. Nothing applies until the agent approves — the pending
+// proposal shows on AgentDesiredConfig and resolves via the agent's decision (a
+// rejection lands in GatewayEvents with the agent's reason).
+func (a *App) ProposeAgentConfig(agentID string, tunnels []control.TunnelSpec) error {
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	return a.analyticsCall(engine.OpProposeAgentConfig, struct {
+		AgentID string               `json:"agentId"`
+		Tunnels []control.TunnelSpec `json:"tunnels"`
+	}{agentID, tunnels}, &resp)
 }
 
 // agentMutate runs a mutating admin op and turns a not-found result (the agentID

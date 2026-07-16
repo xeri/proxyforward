@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"proxyforward/internal/control"
 	"proxyforward/internal/gateway"
 	"proxyforward/internal/link"
 )
@@ -23,6 +24,11 @@ const (
 	OpGatewayEvents      = "gateway_events"
 	OpAgentDesiredConfig = "agent_desired_config"
 	OpReclaimPort        = "reclaim_port"
+	// Consent-protocol ops (config-consent): the operator's decision on an
+	// agent-authored proposal, and the gateway-authored editor's submit.
+	OpApproveProposal    = "approve_agent_proposal"
+	OpRejectProposal     = "reject_agent_proposal"
+	OpProposeAgentConfig = "propose_agent_config"
 )
 
 // isAgentAdminOp reports whether op is a gateway agent-administration op, so
@@ -30,7 +36,7 @@ const (
 func isAgentAdminOp(op string) bool {
 	switch op {
 	case OpListAgents, OpIssuePairing, OpRevokeAgent, OpRenameAgent, OpSetAgentScope, OpGatewayEvents,
-		OpAgentDesiredConfig, OpReclaimPort:
+		OpAgentDesiredConfig, OpReclaimPort, OpApproveProposal, OpRejectProposal, OpProposeAgentConfig:
 		return true
 	}
 	return false
@@ -129,6 +135,34 @@ func (e *Engine) agentAdminOp(op string, body json.RawMessage) (json.RawMessage,
 			return nil, err
 		}
 		return encodeResult(okResult{ok}, nil)
+	case OpApproveProposal:
+		var q struct {
+			AgentID    string `json:"agentId"`
+			ProposalID string `json:"proposalId"`
+		}
+		if err := decodeBody(body, &q); err != nil {
+			return nil, err
+		}
+		return encodeResult(okResult{true}, e.Gateway.ApproveAgentProposal(q.AgentID, q.ProposalID))
+	case OpRejectProposal:
+		var q struct {
+			AgentID    string `json:"agentId"`
+			ProposalID string `json:"proposalId"`
+			Reason     string `json:"reason"`
+		}
+		if err := decodeBody(body, &q); err != nil {
+			return nil, err
+		}
+		return encodeResult(okResult{true}, e.Gateway.RejectAgentProposal(q.AgentID, q.ProposalID, q.Reason))
+	case OpProposeAgentConfig:
+		var q struct {
+			AgentID string               `json:"agentId"`
+			Tunnels []control.TunnelSpec `json:"tunnels"`
+		}
+		if err := decodeBody(body, &q); err != nil {
+			return nil, err
+		}
+		return encodeResult(okResult{true}, e.Gateway.ProposeAgentConfig(q.AgentID, q.Tunnels))
 	default:
 		return nil, fmt.Errorf("unknown agent admin op %q", op)
 	}
