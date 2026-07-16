@@ -176,6 +176,23 @@ Rules: don't document these as working; don't build UI atop them; trust code ove
 README everywhere. When you implement one, delete its row **in the same commit** (the
 tunnel-editor/Settings hints promising them are polish-backlog item #1).
 
+## Working practice — commit as you go
+
+Nothing enforces this; it is judgment, and ignoring it has already cost a session.
+
+- **Commit each concern the moment it stands alone and `go test ./...` is green.** The
+  tree is not a staging area. Batching to the end of a session is how two workstreams
+  end up interleaved in one file, and untangling them costs far more than the commits
+  would have. Message style and scoping: `.claude/rules/go.md`.
+- **Never let two concerns share a dirty tree.** If a second one appears mid-edit
+  (you came to add a feature and found a bug), commit or stash the first before
+  starting it — deciding later which hunk was whose means reading every line back.
+- **Anything independently shippable branches off `master`**, so it never waits behind
+  an unfinished feature; a security fix especially. Stack only on a real dependency,
+  and check with `git merge-base --is-ancestor` rather than assuming one exists.
+- **Label knowingly-incomplete work `wip:` and say what is missing.** An unlabelled
+  stub reads as a finished decision to the next session.
+
 ## Enforcement — what is a gate, not advice
 
 Blocks a merge → CI. `.github/workflows/ci.yml`: gofmt, vet, `go test -short` (unit +
