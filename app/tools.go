@@ -156,6 +156,12 @@ func redactConfig(cfg *config.Config) config.Config {
 	if r.Agent.CertFingerprint != "" {
 		r.Agent.CertFingerprint = secret
 	}
+	if r.Agent.EnrollTicket != "" {
+		// A pending single-use enrollment ticket is a live credential until the
+		// gateway confirms enrollment — exactly the failing-to-pair window in which
+		// a user grabs a bundle. Never let it ride along.
+		r.Agent.EnrollTicket = secret
+	}
 	if r.Agent.GatewayHost != "" {
 		r.Agent.GatewayHost = host
 	}
