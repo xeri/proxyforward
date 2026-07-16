@@ -182,9 +182,11 @@ type Hello struct {
 	LocalIPs []string `json:"localIps,omitempty"`
 	// AgentPubKey is the agent's long-term Ed25519 public key; AgentSig is its
 	// signature over this connection's TLS channel binding (proof of possession).
-	// Together they authenticate the agent per-identity against the gateway's
-	// allowlist (CapEnroll). Both omitempty: a legacy agent that only knows the
-	// shared token sends neither and the gateway falls back to the token.
+	// Together they authenticate an already-enrolled agent per-identity against
+	// the gateway's allowlist; first-contact enrollment rides EnrollTicket below.
+	// Identity is field-driven, not a capability (acted on before negotiation).
+	// Both omitempty: a legacy agent that only knows the shared token sends
+	// neither and the gateway falls back to the token.
 	AgentPubKey []byte `json:"agentPubKey,omitempty"`
 	AgentSig    []byte `json:"agentSig,omitempty"`
 	// EnrollTicket is a pairing ticket present only on a first-contact enrollment

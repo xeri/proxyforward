@@ -75,20 +75,27 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   dies; failed auth rate-limits per IP, fail2ban-style — successes never count
   (`limits.go authLimiter`). Public conns gate globally and per-IP (`limits.go
   connGate`; defaults in `config.go`).
-- One shared gateway token admits **many** agents, told apart by self-asserted
-  `agentID`: a matching agentID **supersedes** (reconnect), a distinct one is admitted
-  **alongside**. Supersede is anti-flap dampened so an ID collision degrades to a slow
-  contest, not a loop (`actor.go admit`, `noteSupersede`). Residual risk that ships
-  (shared token + self-asserted ID + FCFS ports + no per-agent revocation): a
-  token-holder can supersede or port-squat any agent, recoverable only by rotating the
-  shared token — the mitigation (per-agent tokens/revocation) is deferred.
+- **Per-agent identity is the trust model.** Each agent proves possession of a long-term
+  Ed25519 key the gateway allowlists; its derived `agentID` (`agt_…`) is unforgeable,
+  individually **scoped** (ports/tunnels) and **revocable** — revocation evicts the live
+  session and makes the next connect fatal `ErrCodeRevoked`. Agents join via a single-use
+  enrollment ticket in the pairing code (`gateway/auth.go identityValidator`, `agentstore.go`,
+  `link/cred.go`; mechanics in `docs/agent/architecture.md`). A matching agentID
+  **supersedes** (reconnect), a distinct one is admitted **alongside**; supersede is
+  anti-flap dampened so an ID collision degrades to a slow contest, not a loop
+  (`actor.go admit`, `noteSupersede`).
+- The legacy **shared token** survives only as a migration fallback, accepted while
+  `Gateway.AcceptSharedToken` is on (default for now). A shared-token agent self-asserts its
+  `agentID`, so the old residual risk — supersede or port-squat, recoverable only by rotating
+  the token — persists **for that path only**; enrolled agents are protected by their key and
+  by revocation, and disabling `AcceptSharedToken` once every agent is enrolled closes it.
 - The IPC pipe ACL admits Administrators, SYSTEM, and the interactive user only
   (`ipc/server_windows.go pipeSecurity`).
 - Diagnostics bundles redact every secret, host, IP, and identity; peer IPs become
   stable sha256 pseudonyms (`app/tools.go`, leak-tested in `app/tools_test.go`).
   Anything new that exports data must pass the same no-leak test style.
-- Fatal auth errors (`bad_token`, `agent_conflict`, `version`) stop the agent instead
-  of retry-hammering the gateway (fatal classification in `agent.go Run`), and
+- Fatal auth errors (`bad_token`, `agent_conflict`, `version`, `revoked`) stop the agent
+  instead of retry-hammering the gateway (fatal classification in `agent.go isFatal`), and
   surface in the UI via `EngineFatal` on the tick.
 
 ### Liveness & lifecycle
