@@ -38,6 +38,17 @@ func (a *Agent) ApplyTunnels(tunnels []config.Tunnel) {
 		return
 	}
 
+	if sess.Has(control.CapGatewayConfig) {
+		// Gateway-authoritative: a local edit is a proposal the gateway adopts,
+		// bumps, and pushes back (applyPushedConfig then reconciles the resolved
+		// set). Deterministic — the gateway, not this write, is the source of truth.
+		a.logger.Info("proposing tunnel edit to gateway (hot-apply)", "enabled", len(newEnabled))
+		if err := sess.proposeConfig(tunnels); err != nil {
+			a.logger.Warn("hot-apply propose failed; gateway will re-push on reconnect", "err", err)
+		}
+		return
+	}
+
 	if sess.Has(control.CapTunnelSync) {
 		// Desired-state path: one full-set frame; the gateway reconciles.
 		// Idempotency lives there — unchanged specs keep their listeners and
@@ -73,6 +84,79 @@ func (a *Agent) ApplyTunnels(tunnels []config.Tunnel) {
 			return
 		}
 	}
+}
+
+// applyPushedConfig replaces the agent's enabled tunnel set with the gateway's
+// authoritative one (CapGatewayConfig). The wire spec carries only gateway-relevant
+// fields, so agent-local fields (LocalAddr, ProxyProtocolV2) are kept by ID and
+// disabled local drafts are left untouched. publicPorts is refreshed from the resolved
+// ports and state for removed tunnels is forgotten. Disk persistence is delegated to
+// the optional configPersister; with none set the running set is updated in memory and
+// the gateway re-pushes on the next reconnect.
+func (a *Agent) applyPushedConfig(specs []control.TunnelSpec, generation uint64) {
+	a.cfgMu.Lock()
+	old := a.cfg.Agent.Tunnels
+	merged := mergeTunnels(old, specs)
+	a.cfg.Agent.Tunnels = merged
+	a.cfgMu.Unlock()
+	a.configGen.Store(generation)
+
+	pushed := make(map[string]bool, len(specs))
+	for _, spec := range specs {
+		pushed[spec.ID] = true
+		if spec.PublicPort != 0 {
+			a.publicPorts.Store(spec.ID, spec.PublicPort)
+		}
+	}
+	// Forget state for tunnels that were enabled before but the push dropped.
+	for _, t := range old {
+		if t.Enabled && !pushed[t.ID] {
+			a.publicPorts.Delete(t.ID)
+			a.localUp.Delete(t.ID)
+			a.bwLimiters.Release(t.ID)
+		}
+	}
+	a.logger.Info("applied gateway-authoritative config", "generation", generation, "tunnels", len(specs))
+	if p := a.configPersister.Load(); p != nil {
+		if err := (*p)(append([]config.Tunnel(nil), merged...), generation); err != nil {
+			a.logger.Warn("persisting gateway config failed; gateway will re-push on reconnect", "err", err)
+		}
+	}
+}
+
+// mergeTunnels applies a gateway-authoritative spec set to the agent's tunnels: each
+// pushed spec upserts by ID, keeping the agent-local fields the wire never carries
+// (LocalAddr, ProxyProtocolV2); enabled tunnels the push omits are dropped; disabled
+// local drafts are preserved. enabledSpecs(mergeTunnels(old, specs)) round-trips to
+// specs (for the hashed fields), so the agent's next hello hash matches the gateway's.
+func mergeTunnels(existing []config.Tunnel, specs []control.TunnelSpec) []config.Tunnel {
+	byID := make(map[string]config.Tunnel, len(existing))
+	for _, t := range existing {
+		byID[t.ID] = t
+	}
+	pushed := make(map[string]bool, len(specs))
+	out := make([]config.Tunnel, 0, len(specs)+len(existing))
+	for _, spec := range specs {
+		pushed[spec.ID] = true
+		t := byID[spec.ID] // keeps LocalAddr/Options for a known id; zero for a new one
+		t.ID = spec.ID
+		t.Name = spec.Name
+		t.Type = spec.Type
+		t.PublicPort = spec.PublicPort
+		t.Enabled = true
+		t.Options.OfflineMOTD = spec.OfflineMOTD
+		t.Options.MinecraftAware = spec.MinecraftAware
+		t.Options.BandwidthLimitMbps = spec.BandwidthLimitMbps
+		t.Options.BandwidthLimitScope = spec.BandwidthLimitScope
+		out = append(out, t)
+	}
+	// Disabled local drafts survive — the authoritative set governs only enabled tunnels.
+	for _, t := range existing {
+		if !t.Enabled && !pushed[t.ID] {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func enabledByID(tunnels []config.Tunnel) map[string]config.Tunnel {
