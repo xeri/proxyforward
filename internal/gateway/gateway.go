@@ -323,6 +323,17 @@ func (g *Gateway) Tunnels() []TunnelSnapshot {
 	return a.tunnels()
 }
 
+// Events returns the notable auto-fixes/conflicts (port reassignment, suspected
+// clone) recorded since the cursor, oldest first — the incremental feed the GUI
+// event log polls. A zero cursor returns the whole retained ring.
+func (g *Gateway) Events(sinceSeq uint64) []GatewayEvent {
+	a := g.act()
+	if a == nil {
+		return nil // Start not called yet (status polled early)
+	}
+	return a.eventsSince(sinceSeq)
+}
+
 // AgentConnected reports whether any agent session is currently admitted.
 func (g *Gateway) AgentConnected() bool {
 	a := g.act()
@@ -1209,7 +1220,7 @@ func (g *Gateway) bindTunnel(sess *agentSession, spec control.TunnelSpec) (int, 
 	if berr := g.validateSpec(spec, sess.scope); berr != nil {
 		return 0, berr
 	}
-	port, err := g.act().bindTunnel(sess, spec, g.cfg.Gateway.BindAddr, g.handleClient)
+	port, err := g.act().bindTunnel(sess, spec, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
 	if err != nil {
 		return 0, &bindError{control.ErrCodePortInUse, err.Error()}
 	}
@@ -1230,7 +1241,7 @@ func (g *Gateway) syncTunnels(sess *agentSession, sync *control.SyncTunnels) con
 		}
 		valid = append(valid, spec)
 	}
-	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.handleClient)
+	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
 	if !ran {
 		for _, spec := range valid {
 			results = append(results, control.SyncTunnelResult{TunnelID: spec.ID, Code: control.ErrCodePortInUse, Message: "gateway is shutting down"})
@@ -1293,7 +1304,7 @@ func (g *Gateway) pushConfigOnConnect(sess *agentSession) {
 	if !ok || gen == 0 {
 		return // bootstrap: await the agent's seed propose_config
 	}
-	g.act().reconcile(sess, g.validSpecs(sess, stored), g.cfg.Gateway.BindAddr, g.handleClient)
+	g.act().reconcile(sess, g.validSpecs(sess, stored), g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
 	hash := control.HashTunnels(stored)
 	if sess.reportedConfigHash == hash && sess.agentConfigGen.Load() == gen {
 		return // agent is already in sync; listeners are (re)bound, nothing to push
@@ -1323,7 +1334,7 @@ func (g *Gateway) adoptProposal(sess *agentSession, proposed []control.TunnelSpe
 		return
 	}
 	valid := g.validSpecs(sess, proposed)
-	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.handleClient)
+	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
 	if !ran {
 		return // gateway shutting down
 	}
