@@ -36,4 +36,5 @@ paths:
   double-click launch from Explorer. New CLI subcommands call
   `wincon.AttachParent()` at the top.
 - Commits: lowercase, terse, scope-prefixed ("v2 motion: …"); one concern per
-  commit; protocol and implementation never change in the same commit.
+  commit; protocol and implementation never change in the same commit. Naming +
+  hygiene (no plan labels, no attribution trailers): `docs/agent/naming.md`.
