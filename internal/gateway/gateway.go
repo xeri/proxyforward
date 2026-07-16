@@ -142,8 +142,16 @@ func RunStarted(ctx context.Context, g *Gateway, cfg *config.Config, logger *slo
 		Token:       cfg.Gateway.Token,
 		Fingerprint: g.Fingerprint(),
 	}
-	logger.Info("gateway ready — pair agents with the code below (replace YOUR-PUBLIC-ADDRESS with this machine's public hostname or IP)")
-	logger.Info("pairing code", "code", code.String())
+	// The pairing code embeds the shared gateway token, so it goes to the console and
+	// nowhere else. slog would fan it out to three places that outlive the moment: the
+	// rotating log file, the GUI ring, and — because app/tools.go ships both verbatim
+	// — every diagnostics bundle. Bundles are built to be handed to someone else, and
+	// redactConfig masking Gateway.Token there is worth nothing while the same token
+	// rides along in cleartext inside a logged pairing code. stdout is transient and
+	// unshipped; the GUI never needed this line (it mints codes over IPC — app.go
+	// PairingCode), and the CLI operator reads it off the console they're standing at.
+	logger.Info("gateway ready — pairing code printed on the console")
+	fmt.Printf("\npair agents with this code (replace YOUR-PUBLIC-ADDRESS with this machine's public hostname or IP):\n\n    %s\n\n", code.String())
 	<-ctx.Done()
 	g.Shutdown()
 	return nil
