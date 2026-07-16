@@ -17,8 +17,21 @@
 //   &fleet=multi|old — gateway only. multi: a five-agent fleet (good/fair/poor
 //                      health spread) instead of the default single agent, to
 //                      exercise the Agents roster, its sort/filter, and drill-in.
+//                      The ListAgents roster ALSO carries two offline-enrolled
+//                      agents and one revoked agent in every gateway scenario
+//                      (they never appear in status.agents), so the roster's
+//                      connected/offline/revoked states render without any axis.
 //                      old: a pre-roster daemon (no agents array) → the Agents
-//                      screen's honest-unavailable state
+//                      screen's honest-unavailable state (ListAgents also [])
+//   &conflict=port|clone|both
+//                    — gateway only. Seeds GatewayEvents so the Agents screen's
+//                      conflict callout cards + event log have data: port →
+//                      one port-reassigned event; clone → one clone-suspected
+//                      event (references agent0, always linkable); both → both
+//                      plus an older historical reassign. No axis → no events
+//                      (event log shows its written-empty state, no cards).
+//                      Pair with &fleet=multi so the port event links to its
+//                      contesting agent in the roster.
 //   &paired=0        — this machine has never been paired to a gateway, so the
 //                      sidebar's role switcher can't become the agent and must
 //                      route to setup instead (pair with ?mock=gateway)
@@ -43,7 +56,8 @@ export function installDevMock() {
   const axisAnalyticsOff = params.get('analytics') === 'off'
   const axisUnpaired = params.get('paired') === '0'
   const axisGeo = params.get('geo') || '' // off | empty | error | pending
-  const axisFleet = params.get('fleet') || '' // '' (single agent) | multi
+  const axisFleet = params.get('fleet') || '' // '' (single agent) | multi | old
+  const axisConflict = params.get('conflict') || '' // '' | port | clone | both
   const fx = params.get('fx')
   if (fx) document.documentElement.dataset.fx = fx // &fx=high | &fx=low
 
@@ -287,6 +301,118 @@ export function installDevMock() {
   ]
   const agentHealthOf = (jitter: number, loss: number): string =>
     loss > 5 || jitter > 100 ? 'bad' : loss > 1 || jitter > 30 ? 'warn' : 'good'
+
+  // ---- agent directory (roster: ListAgents / RenameAgent / SetAgentScope /
+  //      RevokeAgent) ----
+  // The gateway's enrollment store as the roster sees it: every enrolled agent
+  // (online or offline) plus the connected shared-token agent. Connected entries
+  // mirror the live fleet (agent0 + the &fleet=multi extras) by agentId, so the
+  // roster, the status.agents health join, and the drill-in all agree; the
+  // offline and revoked entries exist ONLY here (never in status.agents), which
+  // is what exercises the roster's offline/revoked states. Renames, scope edits,
+  // and revokes land in `agentOverrides` and surface on the next ListAgents poll
+  // — the same write-then-repoll loop the real bindings drive. agentId carries
+  // the agt_ prefix for enrolled identities and the self-asserted string for the
+  // shared-token agent (agent0), matching link.AgentID / the gateway store.
+  const mkView = (o: any) => ({
+    agentId: o.agentId, nickname: o.nickname || '', enrolled: o.enrolled !== false,
+    revoked: !!o.revoked, scopePorts: o.scopePorts || [], scopeTunnels: o.scopeTunnels || [],
+    issuedAtMs: o.issuedAtMs || 0, connected: !!o.connected, hostname: o.hostname || '',
+    remoteIp: o.remoteIp || '', linkUpSinceMs: o.linkUpSinceMs || 0, tunnels: o.tunnels || 0,
+  })
+  // Enrollment metadata for the connected extras (nickname/scope/enrolled age),
+  // keyed by the same agentId the live fleet and AGENT_SCALE use.
+  const EXTRA_ENROLL: Record<string, {nick: string; ports: number[]; tuns: string[]; days: number}> = {
+    '7788990011223344aabbccddeeff0011': {nick: 'Survival server', ports: [25566, 25567], tuns: [], days: 26},
+    ccddeeff001122334455667788990011: {nick: '', ports: [25568], tuns: [], days: 12},
+    aa00bb11cc22dd33ee44ff5566778899: {nick: 'Creative hub', ports: [], tuns: [], days: 47},
+    f0e1d2c3b4a5968778695a4b3c2d1e0f: {nick: 'Skyblock island', ports: [], tuns: ['c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f'], days: 9},
+  }
+  const connectedViews = () => {
+    if (!state.linkUp) return []
+    // agent0 is the connected shared-token agent: no nickname (→ hostname title),
+    // enrolled:false, unrestricted. Its id is self-asserted, not agt_-prefixed.
+    const a0 = mkView({
+      agentId: 'agentid', enrolled: false, connected: true, hostname: 'DESKTOP-DEV',
+      remoteIp: '84.23.101.7', linkUpSinceMs: LINK_UP_SINCE, tunnels: 1, issuedAtMs: INSTALLED_AT,
+    })
+    if (axisFleet !== 'multi') return [a0]
+    const extras = extraAgents.map(a => {
+      const e = EXTRA_ENROLL[a.agentId] ?? {nick: '', ports: [], tuns: [], days: 20}
+      return mkView({
+        agentId: a.agentId, nickname: e.nick, enrolled: true, connected: true,
+        hostname: a.hostname, remoteIp: a.remote, linkUpSinceMs: a.upSinceMs,
+        tunnels: a.tunnels.length, scopePorts: e.ports, scopeTunnels: e.tuns,
+        issuedAtMs: now0 - e.days * 86_400_000,
+      })
+    })
+    return [a0, ...extras]
+  }
+  // Enrolled agents that are NOT currently connected, plus one revoked — always
+  // in the roster regardless of link state, so their states always render.
+  const offlineViews = [
+    mkView({agentId: 'agt_h4t2q9zm', nickname: 'Backup box', enrolled: true, hostname: 'BACKUP-NAS', scopePorts: [25580], issuedAtMs: now0 - 18 * 86_400_000}),
+    mkView({agentId: 'agt_b7k3n5pd', enrolled: true, hostname: 'SEASONAL-SMP', issuedAtMs: now0 - 40 * 86_400_000}),
+  ]
+  const revokedViews = [
+    mkView({agentId: 'agt_x2m8r6ct', nickname: 'Old laptop', enrolled: true, revoked: true, hostname: 'LAPTOP-OLD', issuedAtMs: now0 - 63 * 86_400_000}),
+  ]
+  const knownAgentIds = new Set<string>([
+    'agentid', ...extraAgents.map(a => a.agentId),
+    ...offlineViews.map(v => v.agentId), ...revokedViews.map(v => v.agentId),
+  ])
+  // Mutations from the write bindings, applied over the composed roster.
+  const agentOverrides = new Map<string, any>()
+  const applyOverride = (v: any) => {
+    const o = agentOverrides.get(v.agentId)
+    if (!o) return v
+    return {
+      ...v,
+      ...(o.nickname !== undefined ? {nickname: o.nickname} : {}),
+      ...(o.scopePorts !== undefined ? {scopePorts: o.scopePorts} : {}),
+      ...(o.scopeTunnels !== undefined ? {scopeTunnels: o.scopeTunnels} : {}),
+      ...(o.revoked !== undefined ? {revoked: o.revoked, connected: o.revoked ? false : v.connected} : {}),
+    }
+  }
+  const listAgents = () => {
+    // The roster is a gateway surface; an agent (or a pre-roster daemon) has none.
+    if (state.role !== 'gateway' || axisFleet === 'old') return []
+    return [...connectedViews(), ...offlineViews, ...revokedViews].map(applyOverride)
+  }
+
+  // ---- gateway conflict / auto-fix events (GatewayEvents) ----
+  // Seeded once from the &conflict axis. Both event kinds ARE conflicts (there
+  // is no benign kind), so with no axis the ring is empty — the event log shows
+  // its written-empty state and no conflict cards appear. GatewayEvents(seq) is
+  // incremental by cursor, so the first poll returns all seeds and later polls
+  // return [] (a quiet ring), which is exactly what the since-cursor tail wants.
+  let evSeq = 0
+  const gwEvents: any[] = []
+  const evNow = Date.now()
+  const pushEvent = (o: any) => gwEvents.push({seq: ++evSeq, ...o})
+  if (axisConflict === 'both') {
+    pushEvent({
+      timeMs: evNow - 52 * 60_000, kind: 'port-reassigned',
+      agentId: 'aa00bb11cc22dd33ee44ff5566778899', tunnelId: 'ab00cd11ef22ab33cd44ef5566778890',
+      requestedPort: 25569, actualPort: 25574,
+      message: 'Requested public port 25569 was busy; CREATIVE-HUB’s "Creative" tunnel was auto-assigned 25574.',
+    })
+  }
+  if (axisConflict === 'port' || axisConflict === 'both') {
+    pushEvent({
+      timeMs: evNow - 8 * 60_000, kind: 'port-reassigned',
+      agentId: '7788990011223344aabbccddeeff0011', tunnelId: 'cc22334455667788990011aabbccddff',
+      requestedPort: 25567, actualPort: 25572,
+      message: 'Requested public port 25567 was already bound; SURVIVAL-RIG’s "Lobby" tunnel was auto-assigned 25572 instead.',
+    })
+  }
+  if (axisConflict === 'clone' || axisConflict === 'both') {
+    pushEvent({
+      timeMs: evNow - 3 * 60_000, kind: 'clone-suspected', agentId: 'agentid',
+      message: 'Agent "agentid" reconnected from 203.0.113.77:52210 while still linked from 84.23.101.7:53880 — possible cloned identity or a shared token in use on two machines.',
+    })
+  }
+  const gatewayEvents = (sinceSeq: number) => gwEvents.filter(e => e.seq > (sinceSeq || 0))
 
   const up = !isWizard && !axisLinkDown && !axisFatal
   const state = {
@@ -788,6 +914,41 @@ export function installDevMock() {
     BrowseMMDB: (title: string) => ok(/asn/i.test(title) ? 'C:\\maxmind\\GeoLite2-ASN.mmdb' : 'C:\\maxmind\\GeoLite2-City.mmdb'),
     GetConfig: () => ok(config),
     PairingCode: () => gated(() => 'pxf://play.example.com:8474/v1/pair/3f8a1c9e2b7d4056a1b2c3d4e5f60718#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'),
+    // Phase 8 agent management: the roster (ListAgents) + the gateway event ring
+    // (GatewayEvents) are reads (ok); the write bindings are gated and mutate the
+    // mock world (agentOverrides) so the UI updates on the next poll, mirroring
+    // the real write-then-repoll loop.
+    ListAgents: () => ok(listAgents()),
+    GatewayEvents: (sinceSeq: number) => ok(gatewayEvents(sinceSeq)),
+    IssuePairingCode: (_reusable: boolean, _ttlSecs: number, _ports: number[], _tunnels: string[]) =>
+      gated(() => {
+        // Each call mints a fresh enrollment ticket → a different token segment,
+        // so "New code" and the reusable toggle visibly change the shown code.
+        const tok = Array.from({length: 16}, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('')
+        return `pxf://play.example.com:8474/v1/pair/${tok}#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08`
+      }),
+    RenameAgent: (agentId: string, nickname: string) => gated(() => {
+      const o = agentOverrides.get(agentId) ?? {}
+      o.nickname = nickname
+      agentOverrides.set(agentId, o)
+      return undefined
+    }),
+    SetAgentScope: (agentId: string, ports: number[], tunnels: string[]) => gated(() => {
+      const o = agentOverrides.get(agentId) ?? {}
+      o.scopePorts = ports; o.scopeTunnels = tunnels
+      agentOverrides.set(agentId, o)
+      return undefined
+    }),
+    // Rejects when the agent is unknown, exactly as the real RevokeAgent does.
+    RevokeAgent: (agentId: string) => gated(() =>
+      knownAgentIds.has(agentId)
+        ? (() => {
+          const o = agentOverrides.get(agentId) ?? {}
+          o.revoked = true; o.connected = false
+          agentOverrides.set(agentId, o)
+          return undefined
+        })()
+        : Promise.reject(new Error(`agent ${agentId} not found (it may have already disconnected or been removed)`))),
     // No OS deep link in browser dev; the real app pulls this once on mount to open
     // straight into pairing when launched via a clicked pxf:// link.
     TakePendingDeepLink: () => ok(''),

@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from 'react'
-import {GetConfig, PairingCode, SetupAgent, SetupGateway} from '../../wailsjs/go/app/App'
-import {Button, Codebox, CopyButton, ErrorBanner, Field, Spinner, TextInput} from '../components/ui'
+import {GetConfig, IssuePairingCode, SetupAgent, SetupGateway} from '../../wailsjs/go/app/App'
+import {Button, Codebox, CopyButton, Disclosure, ErrorBanner, Field, Spinner, TextInput, Toggle} from '../components/ui'
 import {Emblem} from '../components/Emblem'
 import {ImportSetupFlow} from '../components/SetupBackup'
 import {IconCheck, IconGlobe, IconRefresh, IconServer, IconShield, IconSpark} from '../components/icons'
@@ -179,22 +179,31 @@ export function Wizard({status, onDone}: {status: UIStatus | null; onDone: () =>
   )
 }
 
-/** GatewayLive: the gateway is up — hand over the pairing code and listen for
- * the real handshake on the live ticks. */
+/** GatewayLive: the gateway is up — issue a single-use enrollment code, hand it
+ * over, and listen for the real handshake on the live ticks. Each machine gets a
+ * fresh code; the reusable toggle (advanced) trades that for a multi-agent code. */
 function GatewayLive({status, controlPort, onDone}: {
   status: UIStatus | null; controlPort: number; onDone: () => void
 }) {
   const [code, setCode] = useState('')
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [reusable, setReusable] = useState(false)
+  const [gen, setGen] = useState(0)
+
+  // (Re)issue the enrollment ticket on mount, whenever the reusable toggle
+  // flips, and whenever "New code" bumps `gen`. Retries briefly in case the
+  // gateway's listener isn't ready yet, and cancels cleanly on the next issue.
   useEffect(() => {
     let cancelled = false
+    setBusy(true); setCode(''); setErr('')
     const poll = (n: number) => {
-      PairingCode().then(c => { if (!cancelled) setCode(c) })
-        .catch(e => { if (!cancelled) { if (n < 20) setTimeout(() => poll(n + 1), 250); else setErr(String(e)) } })
+      IssuePairingCode(reusable, 600, [], []).then(c => { if (!cancelled) { setCode(c); setBusy(false) } })
+        .catch(e => { if (!cancelled) { if (n < 20) setTimeout(() => poll(n + 1), 250); else { setErr(String(e)); setBusy(false) } } })
     }
     poll(0)
     return () => { cancelled = true }
-  }, [])
+  }, [reusable, gen])
 
   const paired = !!status?.agentConnected
   return (
@@ -203,13 +212,33 @@ function GatewayLive({status, controlPort, onDone}: {
         <IconCheck size={18} /> <span className="font-medium">Gateway is live</span>
       </div>
       <p className="mb-2 text-sm text-[var(--text-2)]">
-        Copy this pairing code and paste it into proxyforward on your Minecraft machine:
+        Copy this one-time pairing code and paste it into proxyforward on your Minecraft machine:
       </p>
       {code
         ? <Codebox text={code} action={<CopyButton text={code} />} />
         : err
-          ? <ErrorBanner message={err} />
+          ? <ErrorBanner message={err} onDismiss={() => setErr('')} />
           : <div className="pf-well px-3 py-2.5 text-sm text-[var(--text-3)]">Generating code…</div>}
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <span className="min-w-0 text-xs text-[var(--text-3)]">
+          {reusable
+            ? 'Reusable — enrolls multiple agents until you revoke it.'
+            : 'Single-use — enrolls one agent, then expires. Valid for 10 minutes.'}
+        </span>
+        <Button variant="ghost" size="sm" onClick={() => setGen(g => g + 1)} disabled={busy}>
+          <IconRefresh size={13} /> New code
+        </Button>
+      </div>
+
+      <div className="mt-3">
+        <Disclosure label="Advanced" hint="Reuse this code for more than one agent">
+          <Toggle
+            checked={reusable} onChange={setReusable}
+            label="Reusable code"
+            hint="Let this code enroll more than one machine. Otherwise it works exactly once, then expires." />
+        </Disclosure>
+      </div>
+
       <ol className="mt-4 space-y-1.5 text-sm text-[var(--text-2)]">
         <li>1. Open proxyforward on the Minecraft machine.</li>
         <li>2. Choose <b>"This hosts Minecraft"</b>.</li>
