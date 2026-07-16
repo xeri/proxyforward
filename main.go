@@ -151,7 +151,9 @@ func newPairCmd() *cobra.Command {
 			cfg.Agent.CertFingerprint = code.Fingerprint
 			if len(cfg.Agent.Tunnels) == 0 {
 				cfg.Agent.Tunnels = []config.Tunnel{{
-					ID:         config.NewID(),
+					// The only tunnel, so nothing is taken yet — a typed tnl_ id
+					// (link.TunnelID) instead of a random hex one.
+					ID:         link.TunnelID("Minecraft", func(string) bool { return false }),
 					Name:       "Minecraft",
 					Type:       config.TunnelTCP,
 					LocalAddr:  localAddr,

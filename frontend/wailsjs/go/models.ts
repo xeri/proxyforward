@@ -1032,8 +1032,73 @@ export namespace config {
 
 }
 
+export namespace control {
+	
+	export class TunnelSpec {
+	    id: string;
+	    name: string;
+	    type: string;
+	    publicPort: number;
+	    offlineMotd?: string;
+	    minecraftAware?: boolean;
+	    bandwidthLimitMbps?: number;
+	    bandwidthLimitScope?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TunnelSpec(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.publicPort = source["publicPort"];
+	        this.offlineMotd = source["offlineMotd"];
+	        this.minecraftAware = source["minecraftAware"];
+	        this.bandwidthLimitMbps = source["bandwidthLimitMbps"];
+	        this.bandwidthLimitScope = source["bandwidthLimitScope"];
+	    }
+	}
+
+}
+
 export namespace gateway {
 	
+	export class AgentConfigView {
+	    generation: number;
+	    tunnels: control.TunnelSpec[];
+	    enrolled: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentConfigView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.generation = source["generation"];
+	        this.tunnels = this.convertValues(source["tunnels"], control.TunnelSpec);
+	        this.enrolled = source["enrolled"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class AgentView {
 	    agentId: string;
 	    nickname: string;
@@ -1047,6 +1112,8 @@ export namespace gateway {
 	    remoteIp: string;
 	    linkUpSinceMs: number;
 	    tunnels: number;
+	    version: string;
+	    transport: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentView(source);
@@ -1066,6 +1133,8 @@ export namespace gateway {
 	        this.remoteIp = source["remoteIp"];
 	        this.linkUpSinceMs = source["linkUpSinceMs"];
 	        this.tunnels = source["tunnels"];
+	        this.version = source["version"];
+	        this.transport = source["transport"];
 	    }
 	}
 	export class GatewayEvent {

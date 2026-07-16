@@ -30,7 +30,8 @@ list of [what isn't built yet](https://github.com/xeri/proxyforward/wiki/Not-Yet
 ## Contents
 
 - [How it works](#how-it-works)
-- [Download](#download) · [Quick start](#quick-start-two-machines)
+- [Download](#download) · [Quick start](#quick-start-two-machines) ·
+  [Ports to forward](#ports-to-forward--on-the-gateway-only)
 - **Engineering**
   - [The tunnel in one link — three data planes](#the-tunnel-in-one-link--three-data-planes)
   - [Head-of-line blocking, and how each plane answers it](#head-of-line-blocking-and-how-each-plane-answers-it)
@@ -74,7 +75,7 @@ flowchart LR
 
 One `proxyforward.exe` runs in **either role** — as a WebView2 desktop app (Wails + React
 19), a `--headless` console process, or a Windows service. Nothing on the Minecraft
-machine's router changes; only the gateway forwards a port.
+machine's router changes; only the gateway forwards ports.
 
 ## Download
 
@@ -103,7 +104,8 @@ gh attestation verify proxyforward-<version>-windows-amd64.exe -R xeri/proxyforw
    [DNS and dynamic IPs](#dns-and-dynamic-ips)) and click **Start gateway**.
 3. **Copy** the pairing code it shows:
    `pxf://host:8474/v1/pair/<token>#sha256:<fingerprint>`
-4. **Forward** port **25565** (or your chosen public port) on the router to this machine,
+4. **Forward** **25565/TCP** (or your chosen public port) *and* **8474/TCP+UDP** on the
+   router to this machine — see [Ports to forward](#ports-to-forward--on-the-gateway-only) —
    and allow the inbound firewall rule when prompted
    (Settings → Windows integration → *Add rule*).
 
@@ -118,6 +120,33 @@ gh attestation verify proxyforward-<version>-windows-amd64.exe -R xeri/proxyforw
 The agent's dashboard turns green and players join at `your-host:25565`. Use
 **Dashboard → Test public reachability** to validate the whole path
 (DNS → firewall → router → tunnel → server) in one click.
+
+### Ports to forward — on the gateway only
+
+The agent needs **nothing** forwarded; it only ever dials out. On the gateway, two port
+numbers cover every transport:
+
+| Port | Protocol | Who connects | Needed when |
+|---|---|---|---|
+| **25565** — your public port | TCP | Players | Always, one per tunnel |
+| **8474** — `gateway.control_port` | TCP | Agents: the control link **and** every per-conn data connection | Always |
+| **8474** — the same number | UDP | Agents: QUIC sessions | Only for the QUIC plane (`quic_enabled`, on by default) |
+
+Two things that surprise people:
+
+- **multi-TCP (`per-conn`) needs no extra ports.** Its N+1 connections all dial *back to
+  the same* control port — they are extra sockets, not extra listeners. Nothing to open
+  beyond 8474/TCP.
+- **QUIC is only the middle hop.** Players always reach the gateway over TCP, and the agent
+  always dials Minecraft over TCP; the transport carrying the bytes *between* them is
+  invisible at both ends. Forward 8474/TCP only and `auto` quietly settles on per-conn —
+  nothing breaks, you just lose QUIC's per-stream loss recovery and IP migration.
+
+The UDP entry shares the TCP control port's number on purpose: the two port spaces are
+independent, so one `host:port` in the pairing code serves both. And if the gateway's
+public port turns out to be taken, it binds a free alternative rather than failing
+(**[auto port-reassign](#one-gateway-many-agents--identity--enrollment)**) — forward the
+port it reports.
 
 ---
 

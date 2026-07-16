@@ -60,6 +60,14 @@ type agentSession struct {
 	// handleClient acquires every player's leg through it. Immutable like caps.
 	dp dataPlane
 
+	// appVersion is the agent build's version (from its hello) and transport is the
+	// active data-plane label (quic | per-conn | mux) chosen at admission. Both are
+	// read-only GUI surfacing — the roster's "Update" badge and the drill-in's
+	// transport chip. Set at admission, immutable after; the agent owns its transport
+	// dial, the gateway only names what it accepted.
+	appVersion string
+	transport  string
+
 	sess    atomic.Pointer[sessionBox]
 	evicted atomic.Bool
 
@@ -522,6 +530,20 @@ func (a *actor) unbindTunnel(sess *agentSession, tunnelID string) {
 	a.do(func() {
 		a.unbindLocked(sess, tunnelID)
 	})
+}
+
+// portHolder finds the session currently bound to port and the tunnel it holds it
+// with, or (nil, "") when no agent holds it. Runs on the actor goroutine (the caller
+// wraps it in do), so reading the listener map is race-free.
+func (a *actor) portHolder(port int) (*agentSession, string) {
+	for _, subtree := range a.listeners {
+		for tunnelID, pl := range subtree {
+			if pl.ln.Addr().(*net.TCPAddr).Port == port {
+				return pl.owner, tunnelID
+			}
+		}
+	}
+	return nil, ""
 }
 
 // reconcileOutcome is one tunnel's result from a reconcile pass.

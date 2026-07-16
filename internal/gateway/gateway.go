@@ -356,6 +356,11 @@ type AgentView struct {
 	RemoteIP      string   `json:"remoteIp"`
 	LinkUpSinceMs int64    `json:"linkUpSinceMs"`
 	Tunnels       int      `json:"tunnels"`
+	// Version and Transport come from the live session (empty when offline): the
+	// agent build's version, feeding the roster's "Update" badge, and the active
+	// data plane (quic | per-conn | mux) shown in the drill-in.
+	Version   string `json:"version"`
+	Transport string `json:"transport"`
 }
 
 // ListAgentViews joins the enrollment allowlist with live sessions and tunnel
@@ -386,6 +391,7 @@ func (g *Gateway) ListAgentViews() []AgentView {
 		}
 		if l, ok := live[r.AgentID]; ok {
 			v.Connected, v.Hostname, v.RemoteIP, v.LinkUpSinceMs = true, l.Hostname, l.RemoteIP, l.LinkUpSinceMs
+			v.Version, v.Transport = l.Version, l.Transport
 		}
 		out = append(out, v)
 	}
@@ -396,11 +402,134 @@ func (g *Gateway) ListAgentViews() []AgentView {
 		out = append(out, AgentView{
 			AgentID: id, Enrolled: false, Connected: true,
 			Hostname: l.Hostname, RemoteIP: l.RemoteIP, LinkUpSinceMs: l.LinkUpSinceMs,
-			Tunnels: tunCount[id],
+			Tunnels: tunCount[id], Version: l.Version, Transport: l.Transport,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].AgentID < out[j].AgentID })
 	return out
+}
+
+// AgentConfigView is the gateway-authoritative desired tunnel set the GUI shows in
+// an agent's drill-in: the tunnels the gateway holds for that agent, and their
+// generation. Enrolled is false for a shared-token/unknown agent — whose config is
+// agent-pushed, not gateway-held — so the panel renders an honest unavailable state
+// rather than a misleading empty list.
+type AgentConfigView struct {
+	Generation uint64               `json:"generation"`
+	Tunnels    []control.TunnelSpec `json:"tunnels"`
+	Enrolled   bool                 `json:"enrolled"`
+}
+
+// AgentDesiredConfig returns the gateway-held desired config for an agent (read only;
+// the editing/promote path is Batch B). Enrolled=false means the agent isn't in the
+// allowlist — a shared-token agent pushes its own config, so there is nothing
+// gateway-authoritative to show.
+func (g *Gateway) AgentDesiredConfig(agentID string) AgentConfigView {
+	if g.agents == nil {
+		return AgentConfigView{}
+	}
+	tunnels, gen, ok := g.agents.DesiredConfig(agentID)
+	return AgentConfigView{Generation: gen, Tunnels: tunnels, Enrolled: ok}
+}
+
+// ReclaimPort gives public port `port` to requesterID's tunnel, bumping whatever
+// enrolled agent currently holds that port to an ephemeral one. This is arbitration,
+// not consent: the incumbent is pushed its new config and its GUI notices the change,
+// but it gets no veto — port allocation is the gateway's to decide.
+//
+// It reports false (no error) when the move isn't the gateway's to make: either party
+// authenticating with the legacy shared token pushes its own config, so the gateway
+// cannot rewrite it. The incumbent is released before the requester binds, so the
+// contested port is provably free in between (the actor's unbind waits out the accept
+// loop) and the requester's bind can't lose a race to auto-reassignment.
+func (g *Gateway) ReclaimPort(requesterID, tunnelID string, port int) (bool, error) {
+	a := g.act()
+	if a == nil {
+		return false, fmt.Errorf("gateway is still starting")
+	}
+	if g.agents == nil || port <= 0 {
+		return false, nil
+	}
+	// Resolve the requester's session and the port's current holder together on the
+	// actor goroutine — the agent and listener maps are its to read.
+	var (
+		requester, incumbent *agentSession
+		incumbentTunnel      string
+	)
+	if ran := a.do(func() {
+		requester = a.agents[requesterID]
+		incumbent, incumbentTunnel = a.portHolder(port)
+	}); !ran {
+		return false, fmt.Errorf("gateway is shutting down")
+	}
+	// Only a live, enrolled requester has a gateway-held config to rewrite.
+	if requester == nil || !requester.enrolled {
+		return false, nil
+	}
+	// A different agent on the port must be enrolled too, or the gateway has no
+	// authority to move it aside.
+	if incumbent != nil && incumbent != requester {
+		if !incumbent.enrolled {
+			return false, nil
+		}
+		// 0 asks for an ephemeral port; reconcile resolves it to the concrete one it
+		// actually bound, so the incumbent's stored + pushed config stay in step.
+		if !g.rewriteTunnelPort(incumbent, incumbentTunnel, 0) {
+			return false, nil
+		}
+	}
+	if !g.rewriteTunnelPort(requester, tunnelID, port) {
+		return false, nil
+	}
+	a.do(func() {
+		a.recordEvent(GatewayEvent{
+			Kind: EventPortReclaimed, AgentID: requesterID, TunnelID: tunnelID,
+			RequestedPort: port, ActualPort: port,
+			Message: fmt.Sprintf("Public port %d was reclaimed for this agent; the agent that held it moved to another port.", port),
+		})
+	})
+	return true, nil
+}
+
+// rewriteTunnelPort rewrites one tunnel's public port in an enrolled agent's
+// authoritative config and re-publishes it — the same adopt → reconcile → push the
+// rest of the gateway-authoritative path uses (adoptProposal). It reports false when
+// the agent holds no such tunnel or the gateway is shutting down. A push to a
+// momentarily-unreachable agent is not fatal: the config is adopted either way and
+// pushConfigOnConnect re-pushes it on the next connect.
+func (g *Gateway) rewriteTunnelPort(sess *agentSession, tunnelID string, port int) bool {
+	stored, _, ok := g.agents.DesiredConfig(sess.agentID)
+	if !ok {
+		return false
+	}
+	next := make([]control.TunnelSpec, 0, len(stored))
+	found := false
+	for _, s := range stored {
+		if s.ID == tunnelID {
+			s.PublicPort = port
+			found = true
+		}
+		next = append(next, s)
+	}
+	if !found {
+		return false
+	}
+	valid := g.validSpecs(sess, next)
+	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
+	if !ran {
+		return false
+	}
+	resolved := resolvePorts(valid, outcomes)
+	gen, ok := g.agents.AdoptConfig(sess.agentID, resolved)
+	if !ok {
+		return false
+	}
+	sess.agentConfigGen.Store(gen)
+	hash := control.HashTunnels(resolved)
+	if err := sess.writeControl(control.TypePushConfig, control.PushConfig{Generation: gen, Hash: hash, Tunnels: resolved}); err != nil {
+		sess.logger.Warn("push_config after port reclaim failed", "err", err)
+	}
+	return true
 }
 
 // TunnelPort reports the actual bound public port of a tunnel (0, false if
@@ -520,6 +649,10 @@ type AgentLink struct {
 	PacketLossPct float64
 	LinkBytesIn   int64
 	LinkBytesOut  int64
+	// Version is the agent build's version and Transport its active data plane
+	// (quic | per-conn | mux) — read-only surfacing carried onto AgentView.
+	Version   string
+	Transport string
 }
 
 // Agents returns every connected agent's link state, sorted by agentID so the
@@ -548,6 +681,8 @@ func (g *Gateway) Agents() []AgentLink {
 			PacketLossPct: loss,
 			LinkBytesIn:   in,
 			LinkBytesOut:  outB,
+			Version:       s.appVersion,
+			Transport:     s.transport,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].AgentID < out[j].AgentID })
@@ -993,6 +1128,20 @@ func withoutCap(caps []string, drop string) []string {
 	return out
 }
 
+// transportName labels a session's active data plane for GUI display, mirroring
+// pickDataPlane's choice. A nil conn is the QUIC accept path (the QUIC session is the
+// whole transport); otherwise the negotiated caps decide per-conn vs the shared mux.
+// The agent owns its dial choice — this only names what the gateway accepted.
+func transportName(conn net.Conn, caps control.CapSet) string {
+	if conn == nil {
+		return "quic"
+	}
+	if caps.Has(control.CapPerConn) {
+		return "per-conn"
+	}
+	return "mux"
+}
+
 func (g *Gateway) buildAndAdmit(ctx context.Context, conn net.Conn, hello *control.Hello, identity Identity, peerIP string, logger *slog.Logger) (*agentSession, []string, error) {
 	negotiated := control.IntersectCaps(hello.Capabilities, control.SupportedCapabilities)
 	// Gateway-authoritative config is keyed to a durable Ed25519 identity, so it is
@@ -1017,6 +1166,8 @@ func (g *Gateway) buildAndAdmit(ctx context.Context, conn net.Conn, hello *contr
 		localIPs:    hello.LocalIPs,
 		caps:        caps,
 		dp:          g.pickDataPlane(caps),
+		appVersion:  hello.AppVersion,
+		transport:   transportName(conn, caps),
 		quality:     linkquality.New(lossWindow),
 		ctx:         sctx,
 		cancel:      cancel,

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 
 	"proxyforward/internal/engine"
@@ -65,6 +66,48 @@ func (a *App) SetAgentScope(agentID string, ports []int, tunnels []string) error
 		Ports   []int    `json:"ports"`
 		Tunnels []string `json:"tunnels"`
 	}{agentID, ports, tunnels})
+}
+
+// AgentDesiredConfig returns the gateway-authoritative desired tunnel set shown in an
+// agent's drill-in (read only; editing is Batch B). A returned error is the honest
+// unavailable state (agent role, detached, or an old daemon); on the wire a
+// zero-value view with Enrolled=false means a shared-token/unknown agent whose config
+// is agent-pushed, not gateway-held.
+func (a *App) AgentDesiredConfig(agentID string) (gateway.AgentConfigView, error) {
+	req := struct {
+		AgentID string `json:"agentId"`
+	}{agentID}
+	var out gateway.AgentConfigView
+	if err := a.analyticsCall(engine.OpAgentDesiredConfig, req, &out); err != nil {
+		return gateway.AgentConfigView{}, err
+	}
+	return out, nil
+}
+
+// ErrReclaimUnsupported is returned when a port reclaim can't proceed because one of
+// the two agents is a shared-token/legacy agent whose config the gateway can't
+// rewrite. The conflict card renders it as the reason the action is unavailable.
+var ErrReclaimUnsupported = errors.New("reclaim needs both agents enrolled — a shared-token agent's config is agent-pushed, not gateway-held")
+
+// ReclaimPort reassigns tunnelID's public port to agentID, bumping whatever enrolled
+// agent currently holds that port to an ephemeral one (which gets a notice). It
+// refuses (ErrReclaimUnsupported) when either party is a shared-token/legacy agent.
+func (a *App) ReclaimPort(agentID, tunnelID string, port int) error {
+	req := struct {
+		AgentID  string `json:"agentId"`
+		TunnelID string `json:"tunnelId"`
+		Port     int    `json:"port"`
+	}{agentID, tunnelID, port}
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	if err := a.analyticsCall(engine.OpReclaimPort, req, &resp); err != nil {
+		return err
+	}
+	if !resp.OK {
+		return ErrReclaimUnsupported
+	}
+	return nil
 }
 
 // agentMutate runs a mutating admin op and turns a not-found result (the agentID

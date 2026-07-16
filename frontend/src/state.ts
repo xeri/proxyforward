@@ -70,6 +70,14 @@ export function scopeLabel(s: string): string {
   return BANDWIDTH_SCOPES.find(o => o.value === (s || 'combined'))?.label ?? 'Combined'
 }
 
+/** Human labels for the active data-plane transport (Settings' link line and the
+ * Agents drill-in chip). An unknown/empty value renders as "—" at the call site. */
+export const TRANSPORT_LABEL: Record<string, string> = {
+  quic: 'QUIC',
+  'per-conn': 'Per-connection',
+  mux: 'Multiplexed',
+}
+
 export function fmtDuration(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
   const h = Math.floor(s / 3600)

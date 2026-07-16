@@ -6,6 +6,10 @@ export function AgentBandwidthHistory(arg1, arg2, arg3) {
   return window['go']['app']['App']['AgentBandwidthHistory'](arg1, arg2, arg3);
 }
 
+export function AgentDesiredConfig(arg1) {
+  return window['go']['app']['App']['AgentDesiredConfig'](arg1);
+}
+
 export function AvatarHandler() {
   return window['go']['app']['App']['AvatarHandler']();
 }
@@ -132,6 +136,10 @@ export function PlayerLatency(arg1, arg2) {
 
 export function Players(arg1) {
   return window['go']['app']['App']['Players'](arg1);
+}
+
+export function ReclaimPort(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ReclaimPort'](arg1, arg2, arg3);
 }
 
 export function RegenerateToken() {

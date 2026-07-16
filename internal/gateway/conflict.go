@@ -20,6 +20,11 @@ const (
 	// which a derived (pubkey-bound) identity should make impossible unless the key
 	// was copied. The card nudges the user to re-enroll for a distinct identity.
 	EventCloneSuspected = "clone-suspected"
+	// EventPortReclaimed: an operator gave a contested public port to one enrolled
+	// agent, bumping the enrolled incumbent that held it to an ephemeral port. Unlike
+	// the two above it is a completed action, not an open conflict — it lands in the
+	// event log for the record, never as a resolvable card.
+	EventPortReclaimed = "port-reclaimed"
 )
 
 // GatewayEvent is one notable, user-facing thing the gateway did or noticed —

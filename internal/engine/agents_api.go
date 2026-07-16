@@ -15,19 +15,22 @@ import (
 // JSON envelope so each App binding is one small typed wrapper. They act on the
 // live gateway (allowlist + sessions + event ring), never the analytics store.
 const (
-	OpListAgents    = "list_agents"
-	OpIssuePairing  = "issue_pairing"
-	OpRevokeAgent   = "revoke_agent"
-	OpRenameAgent   = "rename_agent"
-	OpSetAgentScope = "set_agent_scope"
-	OpGatewayEvents = "gateway_events"
+	OpListAgents         = "list_agents"
+	OpIssuePairing       = "issue_pairing"
+	OpRevokeAgent        = "revoke_agent"
+	OpRenameAgent        = "rename_agent"
+	OpSetAgentScope      = "set_agent_scope"
+	OpGatewayEvents      = "gateway_events"
+	OpAgentDesiredConfig = "agent_desired_config"
+	OpReclaimPort        = "reclaim_port"
 )
 
 // isAgentAdminOp reports whether op is a gateway agent-administration op, so
 // analyticsOp can route it before the analytics-store availability check.
 func isAgentAdminOp(op string) bool {
 	switch op {
-	case OpListAgents, OpIssuePairing, OpRevokeAgent, OpRenameAgent, OpSetAgentScope, OpGatewayEvents:
+	case OpListAgents, OpIssuePairing, OpRevokeAgent, OpRenameAgent, OpSetAgentScope, OpGatewayEvents,
+		OpAgentDesiredConfig, OpReclaimPort:
 		return true
 	}
 	return false
@@ -104,6 +107,28 @@ func (e *Engine) agentAdminOp(op string, body json.RawMessage) (json.RawMessage,
 			return nil, err
 		}
 		return encodeResult(okResult{e.Gateway.SetAgentScope(q.AgentID, gateway.Scope{Ports: q.Ports, TunnelIDs: q.Tunnels})}, nil)
+	case OpAgentDesiredConfig:
+		var q struct {
+			AgentID string `json:"agentId"`
+		}
+		if err := decodeBody(body, &q); err != nil {
+			return nil, err
+		}
+		return encodeResult(e.Gateway.AgentDesiredConfig(q.AgentID), nil)
+	case OpReclaimPort:
+		var q struct {
+			AgentID  string `json:"agentId"`
+			TunnelID string `json:"tunnelId"`
+			Port     int    `json:"port"`
+		}
+		if err := decodeBody(body, &q); err != nil {
+			return nil, err
+		}
+		ok, err := e.Gateway.ReclaimPort(q.AgentID, q.TunnelID, q.Port)
+		if err != nil {
+			return nil, err
+		}
+		return encodeResult(okResult{ok}, nil)
 	default:
 		return nil, fmt.Errorf("unknown agent admin op %q", op)
 	}

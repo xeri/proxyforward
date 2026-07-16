@@ -11,15 +11,22 @@ import {BANDWIDTH_SCOPES, scopeLabel, UIStatus} from '../state'
 
 type Tunnel = config.Tunnel
 
-function newTunnelID(): string {
-  const b = new Uint8Array(16)
-  crypto.getRandomValues(b)
-  return Array.from(b, x => x.toString(16).padStart(2, '0')).join('')
+// newTunnelID renders a typed tnl_<slug> id from the tunnel name, suffixing -2, -3…
+// until it's free — the frontend mirror of link.TunnelID (and its slug: lowercase,
+// [a-z0-9] only, other runs collapse to one hyphen, ends trimmed; empty → "tunnel").
+// Existing hex ids are never touched — the local config dir is disposable, no migration.
+function newTunnelID(name: string, taken: (id: string) => boolean): string {
+  const slug = (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  const base = 'tnl_' + (slug || 'tunnel')
+  let cand = base
+  for (let n = 2; taken(cand); n++) cand = `${base}-${n}`
+  return cand
 }
 
-function blankTunnel(): Tunnel {
+function blankTunnel(existing: Tunnel[]): Tunnel {
+  const taken = (id: string) => existing.some(t => t.ID === id)
   return config.Tunnel.createFrom({
-    ID: newTunnelID(), Name: 'Minecraft', Type: 'tcp',
+    ID: newTunnelID('Minecraft', taken), Name: 'Minecraft', Type: 'tcp',
     LocalAddr: '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
     Options: {MinecraftAware: false, ProxyProtocolV2: false, OfflineMOTD: '', BandwidthLimitMbps: 0, BandwidthLimitScope: 'combined'},
   })
@@ -93,7 +100,7 @@ export function Tunnels({status}: {status: UIStatus}) {
       <PageHeader
         title="Tunnels"
         subtitle="Map local servers to public ports. Changes apply live."
-        action={<Button onClick={() => setEditing(blankTunnel())}><IconPlus size={16} /> Add tunnel</Button>}
+        action={<Button onClick={() => setEditing(blankTunnel(tunnels))}><IconPlus size={16} /> Add tunnel</Button>}
       />
       {err && <ErrorBanner message={err} onDismiss={() => setErr('')} />}
 
@@ -107,7 +114,7 @@ export function Tunnels({status}: {status: UIStatus}) {
       {loaded && tunnels.length === 0 && (
         <Card><EmptyState icon={<IconTunnels size={28} />} title="No tunnels yet"
           hint="Add one to publish a local Minecraft server through the gateway."
-          action={<Button onClick={() => setEditing(blankTunnel())}><IconPlus size={16} /> Add tunnel</Button>} /></Card>
+          action={<Button onClick={() => setEditing(blankTunnel(tunnels))}><IconPlus size={16} /> Add tunnel</Button>} /></Card>
       )}
 
       <div className="pf-stagger grid grid-cols-1 gap-[var(--grid-gap)] @min-[56rem]:grid-cols-2 @min-[84rem]:grid-cols-3">

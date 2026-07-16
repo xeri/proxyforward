@@ -260,9 +260,12 @@ export function installDevMock() {
       agentId: '7788990011223344aabbccddeeff0011', hostname: 'SURVIVAL-RIG',
       lan: ['10.0.0.9'], remote: '198.51.100.7', upSinceMs: NOW0 - 42 * 60_000,
       jitter: 41, loss: 1.3, rtt: 74, factor: 0.4,
+      version: '0.0.9-dev', transport: 'per-conn', // older build → the roster "Update" badge
       tunnels: [
         {id: 'bb11223344556677889900aabbccddee', name: 'Survival', port: 25566, localUp: true, bandwidthLimitMbps: 100, bandwidthLimitScope: 'combined'},
-        {id: 'cc22334455667788990011aabbccddff', name: 'Lobby', port: 25567, localUp: false},
+        // Lobby sits on 25572 because it asked for 25569 and CREATIVE-HUB holds it —
+        // the &conflict=port event below, and the case the reclaim card acts on.
+        {id: 'cc22334455667788990011aabbccddff', name: 'Lobby', port: 25572, localUp: false},
       ],
       conns: [{
         id: 8801, tunnelName: 'Survival', clientAddr: '92.99.11.4:53001',
@@ -274,6 +277,7 @@ export function installDevMock() {
       agentId: 'ccddeeff001122334455667788990011', hostname: 'MINIGAMES-PI',
       lan: ['192.168.1.30'], remote: '92.184.100.23', upSinceMs: NOW0 - 12 * 60_000,
       jitter: 22, loss: 7.5, rtt: 180, factor: 0.06,
+      version: '0.1.0-dev', transport: 'quic',
       tunnels: [{id: 'dd33445566778899001122aabbccdd00', name: 'Minigames', port: 25568, localUp: true}],
       conns: [] as any[],
     },
@@ -281,6 +285,7 @@ export function installDevMock() {
       agentId: 'aa00bb11cc22dd33ee44ff5566778899', hostname: 'CREATIVE-HUB',
       lan: ['10.0.0.12'], remote: '84.113.9.201', upSinceMs: NOW0 - 6 * 3_600_000,
       jitter: 5, loss: 0, rtt: 30, factor: 0.6,
+      version: '0.1.0-dev', transport: 'mux',
       tunnels: [{id: 'ab00cd11ef22ab33cd44ef5566778890', name: 'Creative', port: 25569, localUp: true}],
       conns: [{
         id: 8811, tunnelName: 'Creative', clientAddr: '176.10.44.8:51900',
@@ -292,6 +297,7 @@ export function installDevMock() {
       agentId: 'f0e1d2c3b4a5968778695a4b3c2d1e0f', hostname: 'SKYBLOCK-BOX',
       lan: ['192.168.0.20'], remote: '51.68.220.14', upSinceMs: NOW0 - 95 * 60_000,
       jitter: 34, loss: 0.4, rtt: 55, factor: 0.25,
+      version: '0.1.0-dev', transport: 'quic',
       tunnels: [{id: 'c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f', name: 'Skyblock', port: 25570, localUp: true, bandwidthLimitMbps: 20, bandwidthLimitScope: 'per-connection'}],
       conns: [{
         id: 8821, tunnelName: 'Skyblock', clientAddr: '203.0.113.77:52210',
@@ -320,11 +326,14 @@ export function installDevMock() {
     revoked: !!o.revoked, scopePorts: o.scopePorts || [], scopeTunnels: o.scopeTunnels || [],
     issuedAtMs: o.issuedAtMs || 0, connected: !!o.connected, hostname: o.hostname || '',
     remoteIp: o.remoteIp || '', linkUpSinceMs: o.linkUpSinceMs || 0, tunnels: o.tunnels || 0,
+    // version/transport come from the live session — empty for an offline agent, so
+    // the roster shows no "Update" badge and the drill-in transport chip renders "—".
+    version: o.version || '', transport: o.transport || '',
   })
   // Enrollment metadata for the connected extras (nickname/scope/enrolled age),
   // keyed by the same agentId the live fleet and AGENT_SCALE use.
   const EXTRA_ENROLL: Record<string, {nick: string; ports: number[]; tuns: string[]; days: number}> = {
-    '7788990011223344aabbccddeeff0011': {nick: 'Survival server', ports: [25566, 25567], tuns: [], days: 26},
+    '7788990011223344aabbccddeeff0011': {nick: 'Survival server', ports: [25566, 25569, 25572], tuns: [], days: 26},
     ccddeeff001122334455667788990011: {nick: '', ports: [25568], tuns: [], days: 12},
     aa00bb11cc22dd33ee44ff5566778899: {nick: 'Creative hub', ports: [], tuns: [], days: 47},
     f0e1d2c3b4a5968778695a4b3c2d1e0f: {nick: 'Skyblock island', ports: [], tuns: ['c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f'], days: 9},
@@ -336,6 +345,7 @@ export function installDevMock() {
     const a0 = mkView({
       agentId: 'agentid', enrolled: false, connected: true, hostname: 'DESKTOP-DEV',
       remoteIp: '84.23.101.7', linkUpSinceMs: LINK_UP_SINCE, tunnels: 1, issuedAtMs: INSTALLED_AT,
+      version: '0.1.0-dev', transport: 'mux', // matches the gateway version → no Update badge
     })
     if (axisFleet !== 'multi') return [a0]
     const extras = extraAgents.map(a => {
@@ -344,7 +354,7 @@ export function installDevMock() {
         agentId: a.agentId, nickname: e.nick, enrolled: true, connected: true,
         hostname: a.hostname, remoteIp: a.remote, linkUpSinceMs: a.upSinceMs,
         tunnels: a.tunnels.length, scopePorts: e.ports, scopeTunnels: e.tuns,
-        issuedAtMs: now0 - e.days * 86_400_000,
+        issuedAtMs: now0 - e.days * 86_400_000, version: a.version, transport: a.transport,
       })
     })
     return [a0, ...extras]
@@ -381,6 +391,30 @@ export function installDevMock() {
     return [...connectedViews(), ...offlineViews, ...revokedViews].map(applyOverride)
   }
 
+  // ---- gateway-authoritative desired config (AgentDesiredConfig drill-in panel) ----
+  // Enrolled agents return their gateway-held tunnel set + generation; the shared-token
+  // agent (agentid) and any unknown id return enrolled:false → the panel's honest
+  // unavailable state ("config is agent-pushed"). SEASONAL-SMP is enrolled with no
+  // config yet → the empty "will seed on connect" state; the connected extras mirror
+  // their live tunnels so the drill-in list matches what the fleet is serving.
+  const toSpec = (t: any) => ({
+    id: t.id, name: t.name, type: 'tcp', publicPort: t.port,
+    bandwidthLimitMbps: t.bandwidthLimitMbps ?? 0, bandwidthLimitScope: t.bandwidthLimitScope ?? '',
+  })
+  const OFFLINE_CONFIG: Record<string, {gen: number; tunnels: any[]}> = {
+    agt_h4t2q9zm: {gen: 4, tunnels: [{id: 'e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6', name: 'Backup', port: 25580}]},
+    agt_b7k3n5pd: {gen: 0, tunnels: []}, // enrolled, no config yet → empty state
+    agt_x2m8r6ct: {gen: 2, tunnels: []},
+  }
+  const agentDesiredConfig = (id: string) => {
+    if (state.role !== 'gateway') return {generation: 0, tunnels: [], enrolled: false}
+    const extra = extraAgents.find(a => a.agentId === id)
+    if (extra) return {generation: 3 + extra.tunnels.length, tunnels: extra.tunnels.map(toSpec), enrolled: true}
+    const off = OFFLINE_CONFIG[id]
+    if (off) return {generation: off.gen, tunnels: off.tunnels.map(toSpec), enrolled: true}
+    return {generation: 0, tunnels: [], enrolled: false} // agentid (shared-token) / unknown
+  }
+
   // ---- gateway conflict / auto-fix events (GatewayEvents) ----
   // Seeded once from the &conflict axis. Both event kinds ARE conflicts (there
   // is no benign kind), so with no axis the ring is empty — the event log shows
@@ -400,11 +434,15 @@ export function installDevMock() {
     })
   }
   if (axisConflict === 'port' || axisConflict === 'both') {
+    // Reclaimable under &fleet=multi: the requester (SURVIVAL-RIG) and the agent that
+    // holds the requested 25569 (CREATIVE-HUB) are both enrolled, so the card offers
+    // the trade. Without &fleet=multi neither is in the roster and the card stays
+    // informational — the honest gate, not a hidden action.
     pushEvent({
       timeMs: evNow - 8 * 60_000, kind: 'port-reassigned',
       agentId: '7788990011223344aabbccddeeff0011', tunnelId: 'cc22334455667788990011aabbccddff',
-      requestedPort: 25567, actualPort: 25572,
-      message: 'Requested public port 25567 was already bound; SURVIVAL-RIG’s "Lobby" tunnel was auto-assigned 25572 instead.',
+      requestedPort: 25569, actualPort: 25572,
+      message: 'Requested public port 25569 was already bound; SURVIVAL-RIG’s "Lobby" tunnel was auto-assigned 25572 instead.',
     })
   }
   if (axisConflict === 'clone' || axisConflict === 'both') {
@@ -434,7 +472,7 @@ export function installDevMock() {
       Tunnels: [{ID: tunnelID, Name: 'Minecraft', Type: 'tcp', LocalAddr: '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
         Options: {MinecraftAware: true, ProxyProtocolV2: false, OfflineMOTD: 'Server is offline — back soon', BandwidthLimitMbps: 40, BandwidthLimitScope: 'per-direction'}}]},
     Gateway: {BindAddr: '0.0.0.0', ControlPort: 8474, Token: 'tok', PublicHost: 'play.example.com', PortAllowlist: [],
-      MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10},
+      MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10, AcceptSharedToken: true},
     Metrics: {PrometheusEnabled: false, PrometheusAddr: '127.0.0.1:9464'},
     Logging: {Level: 'info', FileEnabled: true},
     UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: true, Autostart: false},
@@ -921,6 +959,11 @@ export function installDevMock() {
     // the real write-then-repoll loop.
     ListAgents: () => ok(listAgents()),
     GatewayEvents: (sinceSeq: number) => ok(gatewayEvents(sinceSeq)),
+    // Read: the gateway-held desired config for the drill-in panel. Write: reclaim is
+    // a gated no-op here (the card only offers it when both parties are enrolled, so
+    // the mock never has to model the legacy-party refusal).
+    AgentDesiredConfig: (agentId: string) => ok(agentDesiredConfig(agentId)),
+    ReclaimPort: (_agentId: string, _tunnelId: string, _port: number) => gated(() => undefined),
     IssuePairingCode: (_reusable: boolean, _ttlSecs: number, _ports: number[], _tunnels: string[]) =>
       gated(() => {
         // Each call mints a fresh enrollment ticket → a different token segment,

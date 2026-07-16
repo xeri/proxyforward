@@ -11,7 +11,7 @@ import {
 } from '../components/ui'
 import {ExportSetupRow, ImportSetupFlow} from '../components/SetupBackup'
 import {IconExternal, IconMonitor, IconMoon, IconRefresh, IconSun} from '../components/icons'
-import {UIStatus} from '../state'
+import {TRANSPORT_LABEL, UIStatus} from '../state'
 import {ThemePref, useTheme} from '../theme'
 import {fxPref, setFxPref} from '../fx'
 import {MotionPref, useMotion} from '../motion'
@@ -35,13 +35,6 @@ const DEF = {
 /** numStr renders a staged numeric field: 0 means "cleared" and shows as an
  * empty input so the default placeholder reads through. */
 const numStr = (n: number) => (n > 0 ? String(n) : '')
-
-/** Human labels for the active data-plane transport reported on the tick. */
-const TRANSPORT_LABEL: Record<string, string> = {
-  quic: 'QUIC',
-  'per-conn': 'Per-connection',
-  mux: 'Multiplexed',
-}
 
 type SectionDef = {id: string; label: string}
 
@@ -202,8 +195,8 @@ export function Settings({status}: {status: UIStatus}) {
           {!isAgent && (
             <Section id="security" title="Security" subtitle="Pairing and abuse limits, enforced at the gateway.">
               <FormRow
-                label="Pairing token"
-                hint="Anyone who has the pairing code can connect an agent to this gateway — never share it publicly. Rotating it disconnects agents until they re-pair with the new code."
+                label="Shared token (legacy)"
+                hint="The one standing code every shared-token agent uses. Prefer per-agent enrollment codes (Overview or the Agents screen). Anyone who has this code can connect an agent — never share it publicly; rotating it disconnects shared-token agents until they re-pair."
               >
                 <div className="flex items-center gap-2">
                   <CopyPairingCode attached={attached} />

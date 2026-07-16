@@ -1,15 +1,15 @@
 import {ReactNode, useEffect, useRef, useState} from 'react'
-import {MeasureLatency, PairingCode, RestartEngine} from '../../wailsjs/go/app/App'
+import {GetConfig, IssuePairingCode, MeasureLatency, PairingCode, RestartEngine} from '../../wailsjs/go/app/App'
 import {prefersReduced} from '../motion'
 import {app} from '../../wailsjs/go/models'
 import {BandwidthPanel} from '../components/BandwidthChart'
 import {NumberTicker} from '../components/NumberTicker'
 import {
-  Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, ErrorBanner,
+  Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, Disclosure, ErrorBanner,
   IconButton, Overline, PageHeader, RoleWord, SignalCard, StatTile, StatusDot,
 } from '../components/ui'
 import {Emblem} from '../components/Emblem'
-import {IconActivity, IconEye, IconEyeOff, IconGlobe, IconLink, IconServer} from '../components/icons'
+import {IconActivity, IconEye, IconEyeOff, IconGlobe, IconLink, IconRefresh, IconServer} from '../components/icons'
 import {NavId} from '../nav'
 import {fmtBytes, fmtUptime, UIStatus} from '../state'
 
@@ -494,53 +494,94 @@ function PlayerAddressStrip({status, onNavigate}: {status: UIStatus; onNavigate:
   )
 }
 
-/** GatewayPairingStrip: the pairing code as a compact row. The code is a
- * secret (it embeds the gateway token), so it rests masked — screen shares
- * and screenshots don't leak it — with an eye toggle to reveal. Copy works
- * without revealing. */
+/** GatewayPairingStrip: enrollment front and centre. The primary code is a
+ * single-use enrollment ticket (IssuePairingCode) — the modern per-agent identity
+ * path — and the deprecated shared token moves behind an Advanced disclosure, shown
+ * only while the gateway still accepts it (config.AcceptSharedToken). Both codes rest
+ * masked (screen-share safe) with an eye toggle; copy works without revealing. */
 function GatewayPairingStrip() {
-  const [code, setCode] = useState('')
-  const [err, setErr] = useState('')
-  const [shown, setShown] = useState(false)
+  const [acceptShared, setAcceptShared] = useState(false)
   useEffect(() => {
     let cancelled = false
-    const poll = (n: number) => {
-      PairingCode().then(c => { if (!cancelled) setCode(c) })
-        .catch(e => { if (!cancelled) { if (n < 12) setTimeout(() => poll(n + 1), 300); else setErr(String(e)) } })
-    }
-    poll(0)
+    GetConfig().then(c => { if (!cancelled) setAcceptShared(!!c.Gateway?.AcceptSharedToken) }).catch(() => {})
     return () => { cancelled = true }
   }, [])
   return (
     <Card pad={false}>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-5 py-3.5">
-        <div className="w-44 shrink-0">
-          <Overline>Pairing code</Overline>
-          <div className="mt-0.5 text-[11px] text-[var(--text-3)]">Paste into the agent — rotate in Settings if it leaks</div>
-        </div>
-        <div className="min-w-56 flex-1">
-          {code
-            ? <div className="pf-fade">
-                <Codebox
-                  text={shown ? code : '•'.repeat(28)}
-                  // The mask is real text — selectable, it drags out of the app
-                  // as a string of bullets. Copy still hands over the real code.
-                  selectable={shown}
-                  action={
-                    <div className="flex items-center gap-1.5">
-                      <IconButton title={shown ? 'Hide pairing code' : 'Reveal pairing code'} onClick={() => setShown(s => !s)}>
-                        {shown ? <IconEyeOff size={16} /> : <IconEye size={16} />}
-                      </IconButton>
-                      <CopyButton text={code} label="Copy" />
-                    </div>
-                  }
-                />
-              </div>
-            : err
-              ? <ErrorBanner message={err} />
-              : <span className="text-sm text-[var(--text-3)]">Generating…</span>}
-        </div>
+      <div className="space-y-3 px-5 py-3.5">
+        <PairingCodeRow
+          label="Pairing code" hint="Single-use · enrolls one agent, expires in 10 min"
+          fetch={() => IssuePairingCode(false, 600, [], [])} reissuable />
+        {acceptShared && (
+          <Disclosure label="Advanced · legacy shared token"
+            hint="One standing code shared by every agent — weaker than per-agent enrollment. Prefer the code above.">
+            <PairingCodeRow
+              label="Shared token" hint="Rotate it in Settings if it leaks — one leak re-pairs every shared-token agent."
+              fetch={() => PairingCode()} stacked />
+          </Disclosure>
+        )}
       </div>
     </Card>
+  )
+}
+
+/** PairingCodeRow: a masked, copyable pairing/enrollment code. `reissuable` adds a
+ * refresh that mints a fresh code (single-use enrollment tickets expire); `stacked`
+ * lays the hint above the code instead of beside it (the disclosure is narrower). */
+function PairingCodeRow({label, hint, fetch, reissuable, stacked}: {
+  label: string; hint: string; fetch: () => Promise<string>; reissuable?: boolean; stacked?: boolean
+}) {
+  const [code, setCode] = useState('')
+  const [err, setErr] = useState('')
+  const [shown, setShown] = useState(false)
+  const [gen, setGen] = useState(0)
+  const fetchRef = useRef(fetch)
+  fetchRef.current = fetch
+  useEffect(() => {
+    let cancelled = false
+    setCode(''); setErr(''); setShown(false)
+    const poll = (n: number) => {
+      fetchRef.current().then(c => { if (!cancelled) setCode(c) })
+        .catch(e => { if (!cancelled) { if (n < 12) setTimeout(() => poll(n + 1), 300); else setErr(String(e)) } })
+    }
+    poll(0)
+    return () => { cancelled = true }
+  }, [gen])
+  // The mask is real text — selectable, it drags out of the app as bullets. Copy
+  // still hands over the real code.
+  const box = code
+    ? <div className="pf-fade">
+        <Codebox
+          text={shown ? code : '•'.repeat(28)} selectable={shown}
+          action={
+            <div className="flex items-center gap-1.5">
+              {reissuable && <IconButton title="Issue a fresh code" onClick={() => setGen(g => g + 1)}><IconRefresh size={16} /></IconButton>}
+              <IconButton title={shown ? 'Hide pairing code' : 'Reveal pairing code'} onClick={() => setShown(s => !s)}>
+                {shown ? <IconEyeOff size={16} /> : <IconEye size={16} />}
+              </IconButton>
+              <CopyButton text={code} label="Copy" />
+            </div>
+          }
+        />
+      </div>
+    : err
+      ? <ErrorBanner message={err} />
+      : <span className="text-sm text-[var(--text-3)]">Generating…</span>
+  if (stacked) {
+    return (
+      <div className="space-y-1.5">
+        <div className="text-[11px] text-[var(--text-3)]">{hint}</div>
+        {box}
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+      <div className="w-44 shrink-0">
+        <Overline>{label}</Overline>
+        <div className="mt-0.5 text-[11px] text-[var(--text-3)]">{hint}</div>
+      </div>
+      <div className="min-w-56 flex-1">{box}</div>
+    </div>
   )
 }

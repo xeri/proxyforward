@@ -1,13 +1,14 @@
-import {useEffect, useMemo, useRef, useState} from 'react'
+import {ReactNode, useEffect, useMemo, useRef, useState} from 'react'
 import {
-  AgentBandwidthHistory, GatewayEvents, ListAgents, RenameAgent, RevokeAgent, SetAgentScope,
+  AgentBandwidthHistory, AgentDesiredConfig, GatewayEvents, IssuePairingCode, ListAgents,
+  ReclaimPort, RenameAgent, RevokeAgent, SetAgentScope,
 } from '../../wailsjs/go/app/App'
 import {app, gateway} from '../../wailsjs/go/models'
 import {BandwidthPanel} from '../components/BandwidthChart'
 import {Emblem} from '../components/Emblem'
 import {
-  Badge, Banner, Button, Card, CopyIcon, Disclosure, EmptyState, ErrorBanner, Field, Modal,
-  Overline, PageHeader, SegmentedControl, Skeleton, StatusDot, TextInput,
+  Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, Disclosure, EmptyState, ErrorBanner,
+  Field, Modal, MonoChip, Overline, PageHeader, SegmentedControl, Skeleton, StatusDot, TextInput,
 } from '../components/ui'
 import {
   IconActivity, IconAgents, IconArrowRight, IconChevronRight, IconClock, IconLogs,
@@ -15,7 +16,7 @@ import {
 } from '../components/icons'
 import {HistoryResult, RANGES, RangeKey} from '../history'
 import {usePolled} from '../hooks'
-import {fmtBytes, fmtUptime, hasRtt, scopeLabel, UIStatus, worstHealth} from '../state'
+import {fmtBytes, fmtUptime, hasRtt, scopeLabel, TRANSPORT_LABEL, UIStatus, worstHealth} from '../state'
 
 type AgentUI = app.AgentUI
 type AgentView = gateway.AgentView
@@ -35,6 +36,16 @@ const HEALTH_TONE: Record<Seg, 'good' | 'warn' | 'bad' | 'neutral'> = {good: 'go
 // Worst-first ordering for the Health sort: the machine that needs eyes leads.
 const HEALTH_RANK: Record<Seg, number> = {bad: 0, warn: 1, unknown: 2, good: 3}
 
+// Gateway event kinds (mirrors internal/gateway/conflict.go). Only the OPEN ones are
+// resolvable conflicts and become cards; port-reclaimed is a completed action that
+// only lands in the log. EVENT_BADGE labels every kind the log can show.
+const CONFLICT_KINDS = new Set(['port-reassigned', 'clone-suspected'])
+const EVENT_BADGE: Record<string, {label: string; tone: 'warn' | 'bad' | 'good'}> = {
+  'port-reassigned': {label: 'reassign', tone: 'warn'},
+  'clone-suspected': {label: 'clone', tone: 'bad'},
+  'port-reclaimed': {label: 'reclaim', tone: 'good'},
+}
+
 const jitterTone = (v: number): Seg => (v < 0 ? 'unknown' : v > 100 ? 'bad' : v > 30 ? 'warn' : 'good')
 const lossTone = (v: number): Seg => (v < 0 ? 'unknown' : v > 5 ? 'bad' : v > 1 ? 'warn' : 'good')
 const fmtMs = (v: number): string => (v < 0 ? '—' : `${v.toFixed(1)} ms`)
@@ -42,6 +53,22 @@ const fmtPct = (v: number): string => (v < 0 ? '—' : `${v.toFixed(v > 0 && v <
 const fmtRttMs = (v: number): string => (hasRtt(v) ? `${Math.round(v)} ms` : '—')
 const fmtDate = (ms: number): string => (ms > 0 ? new Date(ms).toLocaleDateString(undefined, {year: 'numeric', month: 'short', day: 'numeric'}) : '—')
 const fmtTime = (ms: number): string => new Date(ms).toLocaleTimeString(undefined, {hour12: false})
+
+// The roster's "Update" badge fires only when the agent build is provably OLDER
+// than the gateway's, compared by leading major.minor.patch. A version we can't
+// parse — a missing one (offline agent, or a legacy build that sent none) or an
+// odd string — yields no verdict, so we never paint a fake "Update" or imply a
+// stale build is current (GUI contract: unknown is a sentinel, never a fake zero).
+function parseVer(v: string): [number, number, number] | null {
+  const m = /^\s*v?(\d+)\.(\d+)\.(\d+)/.exec(v || '')
+  return m ? [+m[1], +m[2], +m[3]] : null
+}
+function updateAvailable(agentVer: string, gatewayVer: string): boolean {
+  const a = parseVer(agentVer), g = parseVer(gatewayVer)
+  if (!a || !g) return false
+  for (let i = 0; i < 3; i++) if (a[i] !== g[i]) return a[i] < g[i]
+  return false
+}
 
 const seg = (a: AgentUI): Seg => (a.healthScore || 'unknown') as Seg
 const rowSeg = (r: Row): Seg => (r.live ? seg(r.live) : 'unknown')
@@ -118,6 +145,29 @@ function useGatewayEvents(enabled: boolean): GwEvent[] | null {
   return events
 }
 
+// Per-agent gateway-authoritative config for the drill-in panel. Fetched once per
+// drill-in and cached for an instant re-open; config is essentially static in Batch A
+// (the editing path is Batch B), so it doesn't poll. `loading` separates the skeleton
+// from a resolved-but-empty set, and `err` is the honest-unavailable state (a
+// pre-roster daemon that lacks the binding) — usePolled swallows errors and can't tell
+// those apart, so this is its own hook like useGatewayEvents.
+const agentConfigCache = new Map<string, gateway.AgentConfigView>()
+function useAgentConfig(agentId: string): {cfg: gateway.AgentConfigView | null; loading: boolean; err: boolean} {
+  const [cfg, setCfg] = useState<gateway.AgentConfigView | null>(() => agentConfigCache.get(agentId) ?? null)
+  const [loading, setLoading] = useState(!agentConfigCache.has(agentId))
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    let alive = true
+    const cached = agentConfigCache.get(agentId)
+    setCfg(cached ?? null); setLoading(!cached); setErr(false)
+    AgentDesiredConfig(agentId)
+      .then(v => { if (!alive) return; agentConfigCache.set(agentId, v); setCfg(v); setLoading(false) })
+      .catch(() => { if (alive) { setErr(true); setLoading(false) } })
+    return () => { alive = false }
+  }, [agentId])
+  return {cfg, loading, err}
+}
+
 /**
  * Agents (gateway role): the fleet — a wall of machine cards, the gateway
  * analogue of the Players wall of faces. The roster now comes from ListAgents
@@ -134,6 +184,7 @@ export function Agents({status}: {status: UIStatus}) {
   const [query, setQuery] = useState('')
   const [nonce, setNonce] = useState(0)
   const [dismissed, setDismissed] = useState<Set<number>>(() => new Set())
+  const [issuing, setIssuing] = useState(false)
 
   const isGateway = status.role === 'gateway'
   const rosterKey = isGateway ? `roster:${nonce}` : null
@@ -158,11 +209,14 @@ export function Agents({status}: {status: UIStatus}) {
 
   // Unresolved conflicts: dedupe the event ring by conflict identity (latest
   // wins), drop the client-dismissed ones. A newer event for the same identity
-  // resurfaces even after an older one was dismissed.
+  // resurfaces even after an older one was dismissed. Only the OPEN conflict kinds
+  // become cards — a port-reclaimed record is a completed action and belongs in the
+  // event log, not in a card asking to resolve it.
   const conflicts = useMemo(() => {
     if (!events) return []
     const byKey = new Map<string, GwEvent>()
     for (const e of events) {
+      if (!CONFLICT_KINDS.has(e.kind)) continue
       const key = `${e.kind}:${e.agentId ?? ''}:${e.tunnelId ?? ''}:${e.requestedPort ?? ''}`
       const prev = byKey.get(key)
       if (!prev || e.seq > prev.seq) byKey.set(key, e)
@@ -223,9 +277,13 @@ export function Agents({status}: {status: UIStatus}) {
 
   return (
     <div className="pf-stagger space-y-8">
-      <Header />
+      <Header action={<Button size="sm" onClick={() => setIssuing(true)}>Issue pairing code</Button>} />
+      {issuing && <IssuePairingModal onClose={() => setIssuing(false)} />}
 
-      <ConflictCards conflicts={conflicts} rosterIds={rosterIds} onSelect={setSelected} onDismiss={dismiss} />
+      <ConflictCards
+        conflicts={conflicts} roster={roster ?? []} tunnels={status.tunnels ?? []} rosterIds={rosterIds}
+        onSelect={setSelected} onDismiss={dismiss} onReclaimed={refreshRoster}
+      />
 
       {roster === null ? (
         <RosterSkeleton density={density} />
@@ -265,10 +323,10 @@ export function Agents({status}: {status: UIStatus}) {
               hint={`Nothing matches "${query.trim()}".`} /></Card>
           ) : density === 'grid' ? (
             <div className="pf-stagger grid grid-cols-1 gap-[var(--grid-gap)] @min-[52rem]:grid-cols-2 @min-[80rem]:grid-cols-3">
-              {sorted.map(r => <AgentCard key={r.view.agentId} row={r} onOpen={() => setSelected(r.view.agentId)} />)}
+              {sorted.map(r => <AgentCard key={r.view.agentId} row={r} gwVersion={status.version} onOpen={() => setSelected(r.view.agentId)} />)}
             </div>
           ) : (
-            <Card pad={false}><AgentList rows={sorted} onOpen={setSelected} /></Card>
+            <Card pad={false}><AgentList rows={sorted} gwVersion={status.version} onOpen={setSelected} /></Card>
           )}
         </>
       )}
@@ -278,8 +336,89 @@ export function Agents({status}: {status: UIStatus}) {
   )
 }
 
-function Header() {
-  return <PageHeader title="Agents" subtitle="Every machine enrolled with this gateway." />
+function Header({action}: {action?: ReactNode}) {
+  return <PageHeader title="Agents" subtitle="Every machine enrolled with this gateway." action={action} />
+}
+
+/** IssuePairingModal: mint an enrollment code to hand to a new machine — the roster
+ * analogue of the wizard's GatewayLive. A mode toggle picks the lifetime (single-use
+ * expires in 10 min; reusable never expires until revoked), optional scope restricts
+ * what the enrolling agent may bind, and the code renders with a copy button. One code
+ * shows at a time; changing any setting invalidates it so the shown code's lifetime
+ * hint can never lie about how it was issued, and "New code" re-issues. States:
+ * pre-issue form, generating, issued code, and an issue error (honest unavailable). */
+function IssuePairingModal({onClose}: {onClose: () => void}) {
+  const [reusable, setReusable] = useState(false)
+  const [ports, setPorts] = useState('')
+  const [tuns, setTuns] = useState('')
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const parsePorts = (s: string): number[] => s.split(',').map(x => parseInt(x.trim(), 10)).filter(nu => nu > 0 && nu < 65536)
+  const parseTuns = (s: string): string[] => s.split(',').map(x => x.trim()).filter(Boolean)
+
+  // Any setting change drops the shown code: it was minted with the old mode/scope,
+  // so keeping it visible would misdescribe its lifetime or restrictions.
+  useEffect(() => { setCode(''); setErr('') }, [reusable, ports, tuns])
+
+  const issue = async () => {
+    setBusy(true); setErr(''); setCode('')
+    // Single-use expires in 10 min; a reusable code lives until revoked (ttl 0).
+    try { setCode(await IssuePairingCode(reusable, reusable ? 0 : 600, parsePorts(ports), parseTuns(tuns))) }
+    catch (e) { setErr(String(e)) } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal title="Issue pairing code" onClose={onClose} wide
+      footer={<Button variant="ghost" onClick={onClose}>Done</Button>}>
+      <div className="space-y-4">
+        <p className="text-sm leading-relaxed text-[var(--text-2)]">
+          Share this code with a machine. Every agent that enrolls with it joins this gateway's roster and proves a
+          durable identity you can scope and revoke.
+        </p>
+
+        <Field label="Type" hint={reusable
+          ? 'Enrolls multiple agents; lives until you revoke it.'
+          : 'Enrolls one agent, then expires. Valid for 10 minutes.'}>
+          <SegmentedControl<'single' | 'reusable'>
+            value={reusable ? 'reusable' : 'single'}
+            onChange={v => setReusable(v === 'reusable')}
+            options={[{value: 'single', label: 'Single-use'}, {value: 'reusable', label: 'Reusable'}]}
+          />
+        </Field>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Allowed ports" hint="Comma-separated public ports this agent may bind. Empty = unrestricted.">
+            <TextInput value={ports} onChange={setPorts} placeholder="e.g. 25565, 25566" mono onEnter={issue} />
+          </Field>
+          <Field label="Allowed tunnel IDs" hint="Comma-separated tunnel IDs. Empty = any tunnel.">
+            <TextInput value={tuns} onChange={setTuns} placeholder="Any tunnel" mono onEnter={issue} />
+          </Field>
+        </div>
+
+        {err ? (
+          <ErrorBanner message={err} onDismiss={() => setErr('')} />
+        ) : code ? (
+          <div className="space-y-2">
+            <Codebox text={code} action={<CopyButton text={code} />} />
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0 text-xs text-[var(--text-3)]">
+                {reusable
+                  ? 'Reusable — this code stays valid for more machines until you revoke it.'
+                  : 'Single-use — expires once one agent enrolls, or after 10 minutes.'}
+              </span>
+              <Button variant="ghost" size="sm" onClick={issue} disabled={busy}>New code</Button>
+            </div>
+          </div>
+        ) : busy ? (
+          <div className="pf-well px-3 py-2.5 text-sm text-[var(--text-3)]">Generating code…</div>
+        ) : (
+          <Button onClick={issue} disabled={busy}>Issue code</Button>
+        )}
+      </div>
+    </Modal>
+  )
 }
 
 /** FleetSummary: the page's one hero figure (agent count) with the connected
@@ -312,11 +451,22 @@ function FleetSummary({rows}: {rows: Row[]}) {
 }
 
 /** StatusMark: one agent's connectivity verdict — health dot when connected, a
- * quiet "Offline" dot when enrolled-but-away, a Revoked badge when cut off. */
-function StatusMark({view, h}: {view: AgentView; h: Seg}) {
-  if (view.revoked) return <Badge tone="bad">Revoked</Badge>
-  if (isConnected(view)) return <StatusDot state={h} label={HEALTH_LABEL[h]} pulse />
-  return <StatusDot state="unknown" label="Offline" />
+ * quiet "Offline" dot when enrolled-but-away, a Revoked badge when cut off. An
+ * `update` flag (a connected agent behind the gateway's build) adds a warn-tone
+ * "Update" badge alongside — color IS the signal, so it's a status tone, not accent. */
+function StatusMark({view, h, update}: {view: AgentView; h: Seg; update?: boolean}) {
+  const mark = view.revoked
+    ? <Badge tone="bad">Revoked</Badge>
+    : isConnected(view)
+      ? <StatusDot state={h} label={HEALTH_LABEL[h]} pulse />
+      : <StatusDot state="unknown" label="Offline" />
+  if (!update) return mark
+  return (
+    <span className="inline-flex items-center gap-2">
+      {mark}
+      <Badge tone="warn">Update</Badge>
+    </span>
+  )
 }
 
 /** Metric: tier-3 stat — type on whitespace with a hairline lead, no box; the
@@ -355,7 +505,7 @@ function ScopeChip({view}: {view: AgentView}) {
  * (tactility, DESIGN rule 3) but never ignites; only a live health dot breathes.
  * The whole card is the drill-in affordance. Connected agents show live vitals;
  * offline/revoked ones show their standing instead, at matched geometry. */
-function AgentCard({row, onOpen}: {row: Row; onOpen: () => void}) {
+function AgentCard({row, gwVersion, onOpen}: {row: Row; gwVersion: string; onOpen: () => void}) {
   const {view, live} = row
   const h = rowSeg(row)
   const connected = isConnected(view)
@@ -370,7 +520,7 @@ function AgentCard({row, onOpen}: {row: Row; onOpen: () => void}) {
           <div className="truncate font-semibold">{displayName(view)}</div>
           <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--text-3)]">{view.agentId || '—'}</div>
         </div>
-        <div className="shrink-0"><StatusMark view={view} h={h} /></div>
+        <div className="shrink-0"><StatusMark view={view} h={h} update={updateAvailable(view.version, gwVersion)} /></div>
       </div>
 
       {connected && live ? (
@@ -404,7 +554,7 @@ function AgentCard({row, onOpen}: {row: Row; onOpen: () => void}) {
 /** AgentList: the compact density — one flush row per agent, extra columns
  * revealed as the container widens (@container), so a wide fleet reads as a
  * dense table and a narrow one stays legible. */
-function AgentList({rows, onOpen}: {rows: Row[]; onOpen: (id: string) => void}) {
+function AgentList({rows, gwVersion, onOpen}: {rows: Row[]; gwVersion: string; onOpen: (id: string) => void}) {
   return (
     <div className="divide-y divide-[var(--border)]">
       {rows.map(r => {
@@ -421,7 +571,7 @@ function AgentList({rows, onOpen}: {rows: Row[]; onOpen: (id: string) => void}) 
               <div className="truncate text-sm font-medium">{displayName(view)}</div>
               <div className="truncate font-mono text-[11px] text-[var(--text-3)]">{view.agentId || '—'}</div>
             </div>
-            <div className="hidden w-28 shrink-0 @min-[40rem]:block"><StatusMark view={view} h={h} /></div>
+            <div className="hidden w-28 shrink-0 @min-[40rem]:block"><StatusMark view={view} h={h} update={updateAvailable(view.version, gwVersion)} /></div>
             <div className="hidden w-16 shrink-0 text-right font-mono text-xs tabular-nums text-[var(--text-2)] @min-[52rem]:block" title="Round trip">{connected && live ? fmtRttMs(live.rttMillis) : '—'}</div>
             <div className="hidden w-36 shrink-0 text-right text-xs tabular-nums text-[var(--text-3)] @min-[64rem]:block" title={`Scope: ${scopeText(view)}`}><span className="truncate">{scopeText(view)}</span></div>
             <div className="w-16 shrink-0 text-right text-xs tabular-nums text-[var(--text-3)]" title="Tunnels">{view.tunnels} tun</div>
@@ -482,33 +632,72 @@ function SkeletonCard() {
   )
 }
 
-/** ConflictCards: the gateway's unresolved conflicts, surfaced above the roster.
- * Informational only — there is no one-click reclaim/evict on the backend; each
- * card explains the conflict and links to the contesting agent. Nothing shows
- * when there are none (no empty box). */
-function ConflictCards({conflicts, rosterIds, onSelect, onDismiss}: {
-  conflicts: GwEvent[]; rosterIds: Set<string>; onSelect: (id: string) => void; onDismiss: (seq: number) => void
+/** ConflictCards: the gateway's unresolved conflicts, surfaced above the roster. Each
+ * card explains the conflict and links to the contesting agent; a port clash also
+ * offers the one-click reclaim, but only when the gateway can actually make the trade
+ * (see incumbentOf). Nothing shows when there are none (no empty box). */
+function ConflictCards({conflicts, roster, tunnels, rosterIds, onSelect, onDismiss, onReclaimed}: {
+  conflicts: GwEvent[]; roster: AgentView[]; tunnels: app.TunnelUI[]; rosterIds: Set<string>
+  onSelect: (id: string) => void; onDismiss: (seq: number) => void; onReclaimed: () => void
 }) {
   if (conflicts.length === 0) return null
+  const byId = new Map(roster.map(v => [v.agentId, v]))
+  const enrolled = (id?: string): boolean => {
+    const v = id ? byId.get(id) : undefined
+    return !!v && v.enrolled && !v.revoked
+  }
+  // The agent holding the contested port right now — non-null only when the reclaim is
+  // the gateway's to make: BOTH the agent that wanted the port and the one holding it
+  // are enrolled, so both configs are gateway-held and rewritable, and the holder is
+  // somebody else. A shared-token party pushes its own config, so the gateway would
+  // refuse; we don't offer an action that can't work.
+  const incumbentOf = (e: GwEvent): AgentView | null => {
+    if (e.kind !== 'port-reassigned' || !e.requestedPort || !e.tunnelId) return null
+    if (!enrolled(e.agentId)) return null
+    const holderId = tunnels.find(t => t.publicPort === e.requestedPort)?.agentId
+    if (!holderId || holderId === e.agentId || !enrolled(holderId)) return null
+    return byId.get(holderId) ?? null
+  }
   return (
     <div className="pf-stagger space-y-3">
       {conflicts.map(e => (
         <ConflictCard
           key={e.seq} e={e}
           linkable={!!e.agentId && rosterIds.has(e.agentId)}
+          incumbent={incumbentOf(e)}
           onSelect={() => e.agentId && onSelect(e.agentId)}
           onDismiss={() => onDismiss(e.seq)}
+          onReclaimed={onReclaimed}
         />
       ))}
     </div>
   )
 }
 
-function ConflictCard({e, linkable, onSelect, onDismiss}: {
-  e: GwEvent; linkable: boolean; onSelect: () => void; onDismiss: () => void
+function ConflictCard({e, linkable, incumbent, onSelect, onDismiss, onReclaimed}: {
+  e: GwEvent; linkable: boolean; incumbent: AgentView | null
+  onSelect: () => void; onDismiss: () => void; onReclaimed: () => void
 }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
   const clone = e.kind === 'clone-suspected'
   const hasPorts = e.requestedPort != null && e.actualPort != null
+
+  // Reclaim, then re-poll so the roster and this card's own event ring catch up. A
+  // refusal (a party turned legacy, or the holder moved between poll and click) is
+  // shown in place rather than silently doing nothing.
+  const reclaim = async () => {
+    // incumbentOf only returns non-null once these are all set; re-checked here so the
+    // wire's omitempty optionals narrow without a cast.
+    if (!e.agentId || !e.tunnelId || !e.requestedPort) return
+    setBusy(true); setErr('')
+    try {
+      await ReclaimPort(e.agentId, e.tunnelId, e.requestedPort)
+      onReclaimed()
+      onDismiss()
+    } catch (x) { setErr(String(x)) } finally { setBusy(false) }
+  }
+
   return (
     <Banner
       tone={clone ? 'bad' : 'warn'} onDismiss={onDismiss}
@@ -523,6 +712,18 @@ function ConflictCard({e, linkable, onSelect, onDismiss}: {
           <span className="ml-auto text-[11px] tabular-nums text-[var(--text-3)]">{fmtTime(e.timeMs)}</span>
         </div>
         <div className="break-words text-[var(--text-2)]">{e.message}</div>
+        {incumbent && (
+          <div className="flex flex-wrap items-center gap-2 pt-2">
+            <Button size="sm" variant="subtle" onClick={reclaim} disabled={busy}>
+              {busy ? 'Moving…' : `Give :${e.requestedPort} to this agent`}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onDismiss}>Keep the reassignment</Button>
+            <span className="min-w-0 text-[11px] text-[var(--text-3)]">
+              {displayName(incumbent)} holds :{e.requestedPort} now — it moves to another port.
+            </span>
+          </div>
+        )}
+        {err && <div className="pt-1.5 text-[11px] text-[var(--bad)]">{err}</div>}
       </div>
     </Banner>
   )
@@ -558,11 +759,13 @@ function EventLog({events}: {events: GwEvent[] | null}) {
 }
 
 function EventRow({e}: {e: GwEvent}) {
-  const clone = e.kind === 'clone-suspected'
+  // An unknown kind (a newer daemon than this GUI) still shows its message with the
+  // raw kind as its chip, rather than being mislabelled as one we do know.
+  const badge = EVENT_BADGE[e.kind] ?? {label: e.kind, tone: 'warn' as const}
   return (
     <div className="flex items-baseline gap-2 py-1 text-[12px]">
       <span className="shrink-0 font-mono tabular-nums text-[var(--text-3)]">{fmtTime(e.timeMs)}</span>
-      <span className="shrink-0"><Badge tone={clone ? 'bad' : 'warn'}>{clone ? 'clone' : 'reassign'}</Badge></span>
+      <span className="shrink-0"><Badge tone={badge.tone}>{badge.label}</Badge></span>
       <span className="min-w-0 flex-1 text-[var(--text-2)]">{e.message}</span>
     </div>
   )
@@ -607,16 +810,18 @@ function AgentDetail({status, row, onBack, onChanged}: {
               <CopyIcon text={view.agentId} title="Copy agent ID" />
             </span>
           ) : undefined}
-          action={<StatusMark view={view} h={h} />}
+          action={<StatusMark view={view} h={h} update={updateAvailable(view.version, status.version)} />}
         />
       </div>
 
       <div className="grid grid-cols-12 gap-[var(--grid-gap)]">
-        <div className="col-span-12 @3xl:col-span-5"><AgentIdentity agent={liveOrSynth} /></div>
+        <div className="col-span-12 @3xl:col-span-5"><AgentIdentity agent={liveOrSynth} transport={view.transport} /></div>
         <div className="col-span-12 @3xl:col-span-7"><AgentHealth agent={liveOrSynth} /></div>
       </div>
 
       <AgentManagement view={view} onChanged={onChanged} />
+
+      <AgentConfigPanel view={view} />
 
       {/* The detail's moment of light (DESIGN rules 5/7): the same bare hero
           graph Traffic uses, drawing THIS agent's per-agent RRD. It breaks the
@@ -742,9 +947,63 @@ function AgentManagement({view, onChanged}: {view: AgentView; onChanged: () => v
   )
 }
 
+/** AgentConfigPanel: the gateway-authoritative desired tunnel set the gateway holds
+ * for this agent — read-only in Batch A (editing + promote with consent is Batch B).
+ * Four states: skeleton while AgentDesiredConfig resolves, the tunnel list, a written
+ * empty state for an enrolled agent with no config yet, and the honest-unavailable
+ * state told two ways apart — a shared-token agent (config is agent-pushed, not
+ * gateway-held) vs a daemon too old to report it. */
+function AgentConfigPanel({view}: {view: AgentView}) {
+  const {cfg, loading, err} = useAgentConfig(view.agentId)
+  const tunnels = cfg?.tunnels ?? []
+  return (
+    <Card label="Gateway config" pad={false}
+      action={cfg?.enrolled ? <div className="pr-1"><MonoChip>gen {cfg.generation}</MonoChip></div> : undefined}>
+      {loading ? (
+        <div className="space-y-2 px-5 pb-5 pt-1" aria-busy="true">
+          {[0, 1].map(i => (
+            <div key={i} className="flex items-center gap-3">
+              <Skeleton className="h-8 w-8 rounded-[var(--r-md)]" />
+              <div className="flex-1 space-y-1.5"><Skeleton className="h-3.5 w-32 rounded-full" /><Skeleton className="h-3 w-40 rounded-full" /></div>
+              <Skeleton className="h-4 w-14 rounded-full" />
+            </div>
+          ))}
+        </div>
+      ) : err ? (
+        <div className="px-5 pb-5"><EmptyState icon={<IconServer size={24} />} title="Config unavailable"
+          hint="The background service is an older version that doesn't report gateway-held config. Update it to see this agent's authoritative tunnel set." /></div>
+      ) : cfg && !cfg.enrolled ? (
+        <div className="px-5 pb-5"><EmptyState icon={<IconShield size={24} />} title="Shared-token agent"
+          hint="This agent authenticates with the legacy shared token, so its tunnel config is agent-pushed — the gateway holds none to show." /></div>
+      ) : tunnels.length === 0 ? (
+        <div className="px-5 pb-5"><EmptyState icon={<IconTunnels size={24} />} title="No tunnels yet"
+          hint="The gateway holds no config for this agent — it will seed on connect." /></div>
+      ) : (
+        <div className="divide-y divide-[var(--border)]">
+          {tunnels.map(t => (
+            <div key={t.id} className="flex items-center gap-3 px-5 py-2.5">
+              <div className="pf-control grid h-8 w-8 shrink-0 place-items-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-2)]"><IconServer size={15} /></div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{t.name || t.id}</div>
+                <div className="truncate font-mono text-[11px] text-[var(--text-3)]">{t.id}</div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Badge>{(t.type || 'tcp').toUpperCase()}</Badge>
+                <MonoChip>{t.publicPort > 0 ? `:${t.publicPort}` : 'auto'}</MonoChip>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 /** AgentIdentity: where this machine is — its remote address prominent, LAN
- * quiet, with link uptime and lifetime link data. Wears the agent role swatch. */
-function AgentIdentity({agent}: {agent: AgentUI}) {
+ * quiet, with link uptime, lifetime link data, and the active transport. Wears the
+ * agent role swatch. The gateway reports the transport it accepted; the agent owns
+ * the dial, so an offline agent (empty) reads "—", never a guessed value. */
+function AgentIdentity({agent, transport}: {agent: AgentUI; transport: string}) {
   const lan = (agent.lanIps ?? []).filter(Boolean)
   return (
     <Card pad={false} className="h-full">
@@ -764,7 +1023,7 @@ function AgentIdentity({agent}: {agent: AgentUI}) {
               <div className="mt-0.5 truncate font-mono text-[12px] text-[var(--text-2)]">{lan.join(', ')}</div>
             </div>
           )}
-          <div className="flex gap-6 pt-0.5">
+          <div className="flex flex-wrap gap-x-6 gap-y-2.5 pt-0.5">
             <div>
               <Overline>Link uptime</Overline>
               <div className="mt-0.5 text-sm font-medium tabular-nums text-[var(--text)]">
@@ -775,6 +1034,14 @@ function AgentIdentity({agent}: {agent: AgentUI}) {
               <Overline>Link data</Overline>
               <div className="mt-0.5 text-sm font-medium tabular-nums text-[var(--text)]">
                 {agent.linkBytesIn + agent.linkBytesOut > 0 ? fmtBytes(agent.linkBytesIn + agent.linkBytesOut) : '—'}
+              </div>
+            </div>
+            <div>
+              <Overline>Transport</Overline>
+              <div className="mt-1">
+                {transport
+                  ? <MonoChip>{TRANSPORT_LABEL[transport] ?? transport}</MonoChip>
+                  : <span className="text-sm font-medium text-[var(--text-3)]">—</span>}
               </div>
             </div>
           </div>

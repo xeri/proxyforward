@@ -101,11 +101,29 @@ func (a *Agent) applyPushedConfig(specs []control.TunnelSpec, generation uint64)
 	a.cfgMu.Unlock()
 	a.configGen.Store(generation)
 
+	// The ports this agent was holding before the push, so a gateway-initiated move can
+	// be told apart from this agent's own edit echoing back.
+	wasPort := make(map[string]int, len(old))
+	for _, t := range old {
+		if t.Enabled {
+			wasPort[t.ID] = t.PublicPort
+		}
+	}
 	pushed := make(map[string]bool, len(specs))
 	for _, spec := range specs {
 		pushed[spec.ID] = true
 		if spec.PublicPort != 0 {
 			a.publicPorts.Store(spec.ID, spec.PublicPort)
+		}
+		// A concrete port that moved under us: an operator reclaimed it for another
+		// agent, or the gateway auto-reassigned off a busy one. Either way this agent
+		// asked for the old port and no longer has it, so say so — a diff-and-flag, no
+		// new wire. An agent-authored edit never trips this (ApplyTunnels writes the new
+		// set locally before proposing, so the gateway's echo matches), and an ephemeral
+		// (0) request resolving to a concrete port is the gateway doing what was asked.
+		if was, held := wasPort[spec.ID]; held && was != 0 && spec.PublicPort != 0 && was != spec.PublicPort {
+			a.logger.Warn("public port reassigned by the gateway",
+				"tunnel", spec.Name, "was", was, "now", spec.PublicPort)
 		}
 	}
 	// Forget state for tunnels that were enabled before but the push dropped.

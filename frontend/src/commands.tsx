@@ -54,7 +54,7 @@ export const COMMANDS: Command[] = [
     run: () => setThemePref('system'),
   },
   {
-    id: 'copy-pairing', title: 'Copy pairing code', hint: 'Hand to your agent', icon: <IconKey size={15} />, section: 'Actions',
+    id: 'copy-pairing', title: 'Copy shared-token code', hint: 'Legacy — prefer per-agent enrollment', icon: <IconKey size={15} />, section: 'Actions',
     when: ctx => ctx.status.role === 'gateway' && ctx.status.mode === 'engine',
     run: () => PairingCode().then(copyText).catch(() => {}),
   },
