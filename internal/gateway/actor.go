@@ -186,6 +186,9 @@ type actor struct {
 	generation uint64                                // global-monotonic supersede ordinal
 	listeners  map[string]map[string]*publicListener // agentID → tunnelID → listener
 	admitDamp  map[string]dampState                  // agentID → anti-flap state
+	// events is the ring of notable auto-fixes/conflicts (port reassign, suspected
+	// clone) the GUI event log polls. Written on this goroutine, read via do().
+	events *eventRing
 
 	clientWG sync.WaitGroup // tracks handleClient goroutines across all agents
 }
@@ -202,6 +205,15 @@ type dampState struct {
 // off and retry, not treat it as fatal.
 var errAdmitDampened = fmt.Errorf("admission dampened: same agentID reconnecting too fast")
 
+// supersedeFlapWindow: supersedes closer together than this look like two live
+// machines contesting one agentID rather than a single reconnect. Shared by the
+// anti-flap penalty (noteSupersede) and the cloned-key detector (admit).
+const supersedeFlapWindow = 2 * time.Second
+
+// eventRingCap bounds the gateway event ring: enough to show a meaningful recent
+// history in the GUI event log without unbounded growth on a busy fleet.
+const eventRingCap = 256
+
 func newActor(logger *slog.Logger) *actor {
 	return &actor{
 		logger:    logger,
@@ -210,6 +222,7 @@ func newActor(logger *slog.Logger) *actor {
 		agents:    make(map[string]*agentSession),
 		listeners: make(map[string]map[string]*publicListener),
 		admitDamp: make(map[string]dampState),
+		events:    newEventRing(eventRingCap),
 	}
 }
 
@@ -260,6 +273,22 @@ func (a *actor) do(fn func()) bool {
 	}
 }
 
+// recordEvent appends a notable event to the ring. Must run on the actor
+// goroutine (its callers — admit, bindLocked — already do), so it needs no lock.
+// It stamps TimeMs; the caller sets Kind and any structured fields.
+func (a *actor) recordEvent(ev GatewayEvent) {
+	ev.TimeMs = time.Now().UnixMilli()
+	a.events.push(ev)
+}
+
+// eventsSince returns the ring's events newer than cursor, for the engine's
+// incremental poll. Reads on the actor goroutine so it never races a push.
+func (a *actor) eventsSince(cursor uint64) []GatewayEvent {
+	var out []GatewayEvent
+	a.do(func() { out = a.events.since(cursor) })
+	return out
+}
+
 // admit decides what happens when an authenticated agent arrives on the shared
 // gateway token. A matching agentID supersedes the existing session (reconnect
 // semantics — closing it and its listeners first); a *different* agentID is
@@ -274,10 +303,26 @@ func (a *actor) admit(sess *agentSession) (uint64, error) {
 	)
 	ran := a.do(func() {
 		if incumbent, ok := a.agents[sess.agentID]; ok {
-			if d := a.admitDamp[sess.agentID]; d.penalty > 0 && time.Since(d.lastSupersedeAt) < d.penalty {
+			d := a.admitDamp[sess.agentID]
+			if d.penalty > 0 && time.Since(d.lastSupersedeAt) < d.penalty {
 				outErr = errAdmitDampened
 				a.logger.Warn("admission dampened; keeping incumbent", "agent", sess.agentID, "penalty", d.penalty)
 				return
+			}
+			// A rapid supersede from a *different* IP than the incumbent is the
+			// fingerprint of a cloned key: a derived identity is otherwise
+			// unforgeable, so two machines holding the same key take turns stealing
+			// the session. A single supersede from a new IP is just a reconnect
+			// after a network change, so require a recent prior supersede before
+			// flagging — one contest is normal, a two-sided volley is a clone.
+			if incumbent.remoteIP != "" && sess.remoteIP != "" && incumbent.remoteIP != sess.remoteIP &&
+				!d.lastSupersedeAt.IsZero() && time.Since(d.lastSupersedeAt) < supersedeFlapWindow {
+				a.recordEvent(GatewayEvent{
+					Kind:    EventCloneSuspected,
+					AgentID: sess.agentID,
+					Message: fmt.Sprintf("agent %s is being contested from two addresses (%s and %s) — its identity key looks cloned; re-enroll one machine for its own identity", sess.agentID, incumbent.remoteIP, sess.remoteIP),
+				})
+				a.logger.Warn("suspected cloned agent identity", "agent", sess.agentID, "incumbent_ip", incumbent.remoteIP, "newcomer_ip", sess.remoteIP)
 			}
 			a.logger.Info("superseding previous session from same agent", "agent", sess.agentID, "old_generation", incumbent.gen)
 			a.evict(incumbent, "superseded by new connection from the same agent")
@@ -301,12 +346,11 @@ func (a *actor) admit(sess *agentSession) (uint64, error) {
 // everything decays by timestamp comparison.
 func (a *actor) noteSupersede(agentID string) {
 	const (
-		flapThreshold = 2 * time.Second // supersedes closer than this look like a flap
-		basePenalty   = 1 * time.Second
-		capPenalty    = 30 * time.Second
+		basePenalty = 1 * time.Second
+		capPenalty  = 30 * time.Second
 	)
 	d := a.admitDamp[agentID]
-	if !d.lastSupersedeAt.IsZero() && time.Since(d.lastSupersedeAt) < flapThreshold {
+	if !d.lastSupersedeAt.IsZero() && time.Since(d.lastSupersedeAt) < supersedeFlapWindow {
 		if d.penalty == 0 {
 			d.penalty = basePenalty
 		} else {
@@ -360,8 +404,10 @@ func (a *actor) evict(sess *agentSession, reason string) {
 // for the spec's ID (config hot-apply) and open a fresh public listener. The
 // nested map keys by agentID first, so a re-register can only replace the SAME
 // agent's listener — agent B can never steal agent A's. A public-port clash
-// across agents is caught by net.Listen (global FCFS).
-func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr string, handle func(*publicListener, net.Conn)) (int, error) {
+// across agents (or with an outside process) is caught by net.Listen (global
+// FCFS); rather than fail the tunnel, bindLocked reassigns it to a policy-valid
+// free port and records the clash so the GUI can offer to reclaim the port.
+func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr string, allowlist []int, handle func(*publicListener, net.Conn)) (int, error) {
 	subtree := a.listeners[sess.agentID]
 	if old, ok := subtree[spec.ID]; ok {
 		old.ln.Close()
@@ -370,7 +416,28 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr
 	}
 	ln, err := net.Listen("tcp", net.JoinHostPort(bindAddr, strconv.Itoa(spec.PublicPort)))
 	if err != nil {
-		return 0, portowner.DecorateBindError(spec.PublicPort, err)
+		if !portowner.IsAddrInUse(err) {
+			return 0, portowner.DecorateBindError(spec.PublicPort, err)
+		}
+		// The requested port is taken. Bind a policy-valid alternative instead of
+		// failing, so the tunnel comes up; the listener keeps the *requested* spec
+		// so a later reconcile of the same spec is a no-op (sameListener) and the
+		// reassigned port stays put rather than re-contending on every sync.
+		reln := listenFirstFree(bindAddr, reassignCandidates(spec.PublicPort, sess.scope, allowlist))
+		if reln == nil {
+			return 0, portowner.DecorateBindError(spec.PublicPort, err)
+		}
+		actual := reln.Addr().(*net.TCPAddr).Port
+		a.recordEvent(GatewayEvent{
+			Kind:          EventPortReassigned,
+			AgentID:       sess.agentID,
+			TunnelID:      spec.ID,
+			RequestedPort: spec.PublicPort,
+			ActualPort:    actual,
+			Message:       fmt.Sprintf("%q could not take port %d (in use by %s); it is on port %d until you reclaim %d", spec.Name, spec.PublicPort, a.portHolderDesc(spec.PublicPort), actual, spec.PublicPort),
+		})
+		a.logger.Warn("public port in use; reassigned tunnel", "tunnel_id", spec.ID, "requested_port", spec.PublicPort, "actual_port", actual)
+		ln = reln
 	}
 	pl := &publicListener{spec: spec, owner: sess, ln: ln, done: make(chan struct{})}
 	pl.limiters.Store(bwcap.BuildSet(spec.BandwidthLimitMbps, spec.BandwidthLimitScope))
@@ -381,6 +448,37 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr
 	subtree[spec.ID] = pl
 	go a.acceptClients(pl, handle)
 	return ln.Addr().(*net.TCPAddr).Port, nil
+}
+
+// listenFirstFree tries to bind each candidate port in order and returns the
+// first listener that opens. A candidate of 0 asks the OS for any free ephemeral
+// port. Returns nil when every candidate is taken (or the list is empty).
+func listenFirstFree(bindAddr string, candidates []int) net.Listener {
+	for _, p := range candidates {
+		ln, err := net.Listen("tcp", net.JoinHostPort(bindAddr, strconv.Itoa(p)))
+		if err == nil {
+			return ln
+		}
+	}
+	return nil
+}
+
+// portHolderDesc names whatever holds a public port, for a reassignment message:
+// another of this gateway's agents (found in the listener map — the "evict other"
+// case) when it is an internal clash, else the owning OS process (portowner) when
+// identifiable. Runs on the actor goroutine, so reading listeners is race-free.
+func (a *actor) portHolderDesc(port int) string {
+	for agentID, subtree := range a.listeners {
+		for _, pl := range subtree {
+			if pl.ln.Addr().(*net.TCPAddr).Port == port {
+				return "agent " + agentID
+			}
+		}
+	}
+	if o, ok := portowner.Lookup(port); ok {
+		return o.String()
+	}
+	return "another process"
 }
 
 // unbindLocked runs on the actor goroutine: close one tunnel's listener if it
@@ -401,7 +499,7 @@ func (a *actor) unbindLocked(sess *agentSession, tunnelID string) {
 
 // bindTunnel opens the public listener for a tunnel spec. Runs net.Listen on
 // the actor goroutine — binds are rare and this keeps port state serialized.
-func (a *actor) bindTunnel(sess *agentSession, spec control.TunnelSpec, bindAddr string, handle func(*publicListener, net.Conn)) (int, error) {
+func (a *actor) bindTunnel(sess *agentSession, spec control.TunnelSpec, bindAddr string, allowlist []int, handle func(*publicListener, net.Conn)) (int, error) {
 	var (
 		port   int
 		outErr error
@@ -411,7 +509,7 @@ func (a *actor) bindTunnel(sess *agentSession, spec control.TunnelSpec, bindAddr
 			outErr = fmt.Errorf("session is no longer active")
 			return
 		}
-		port, outErr = a.bindLocked(sess, spec, bindAddr, handle)
+		port, outErr = a.bindLocked(sess, spec, bindAddr, allowlist, handle)
 	})
 	if !ran {
 		return 0, fmt.Errorf("gateway is shutting down")
@@ -439,7 +537,7 @@ type reconcileOutcome struct {
 // the *requested* spec, so PublicPort-0 ephemeral tunnels stay stable) is
 // left untouched: live client connections survive re-syncs of identical
 // state. The bool result is false when the gateway is shutting down.
-func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, bindAddr string, handle func(*publicListener, net.Conn)) ([]reconcileOutcome, bool) {
+func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, bindAddr string, allowlist []int, handle func(*publicListener, net.Conn)) ([]reconcileOutcome, bool) {
 	outcomes := make([]reconcileOutcome, 0, len(desired))
 	ran := a.do(func() {
 		if a.agents[sess.agentID] != sess || sess.evicted.Load() {
@@ -482,7 +580,7 @@ func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, bind
 				outcomes = append(outcomes, reconcileOutcome{ID: spec.ID, Port: pl.ln.Addr().(*net.TCPAddr).Port})
 				continue
 			}
-			port, err := a.bindLocked(sess, spec, bindAddr, handle)
+			port, err := a.bindLocked(sess, spec, bindAddr, allowlist, handle)
 			outcomes = append(outcomes, reconcileOutcome{ID: spec.ID, Port: port, Err: err})
 		}
 	})
@@ -532,10 +630,14 @@ func (a *actor) session(agentID string) *agentSession {
 
 // TunnelSnapshot is one registered tunnel's live state, for status surfaces.
 type TunnelSnapshot struct {
-	AgentID             string // the agent that registered this tunnel
-	ID                  string
-	Name                string
-	PublicPort          int  // actual bound port
+	AgentID    string // the agent that registered this tunnel
+	ID         string
+	Name       string
+	PublicPort int // actual bound port
+	// RequestedPort is the port the spec asked for. When it differs from PublicPort
+	// (and is non-zero), the port was in use and the tunnel was auto-reassigned — the
+	// signal the GUI turns into a "reclaim port" card.
+	RequestedPort       int
 	LocalUp             bool // agent's last reported backend health
 	LocalKnown          bool
 	BandwidthLimitMbps  int    // configured cap (0 = unlimited)
@@ -554,6 +656,7 @@ func (a *actor) tunnels() []TunnelSnapshot {
 					ID:                  pl.spec.ID,
 					Name:                pl.spec.Name,
 					PublicPort:          pl.ln.Addr().(*net.TCPAddr).Port,
+					RequestedPort:       pl.spec.PublicPort,
 					BandwidthLimitMbps:  pl.spec.BandwidthLimitMbps,
 					BandwidthLimitScope: pl.spec.BandwidthLimitScope,
 				}

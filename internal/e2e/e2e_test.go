@@ -882,8 +882,10 @@ func TestTwoAgentsSameTunnelID(t *testing.T) {
 	roundTrip(t, addrB, []byte("B's tunnel"))
 }
 
-// TestConcurrentPortRace (T2): two agents race to bind the same public port;
-// exactly one wins (global FCFS) and keeps serving, the other never binds it.
+// TestConcurrentPortRace (T2): two agents race to bind the same public port.
+// Exactly one wins it (global FCFS); the loser is not failed but auto-reassigned
+// to a free port, so *both* come up and serve — the conflict is surfaced (a GUI
+// card), never a dead tunnel. (conflict, #2)
 func TestConcurrentPortRace(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
@@ -901,22 +903,29 @@ func TestConcurrentPortRace(t *testing.T) {
 	agB := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(bTun, echoAddr, port)})
 	agC := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(cTun, echoAddr, port)})
 
+	var pB, pC int
+	var bOK, cOK bool
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		_, bOK := agB.TunnelPublicPort(bTun)
-		_, cOK := agC.TunnelPublicPort(cTun)
-		if bOK || cOK {
+		pB, bOK = agB.TunnelPublicPort(bTun)
+		pC, cOK = agC.TunnelPublicPort(cTun)
+		if bOK && cOK {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	time.Sleep(500 * time.Millisecond) // let the loser's bind definitively fail
-	_, bOK := agB.TunnelPublicPort(bTun)
-	_, cOK := agC.TunnelPublicPort(cTun)
-	if bOK == cOK {
-		t.Fatalf("exactly one agent must win port %d; bOK=%v cOK=%v", port, bOK, cOK)
+	if !bOK || !cOK {
+		t.Fatalf("both agents should come up (one wins %d, the other is reassigned); bOK=%v cOK=%v", port, bOK, cOK)
 	}
-	roundTrip(t, fmt.Sprintf("127.0.0.1:%d", port), []byte("winner serves"))
+	if pB == pC {
+		t.Fatalf("contending agents must bind distinct ports, both got %d", pB)
+	}
+	if (pB == port) == (pC == port) {
+		t.Fatalf("exactly one agent must win the requested port %d; got pB=%d pC=%d", port, pB, pC)
+	}
+	// Both serve — the winner on the requested port, the loser on its reassignment.
+	roundTrip(t, fmt.Sprintf("127.0.0.1:%d", pB), []byte("B serves"))
+	roundTrip(t, fmt.Sprintf("127.0.0.1:%d", pC), []byte("C serves"))
 }
 
 // TestAgentChurnPreservesOtherAgent (T3): one agent disconnecting and
