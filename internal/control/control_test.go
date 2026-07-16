@@ -189,7 +189,7 @@ func TestHashTunnels(t *testing.T) {
 		t.Fatal("empty and populated sets collide")
 	}
 	// Deterministic across calls (no map iteration order leaking in).
-	if HashTunnels(a) != HashTunnels(a) {
+	if h1, h2 := HashTunnels(a), HashTunnels(a); h1 != h2 {
 		t.Fatal("hash is not deterministic")
 	}
 }
