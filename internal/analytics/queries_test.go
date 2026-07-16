@@ -401,3 +401,52 @@ func TestSessionTimeline(t *testing.T) {
 		t.Fatalf("empty timeline = %+v", empty)
 	}
 }
+
+// TestQueryAgentScoping (T4) is the anti-commingling guarantee: two agents that
+// serve the same tunnel_id must stay separate when a query is scoped by
+// agent_id, while a bare tunnel_id deliberately aggregates across every agent.
+func TestQueryAgentScoping(t *testing.T) {
+	d := openTest(t, t.TempDir())
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := d.sql.Exec(q, args...); err != nil {
+			t.Fatalf("seed: %v\n%s", err, q)
+		}
+	}
+	exec(`INSERT INTO players (uuid, name, offline, first_seen, last_seen, last_cc) VALUES
+		(?, 'Ann', 0, ?, ?, ''),
+		(?, 'Bob', 0, ?, ?, '')`,
+		steveUUID, qBase-hourMs, qBase-1000,
+		alexUUID, qBase-hourMs, qBase-1000)
+	// Both agents serve tunnel_id "web"; Ann via agentA, Bob via agentB.
+	exec(`INSERT INTO sessions (id, agent_id, tunnel_id, tunnel_name, client_ip, started_ms, ended_ms, bytes_in, bytes_out, player_uuid, player_name) VALUES
+		(1, 'agentA', 'web', 'mc', '203.0.113.1', ?, ?, 100, 200, ?, 'Ann'),
+		(2, 'agentB', 'web', 'mc', '203.0.113.2', ?, ?, 300, 400, ?, 'Bob')`,
+		qBase-hourMs, qBase-1000, steveUUID,
+		qBase-hourMs, qBase-1000, alexUUID)
+
+	// Sessions scoped by (agent, tunnel) isolate each agent.
+	if s, err := d.Sessions(SessionsQuery{AgentID: "agentA", TunnelID: "web"}, qBase); err != nil {
+		t.Fatal(err)
+	} else if s.Total != 1 || s.Sessions[0].PlayerName != "Ann" {
+		t.Fatalf("agentA/web sessions = %+v, want 1 (Ann)", s)
+	}
+	if s, _ := d.Sessions(SessionsQuery{AgentID: "agentB", TunnelID: "web"}, qBase); s.Total != 1 || s.Sessions[0].PlayerName != "Bob" {
+		t.Fatalf("agentB/web sessions = %+v, want 1 (Bob)", s)
+	}
+	// A bare tunnel_id aggregates across agents (documented, intentional).
+	if s, _ := d.Sessions(SessionsQuery{TunnelID: "web"}, qBase); s.Total != 2 {
+		t.Fatalf("web sessions (all agents) = %d, want 2", s.Total)
+	}
+
+	// Players scoped by agent show only that agent's players, with agent-scoped
+	// aggregates on the join.
+	if p, err := d.Players(PlayersQuery{AgentID: "agentA"}, nil, qBase); err != nil {
+		t.Fatal(err)
+	} else if p.Total != 1 || p.Players[0].Name != "Ann" || p.Players[0].BytesIn != 100 {
+		t.Fatalf("agentA players = %+v, want Ann with 100 bytesIn", p)
+	}
+	if p, _ := d.Players(PlayersQuery{AgentID: "agentB", TunnelID: "web"}, nil, qBase); p.Total != 1 || p.Players[0].Name != "Bob" || p.Players[0].BytesIn != 300 {
+		t.Fatalf("agentB/web players = %+v, want Bob with 300 bytesIn", p)
+	}
+}

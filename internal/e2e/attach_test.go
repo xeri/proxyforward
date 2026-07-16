@@ -35,6 +35,7 @@ func TestAttachedAnalytics(t *testing.T) {
 	cfg := config.Default()
 	cfg.Role = config.RoleAgent
 	cfg.Agent.AgentID = config.NewID()
+	cfg.Agent.Transport = config.TransportMux // this test is about attach, not the transport ladder
 	cfg.Agent.GatewayHost = "127.0.0.1"
 	cfg.Agent.GatewayPort = 1 // nothing listens; the agent just retries
 	cfg.Agent.Token = config.NewToken()

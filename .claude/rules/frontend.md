@@ -29,7 +29,21 @@ Read `frontend/DESIGN.md` (the charter) before any UI work; pull polish work fro
   specificity.
 - Load-bearing couplings — change both sides or nothing: `--sidebar-w` ↔ `Shell`
   grid, `--nav-item-h` ↔ `Sidebar.tsx ITEM_H`, `--dur-theme` ↔
-  `theme.ts THEME_SWEEP_MS`. Root font 13.5 px scales every rem.
+  `theme.ts THEME_SWEEP_MS`.
+- Every scroller rubber-bands at its ends (`rubberband.ts`). A new one must mark the
+  element to translate with `data-band-content` (default: its first child — wrong for
+  a well whose children are rows). A well that owns the surface (overlay body, menu,
+  the log) also takes `overscroll-y-contain`, so it bands itself; an embedded list on
+  a scrollable page must NOT — it keeps chaining and the *page* bounces, or reaching
+  its end would freeze the page under the cursor (`GeoRank.tsx`). An optional
+  edge-light overlay is a *sibling* of the scroller marked `data-band-glow`;
+  `rubberband.ts` stamps `--band-t`/`data-band` straight onto it, never onto the
+  scroller — the scroller's subtree is the whole screen and `--band-t` inherits, so
+  stamping there restyles every descendant each frame (`.pf-band-glow`, Shell/Activity).
+- Root font = 13.5px × `--ui-scale` (viewport-stepped in `tokens.css`), so every
+  rem AND every `--fs-*`/`--sp-*` token scale together across resolutions. New
+  geometry that must align with JS px math (like `ITEM_H`) must NOT multiply by
+  `--ui-scale`; everything user-facing should.
 
 ## Footguns
 - `frontend/wailsjs/` is GENERATED — never hand-edit (a PreToolUse hook blocks it);

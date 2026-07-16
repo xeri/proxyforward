@@ -88,14 +88,21 @@ export function Activity({attached}: {attached: boolean}) {
           </span>
           <Badge tone="neutral">ring · {CAP} max</Badge>
         </div>
-        <div ref={bodyRef} className="pf-well-flush relative min-h-0 flex-1 select-text overflow-y-auto px-3 py-2 font-mono text-[12px] leading-relaxed">
-          {filtered.length === 0
-            ? (attached && entries.length === 0
-              ? <EmptyState icon={<IconTerminal size={26} />} title="The service keeps its own logs"
-                  hint="This window views a background service, which logs to its own files. Export diagnostics to collect them." />
-              : <EmptyState icon={<IconLogs size={26} />} title="No log lines"
-                  hint="Activity streams here as the engine runs." />)
-            : filtered.map(e => <LogLine key={e.seq} e={e} />)}
+        {/* The well bounces at its ends; the glow is its sibling so it neither
+            scrolls nor rides the band's transform (rubberband.ts). */}
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div ref={bodyRef} className="pf-well-flush relative min-h-0 flex-1 select-text overflow-y-auto overscroll-y-contain px-3 py-2 font-mono text-[12px] leading-relaxed">
+            <div data-band-content>
+              {filtered.length === 0
+                ? (attached && entries.length === 0
+                  ? <EmptyState icon={<IconTerminal size={26} />} title="The service keeps its own logs"
+                      hint="This window views a background service, which logs to its own files. Export diagnostics to collect them." />
+                  : <EmptyState icon={<IconLogs size={26} />} title="No log lines"
+                      hint="Activity streams here as the engine runs." />)
+                : filtered.map(e => <LogLine key={e.seq} e={e} />)}
+            </div>
+          </div>
+          <div className="pf-band-glow absolute inset-0 z-10" data-band-glow aria-hidden />
         </div>
       </div>
     </div>

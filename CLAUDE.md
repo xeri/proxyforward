@@ -61,21 +61,27 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   arms in both `agent.go` and `gateway.go`). Replies that can grow are chunked or
   clamped under the frame cap (`MaxConnStatsPerFrame`, `ipc.MaxStatusConns`) —
   never raise the cap itself.
-- Never advertise a capability that isn't implemented end-to-end. (Currently violated
-  by `CapTunnelUDP` — see Reality check. Don't repeat this.)
+- Never advertise a capability that isn't implemented end-to-end — the peer acts on
+  the offer, then fails. (`tunnel-udp` violated this until it was un-advertised.)
 
 ### Security (`internal/link/`, `internal/gateway/`)
 - TLS 1.3 only, both sides (`cert.go GatewayTLSConfig` / `AgentTLSConfig`). Trust =
   the gateway's self-signed ECDSA P-256 cert pinned by SHA-256 fingerprint carried
-  out-of-band in the pairing code `pf1://host:port/<token>#sha256:<hex>`
-  (`link/pairing.go`). No CA, ever. Token and fingerprint compare in constant time
+  out-of-band in the pairing code `pxf://host:port/v1/pair/<token>#sha256:<hex>`
+  (`link/pairing.go`; `pxf` doubles as the OS deep-link scheme, `/v1/pair/` is a
+  format-version + role marker so a wrong-kind link fails loudly). No CA, ever. Token and fingerprint compare in constant time
   (`crypto/subtle` — `gateway.go handleControlConn`, `cert.go`).
 - The pre-auth prologue (accept → TLS → hello) finishes within `preAuthTimeout` or
   dies; failed auth rate-limits per IP, fail2ban-style — successes never count
   (`limits.go authLimiter`). Public conns gate globally and per-IP (`limits.go
   connGate`; defaults in `config.go`).
-- Same agentID reconnect **supersedes** (generation counter); a different agentID on
-  the same token is **rejected** — no flapping (`actor.go admit`).
+- One shared gateway token admits **many** agents, told apart by self-asserted
+  `agentID`: a matching agentID **supersedes** (reconnect), a distinct one is admitted
+  **alongside**. Supersede is anti-flap dampened so an ID collision degrades to a slow
+  contest, not a loop (`actor.go admit`, `noteSupersede`). Residual risk that ships
+  (shared token + self-asserted ID + FCFS ports + no per-agent revocation): a
+  token-holder can supersede or port-squat any agent, recoverable only by rotating the
+  shared token — the mitigation (per-agent tokens/revocation) is deferred.
 - The IPC pipe ACL admits Administrators, SYSTEM, and the interactive user only
   (`ipc/server_windows.go pipeSecurity`).
 - Diagnostics bundles redact every secret, host, IP, and identity; peer IPs become
@@ -87,18 +93,25 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
 
 ### Liveness & lifecycle
 - **One liveness owner**: app-level ping in **both** directions (`pingInterval`) with
-  an idle read deadline (`controlIdleTimeout`); yamux keepalive OFF and its write
-  timeout deliberately long so the heartbeat, not yamux, declares death
-  (`transport/yamux.go muxConfig`).
-- Nothing outside `internal/transport` imports yamux. Agent and gateway program
-  against `transport.Session` / `Stream` so the mux can be swapped.
+  an idle read deadline (`controlIdleTimeout`); the transport's own keepalive is OFF
+  and its write/idle timeout deliberately long so the heartbeat, not the transport,
+  declares death (yamux keepalive off + long write timeout in `transport/yamux.go
+  muxConfig`; QUIC `KeepAlivePeriod=0` + a `MaxIdleTimeout` above the liveness budget
+  in `transport/quicconfig.go quicConfig`).
+- Nothing outside `internal/transport` imports yamux or quic-go. Agent and gateway
+  program against `transport.Session` / `Stream` so the transport can be swapped
+  (yamux-over-TCP, per-conn multi-TCP, or QUIC); the gateway chooses the data
+  plane once per session behind `dataPlane.openFlow` (QUIC rides the shared-session
+  mux plane), keeping `handleClient` transport-agnostic (`dataplane.go pickDataPlane`).
 - Reconnect: full-jitter exponential backoff, sequence resets after a stable period;
   network-change/resume ticks short-circuit it; DNS re-resolves every attempt
   (`link/backoff.go`, `netnotify/`, `agent.go runSession`).
 - **Ghost-listener guarantee**: all session/listener lifecycle runs on the gateway's
-  single actor goroutine; eviction closes each listener and waits for its accept loop
-  before anything else proceeds — a rebound port is provably free
-  (`actor.go evictLocked` / `bindLocked`; regression: e2e `TestAgentRestartRebinds`).
+  single actor goroutine; per-agent eviction closes that agent's listeners and waits
+  each accept loop before anything else proceeds — a rebound port is provably free, and
+  evicting one agent leaves the others' listeners and connections untouched (the
+  per-agent mux is the connection-drain boundary). (`actor.go evict` / `bindLocked`;
+  regressions: e2e `TestAgentRestartRebinds`, `TestEvictionIsolatesAndDrains`.)
 - Exactly one process owns ports and config: every engine serves the named pipe
   `\\.\pipe\proxyforward`; a GUI that finds it attaches as a thin client; pipe
   conflict is fatal by design (`engine.go Run`, `app/app.go Startup`).
@@ -110,8 +123,9 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   intact (`relay_test.go`, e2e `TestFinalBytesThroughTunnel`). Every write refreshes
   a progress deadline so a parked peer can't leak a goroutine.
 - No Nagle anywhere: Go's default `TCP_NODELAY` end-to-end, set explicitly on the
-  agent's two dials (`SetNoDelay` in `agent.go runSession` and `handleDataStream`);
-  the yamux window is sized so a chunk burst fits in flight.
+  agent's dials (`SetNoDelay` in `agent.go dialGateway` — control conn and every
+  per-conn data conn — and `handleDataStream` for the local dial); the yamux
+  window is sized so a chunk burst fits in flight.
 - **Enforced floor**: `TestBurstThroughputAndCrossStreamLatency` in
   `internal/e2e/e2e_test.go` — throughput and worst cross-stream RTT bounds are in
   the numbers table. Run it before and after any hot-path change (`hot-path` skill).
@@ -131,12 +145,15 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   alone (`ui.tsx StatusDot`).
 - All motion gates on `prefersReduced()` / `data-motion` (`motion.ts`, kill switch at
   the bottom of `motion.css`); data changes are instant under reduced motion, never
-  eased (`NumberTicker`, `charts/util.ts useTweenedValues`).
+  eased (`NumberTicker`, `charts/util.ts useTweenedValues`). That kill switch only
+  zeroes CSS durations, so *scripted* motion must gate itself in JS — the scroll
+  rubber band attaches no listener at all under it (`rubberband.ts useRubberBand`).
 - Chart series tokens `--dl/--ul/--conn/--rtt` are load-bearing names; direction
   mapping (wire "in/out" → UI "upload/download") happens in exactly one place,
   the `frontend/src/history.ts` header. Never re-map elsewhere.
-- The design charter is `frontend/DESIGN.md` — one identity surface per screen, glass
-  as a reward, motion communicates network state, color is signal.
+- The design charter is `frontend/DESIGN.md` — one identity surface per screen; every
+  surface is glass but only Signal Glass *answers the pointer* (never give a card the
+  caustics/streak/wake); motion communicates network state; color is signal.
 
 ### Privacy
 - Player/traffic analytics are local-only (SQLite next to the config); the only
@@ -150,11 +167,7 @@ The README and the Settings/Tunnels UI **oversell**. Ground truth at 4a8b0c9:
 
 | Feature (advertised in README/UI) | Actual state |
 |---|---|
-| Offline MOTD responder | `mc.ServeOffline` built + fuzzed, **never called**; gateway closes dead-session conns (`gateway.go handleClient`). |
-| `per-conn` transport | Config-valid only; agent never reads it, gateway rejects `KindData` (`handleControlConn`). |
-| UDP tunnels | No UDP socket code; `validateSpec` rejects `type:"udp"` — yet `CapTunnelUDP` is **advertised** (live protocol-bug risk). |
-| Bandwidth cap | `BandwidthLimitMbps` stored, never enforced. |
-| Prometheus `/metrics` | `MetricsConfig` stored, no server exists. |
+| UDP tunnels | Not implemented: no UDP socket code, `validateSpec` rejects `type:"udp"`. No longer advertised (the `tunnel-udp` capability was removed); config still accepts `type:"udp"` but the gateway rejects it — a latent gap, not an oversell. |
 | MC status polling (MOTD/players) | Only login sniffing (`mcsniff/`); the health probe is a bare TCP dial (`health.go probeOnce`). |
 | Tray / minimize-to-tray / autostart | Hidden `tray_spike.go` command only; `MinimizeToTray` / `Autostart` stored, unused. |
 | Linux / macOS binaries | CI **builds** them (`.github/workflows/ci.yml`) so the `*_other.go` stubs can't rot, but they **cannot run**: `ipc.Serve` returns `ErrUnsupported` off Windows and every engine must serve the pipe (`engine.go Run`), so the window opens and the engine dies. Unpublished artifacts, never release assets. Fixing this means a real unix-socket IPC port. |

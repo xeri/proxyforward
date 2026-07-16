@@ -108,9 +108,13 @@ func (g *connGate) release(ip string) {
 
 // remoteIP extracts the bare IP from a net.Conn's remote address, falling
 // back to the whole string for exotic transports.
-func remoteIP(conn net.Conn) string {
-	if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
+func remoteIP(conn net.Conn) string { return ipFromAddr(conn.RemoteAddr()) }
+
+// ipFromAddr extracts the bare IP from any net.Addr (a QUIC session reports a
+// *net.UDPAddr), falling back to the whole string for exotic transports.
+func ipFromAddr(addr net.Addr) string {
+	if host, _, err := net.SplitHostPort(addr.String()); err == nil {
 		return host
 	}
-	return conn.RemoteAddr().String()
+	return addr.String()
 }

@@ -3,7 +3,7 @@ import {toggleTheme, useTheme} from '../theme'
 import {ConnectionPill} from '../components/ConnectionPill'
 import {IconButton, Kbd} from '../components/ui'
 import {IconCommand, IconMoon, IconServer, IconSun} from '../components/icons'
-import {NAV_MAIN, NAV_SETTINGS, NavId} from '../nav'
+import {labelOf, NavId} from '../nav'
 import {useTitleContext} from '../pagecontext'
 import {WindowControls} from './WindowControls'
 
@@ -31,7 +31,7 @@ export function TitleBar({status, nav, brand = false, onPalette}: {
 }) {
   const {resolved} = useTheme()
   const screenCtx = useTitleContext()
-  const navLabel = nav ? [...NAV_MAIN, NAV_SETTINGS].find(n => n.id === nav)?.label : undefined
+  const navLabel = nav ? labelOf(nav) : undefined
   const ctx = screenCtx ?? (status ? defaultContext(status) : null)
   return (
     <div className="pf-drag flex h-full items-stretch" onContextMenu={e => e.preventDefault()}>

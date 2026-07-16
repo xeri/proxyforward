@@ -7,7 +7,7 @@ import {
   Modal, MonoChip, PageHeader, Select, Skeleton, TextInput, Toggle,
 } from '../components/ui'
 import {IconBolt, IconEdit, IconPlus, IconServer, IconTrash, IconTunnels} from '../components/icons'
-import {UIStatus} from '../state'
+import {BANDWIDTH_SCOPES, scopeLabel, UIStatus} from '../state'
 
 type Tunnel = config.Tunnel
 
@@ -21,7 +21,7 @@ function blankTunnel(): Tunnel {
   return config.Tunnel.createFrom({
     ID: newTunnelID(), Name: 'Minecraft', Type: 'tcp',
     LocalAddr: '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
-    Options: {MinecraftAware: false, ProxyProtocolV2: false, OfflineMOTD: '', BandwidthLimitMbps: 0},
+    Options: {MinecraftAware: false, ProxyProtocolV2: false, OfflineMOTD: '', BandwidthLimitMbps: 0, BandwidthLimitScope: 'combined'},
   })
 }
 
@@ -118,13 +118,17 @@ export function Tunnels({status}: {status: UIStatus}) {
             ...(t.Options?.MinecraftAware ? [['Minecraft-aware', 'On'] as [string, string]] : []),
             ...(t.Options?.ProxyProtocolV2 ? [['PROXY protocol v2', 'On'] as [string, string]] : []),
             ...(t.Options?.OfflineMOTD ? [['Offline MOTD', t.Options.OfflineMOTD] as [string, string]] : []),
-            ...((t.Options?.BandwidthLimitMbps ?? 0) > 0 ? [['Bandwidth cap', `${t.Options.BandwidthLimitMbps} Mbps`] as [string, string]] : []),
+            ...((t.Options?.BandwidthLimitMbps ?? 0) > 0
+              ? [['Bandwidth cap', `${t.Options.BandwidthLimitMbps} Mbps${
+                  (t.Options.BandwidthLimitScope || 'combined') !== 'combined' ? ` · ${scopeLabel(t.Options.BandwidthLimitScope)}` : ''
+                }`] as [string, string]]
+              : []),
           ]
           return (
             <div key={t.ID} className="pf-card pf-lift flex flex-col p-4">
               <div className="flex items-start justify-between">
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] text-[var(--text-2)] shadow-[inset_0_1px_0_var(--hairline)]">
+                  <div className="pf-control relative flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-2)]">
                     <IconServer size={18} />
                   </div>
                   <div className="min-w-0">
@@ -267,7 +271,7 @@ function TunnelEditor({title, initial, onSave, onCancel}: {
             <div className="divide-y divide-[var(--border)] rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] px-4 py-1">
               <Toggle checked={opt.MinecraftAware} onChange={v => setOpt({MinecraftAware: v})}
                 label="Minecraft-aware"
-                hint="Poll the server for MOTD, player count and version; sniff usernames for the traffic view." />
+                hint="Sniff player usernames from the login handshake for the traffic and players views." />
               <Toggle checked={opt.ProxyProtocolV2} onChange={v => setOpt({ProxyProtocolV2: v})}
                 label="PROXY protocol v2"
                 hint={<>Send the real client IP to the local server (Paper/Velocity). <b>Mutually exclusive</b> with BungeeCord/Velocity IP-forwarding — enabling both causes ghost errors.</>} />
@@ -281,10 +285,23 @@ function TunnelEditor({title, initial, onSave, onCancel}: {
               <Field label="Bandwidth cap (Mbps)" hint="0 = unlimited. Protects the gateway's uplink.">
                 <TextInput value={String(opt.BandwidthLimitMbps)} onChange={v => setOpt({BandwidthLimitMbps: parseInt(v, 10) || 0})} mono />
               </Field>
-              <Field label="Protocol">
-                <Select value="tcp" onChange={() => {}} options={[{value: 'tcp', label: 'TCP (Java Edition)'}]} />
+              <Field label="Cap scope" hint={
+                (opt.BandwidthLimitMbps ?? 0) > 0
+                  ? 'What the cap applies to: both directions together, each direction, or each connection.'
+                  : 'Set a cap first.'
+              }>
+                <Select
+                  value={opt.BandwidthLimitScope || 'combined'}
+                  onChange={v => setOpt({BandwidthLimitScope: v})}
+                  options={BANDWIDTH_SCOPES}
+                  disabled={(opt.BandwidthLimitMbps ?? 0) <= 0}
+                />
               </Field>
             </div>
+
+            <Field label="Protocol">
+              <Select value="tcp" onChange={() => {}} options={[{value: 'tcp', label: 'TCP (Java Edition)'}]} />
+            </Field>
           </div>
         </Disclosure>
       </div>

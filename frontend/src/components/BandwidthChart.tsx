@@ -3,10 +3,11 @@ import {prefersReduced} from '../motion'
 import {fmtBytes, fmtRate} from '../state'
 import {
   Bucket, ChartMode, HistoryResult, RANGE_KEYS, RANGES, RangeKey, SeriesVisibility,
-  loadCandlePref, loadRangePref, loadSeriesPref, modeFor, saveCandlePref, saveRangePref, saveSeriesPref,
+  loadCandlePref, loadRangePref, loadSeriesPref, loadUptimePref, modeFor,
+  saveCandlePref, saveRangePref, saveSeriesPref, saveUptimePref,
   useBandwidthHistory,
 } from '../history'
-import {Button, Card, LiveDot} from './ui'
+import {Button, Card, LiveDot, Switch} from './ui'
 
 export {LiveDot} // moved to ui.tsx; re-exported for existing importers
 import {IconArrowRight} from './icons'
@@ -22,6 +23,9 @@ const H = 260
 // the same amount so the plot area — and download/upload — stay the same size.
 // Wide enough for the spelled-out axis names ("conns" / "RTT ms").
 const RIGHT_COL = 54
+// The uptime strip claims one short lane below the time-label row when shown,
+// so toggling it never resizes the plot itself.
+const UPTIME_LANE = 20
 
 // ---------------------------------------------------------------------------
 // BandwidthPanel: range selector + mode toggle + legend/series toggles + stats
@@ -30,19 +34,31 @@ const RIGHT_COL = 54
 // cadence and keeps it in a module-level cache so tab switches never lose
 // history.
 // ---------------------------------------------------------------------------
-export function BandwidthPanel({historyUnsupported, compact = false, hero = false, onExpand}: {
+export function BandwidthPanel({historyUnsupported, compact = false, hero = false, onExpand, useHistory, heading = 'Bandwidth', vtName = 'pf-bw'}: {
   historyUnsupported?: boolean
   /** Compact teaser: live-rate headline + a 1h sparkline, no controls, optional jump-off. */
   compact?: boolean
   /** Hero: Traffic's identity surface — bare, no card. The graph is the artwork. */
   hero?: boolean
   onExpand?: () => void
+  /** History source hook — defaults to the gateway-wide series. The Agents
+   * drill-in injects a per-agent source so the same instrument (range, candles,
+   * series, stats) draws one agent's RRD without forking the panel. */
+  useHistory?: (range: RangeKey) => HistoryResult | null
+  /** Card heading override (the per-agent panel keeps "Bandwidth"). */
+  heading?: string
+  /** View-transition name — one per screen. Pass null for the drill-in chart,
+   * which shares a screen with no morph target. */
+  vtName?: string | null
 }) {
   const [rangePref, setRange] = useState<RangeKey>(loadRangePref)
   const [candles, setCandles] = useState<boolean>(loadCandlePref)
   const [vis, setVis] = useState<SeriesVisibility>(loadSeriesPref)
+  const [uptime, setUptime] = useState<boolean>(loadUptimePref)
   const range: RangeKey = compact ? '1h' : rangePref
-  const data = useBandwidthHistory(range)
+  // One hook call, one position — the source is chosen once per mount.
+  const useHist = useHistory ?? useBandwidthHistory
+  const data = useHist(range)
   const spec = RANGES[range]
   const mode = modeFor(range, candles)
   const buckets = data?.buckets ?? []
@@ -50,6 +66,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
 
   const pickRange = (r: RangeKey) => { setRange(r); saveRangePref(r) }
   const pickCandles = (on: boolean) => { setCandles(on); saveCandlePref(on) }
+  const pickUptime = (on: boolean) => { setUptime(on); saveUptimePref(on) }
   const toggle = (k: keyof SeriesVisibility) => {
     setVis(prev => { const next = {...prev, [k]: !prev[k]}; saveSeriesPref(next); return next })
   }
@@ -73,6 +90,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
           <SparkChart
             buckets={buckets}
             bucketMs={data?.bucketMs ?? 1000}
+            windowMs={spec.windowMs}
             emptyHint={historyUnsupported
               ? 'History is unavailable — the background service is an older version.'
               : 'Collecting data — history builds while the app runs.'}
@@ -126,16 +144,29 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
       {!compact && <StatsRow buckets={buckets} mode={mode} bucketMs={data?.bucketMs ?? 0} vis={vis} onToggle={toggle} />}
 
       {!compact && (
-        <BandwidthChart
-          buckets={buckets}
-          bucketMs={data?.bucketMs ?? 1000}
-          mode={mode}
-          vis={vis}
-          height={hero ? 360 : H}
-          emptyHint={historyUnsupported
-            ? 'History is unavailable — the background service is an older version.'
-            : 'Collecting data — history builds while the app runs.'}
-        />
+        <>
+          <BandwidthChart
+            buckets={buckets}
+            bucketMs={data?.bucketMs ?? 1000}
+            windowMs={spec.windowMs}
+            mode={mode}
+            vis={vis}
+            showUptime={uptime}
+            height={hero ? 360 : H}
+            emptyHint={historyUnsupported
+              ? 'History is unavailable — the background service is an older version.'
+              : 'Collecting data — history builds while the app runs.'}
+          />
+          {/* Coverage toggle: reveal a strip under the time axis marking when
+              the app was actually recording — the stretches the plot draws as
+              real data, versus the quiet gaps that read as 0 B/s. */}
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text-3)]">
+            <Switch checked={uptime} onChange={pickUptime} label="Show app uptime timeline" />
+            <button type="button" onClick={() => pickUptime(!uptime)} className="select-none transition-colors hover:text-[var(--text-2)]">
+              App uptime
+            </button>
+          </div>
+        </>
       )}
     </>
   )
@@ -144,8 +175,9 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
     // The panel names itself a shared element: navigating Overview ⇄ Traffic
     // morphs the teaser into the hero (each screen mounts exactly one). The
     // view-transition group animates the box, so the teaser's quiet card can
-    // morph into the bare hero.
-    <div style={{viewTransitionName: 'pf-bw'} as React.CSSProperties}>
+    // morph into the bare hero. The drill-in chart passes vtName=null — it has
+    // no morph partner and must not claim the name a real transition owns.
+    <div style={vtName ? {viewTransitionName: vtName} as React.CSSProperties : undefined}>
       {hero ? (
         <section>
           <div className="mb-4 flex items-end justify-between gap-3">
@@ -159,7 +191,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
         </section>
       ) : (
         <Card
-          title={compact ? undefined : 'Bandwidth'}
+          title={compact ? undefined : heading}
           label={compact ? 'Bandwidth' : undefined}
           subtitle={compact ? 'Last hour' : subtitleFor(range, data)}
           action={compact ? (
@@ -320,6 +352,47 @@ function toPlots(buckets: Bucket[], bucketMs: number, mode: ChartMode, nowMs: nu
   })
 }
 
+/** zeroBucket synthesizes an all-quiet bucket at slot time t. The app wasn't
+ * running, so the tunnel relayed zero bytes — but the connection count and RTT
+ * are genuinely *unknown* for that stretch, so their gauges stay at the -1
+ * sentinel (the crosshair reads "0 B/s" yet omits conn/RTT rather than
+ * inventing a fake 0 — same rule as any unknown gauge). */
+function zeroBucket(t: number): Bucket {
+  return {
+    t, in: 0, out: 0,
+    io: 0, ih: 0, il: 0, ic: 0,
+    oo: 0, oh: 0, ol: 0, oc: 0,
+    co: -1, ch: -1, cl: -1, cc: -1,
+    ro: -1, rh: -1, rl: -1, rc: -1,
+    po: -1, ph: -1, pl: -1, pc: -1,
+    lo: -1, lh: -1, ll: -1, lc: -1,
+  }
+}
+
+/** resolveHover maps a cursor x to the bucket under it: the real bucket whose
+ * drawn slot the cursor sits in, or a synthetic zero bucket when the cursor is
+ * over a time the app wasn't recording — a mid-history gap or the empty
+ * pre-history lead-in before the window filled. So every x on the axis reads
+ * out, quiet stretches honestly as 0 B/s, instead of snapping the crosshair to
+ * the nearest moment the app happened to be open. */
+function resolveHover(
+  hoverX: number, buckets: Bucket[], bucketMs: number,
+  t0: number, t1: number, span: number, padL: number, plotW: number,
+  x: (t: number) => number,
+): {b: Bucket; cx: number} | null {
+  if (!buckets.length) return null
+  // Slots tile [x(t), x(t+bucketMs)); contiguous buckets abut exactly, so a hit
+  // here is genuine data (candle-coalesced, unevenly spaced slots included).
+  for (const b of buckets) {
+    if (hoverX >= x(b.t) && hoverX < x(b.t + bucketMs)) return {b, cx: x(b.t + bucketMs / 2)}
+  }
+  // Empty time: invert x to a timestamp (clamped into the domain), snap to the
+  // bucket grid, and render it as zero throughput at that slot's center.
+  const ht = Math.min(t1 - 1, Math.max(t0, t0 + ((hoverX - padL) / plotW) * span))
+  const slot = Math.floor(ht / bucketMs) * bucketMs
+  return {b: zeroBucket(slot), cx: x(slot + bucketMs / 2)}
+}
+
 /** useTweenedPlots eases plotted values toward each fresh target over ~220ms
  * (ease-out cubic), aligning by timestamp so refreshes glide instead of
  * snapping. Buckets with no prior value (newly appeared) snap in. */
@@ -370,9 +443,12 @@ function useTweenedPlots(target: Plot[]): Plot[] {
 const SPARK_H = 160
 const SPARK_PAD = {t: 14, r: 2, b: 4, l: 2}
 
-function SparkChart({buckets, bucketMs, emptyHint}: {
+function SparkChart({buckets, bucketMs, windowMs = 0, emptyHint}: {
   buckets: Bucket[]
   bucketMs: number
+  /** Range window (ms); anchors the time domain so young data grows in from
+   * the right edge instead of floating mid-plot. 0 = fit the data extent. */
+  windowMs?: number
   emptyHint?: string
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -384,8 +460,12 @@ function SparkChart({buckets, bucketMs, emptyHint}: {
 
   const view = useMemo(() => {
     if (!buckets.length || !bucketMs) return null
-    const t0 = buckets[0].t
+    // Anchor the domain to the full range window: a freshly started app has
+    // only seconds of history, and fitting the extent floated a short line in
+    // the middle of the plot. Anchored, the line hugs the right ("now") edge
+    // and grows leftward until the window fills — the live-monitor read.
     const t1 = buckets[buckets.length - 1].t + bucketMs
+    const t0 = windowMs > 0 ? Math.min(buckets[0].t, t1 - windowMs) : buckets[0].t
     const span = Math.max(1, t1 - t0)
     const x = (t: number) => SPARK_PAD.l + ((t - t0) / span) * plotW
     const dn = niceScale(Math.max(1, ...buckets.map(b => b.out * 1000 / bucketMs)))
@@ -394,7 +474,7 @@ function SparkChart({buckets, bucketMs, emptyHint}: {
     const yDn = (v: number) => baseY - (v / dn.max) * plotH
     const yUp = (v: number) => baseY - (v / up.max) * plotH
     return {t0, t1, span, x, yDn, yUp, nowMs: Date.now()}
-  }, [buckets, bucketMs, plotW, baseY])
+  }, [buckets, bucketMs, windowMs, plotW, baseY])
 
   const plotsTarget = useMemo(
     () => (view ? toPlots(buckets, bucketMs, 'line', view.nowMs) : []),
@@ -402,18 +482,11 @@ function SparkChart({buckets, bucketMs, emptyHint}: {
   )
   const plots = useTweenedPlots(plotsTarget)
 
-  const hover = useMemo(() => {
-    if (hoverX === null || !view || !buckets.length) return null
-    let best = 0
-    let bestD = Infinity
-    for (let i = 0; i < buckets.length; i++) {
-      const c = view.x(buckets[i].t + bucketMs / 2)
-      const d = Math.abs(c - hoverX)
-      if (d < bestD) { bestD = d; best = i }
-    }
-    const b = buckets[best]
-    return {b, cx: view.x(b.t + bucketMs / 2)}
-  }, [hoverX, view, buckets, bucketMs])
+  const hover = useMemo(
+    () => (hoverX === null || !view ? null
+      : resolveHover(hoverX, buckets, bucketMs, view.t0, view.t1, view.span, SPARK_PAD.l, plotW, view.x)),
+    [hoverX, view, buckets, bucketMs, plotW],
+  )
 
   if (!view) {
     // HTML well (not SVG text) so the long hints wrap; height matches the
@@ -429,6 +502,12 @@ function SparkChart({buckets, bucketMs, emptyHint}: {
   const cx = (t: number) => x(t + bucketMs / 2)
   const dnLine = plots.map((p, i) => `${i === 0 ? 'M' : 'L'}${cx(p.t).toFixed(1)},${yDn(p.dn).toFixed(1)}`).join('')
   const upLine = plots.map((p, i) => `${i === 0 ? 'M' : 'L'}${cx(p.t).toFixed(1)},${yUp(p.up).toFixed(1)}`).join('')
+  // A series that is flat zero across the window is not drawn: both lines
+  // would stack neon on the baseline and whichever painted last (blue upload)
+  // won. The baseline rule IS the zero line; the headlines above still say
+  // "0 B/s" in each series color, so nothing goes unexplained.
+  const dnIdle = plots.every(p => p.dn <= 0)
+  const upIdle = plots.every(p => p.up <= 0)
   const first = plots[0]
   const lastP = plots[plots.length - 1]
   const hoverDn = hover ? hover.b.out * 1000 / bucketMs : 0
@@ -464,16 +543,20 @@ function SparkChart({buckets, bucketMs, emptyHint}: {
 
         <line x1={SPARK_PAD.l} x2={w - SPARK_PAD.r} y1={baseY} y2={baseY} stroke="var(--border)" strokeWidth="1" opacity="0.4" />
 
-        <path d={`${dnLine}L${cx(lastP.t).toFixed(1)},${baseY}L${cx(first.t).toFixed(1)},${baseY}Z`} fill="url(#pf-spark-dl-area)" />
-        <path d={dnLine} fill="none" stroke="var(--dl)" strokeWidth="4.5" strokeLinejoin="round" className="pf-chart-halo" />
-        <path d={dnLine} fill="none" stroke="var(--dl)" strokeWidth="1.5" strokeLinejoin="round" className="pf-chart-glow-hot" style={{color: 'var(--dl)'}} />
-        <path d={`${upLine}L${cx(lastP.t).toFixed(1)},${baseY}L${cx(first.t).toFixed(1)},${baseY}Z`} fill="url(#pf-spark-ul-area)" />
-        <path d={upLine} fill="none" stroke="var(--ul)" strokeWidth="4.5" strokeLinejoin="round" className="pf-chart-halo" />
-        <path d={upLine} fill="none" stroke="var(--ul)" strokeWidth="1.5" strokeLinejoin="round" className="pf-chart-glow-hot" style={{color: 'var(--ul)'}} />
+        {!dnIdle && <>
+          <path d={`${dnLine}L${cx(lastP.t).toFixed(1)},${baseY}L${cx(first.t).toFixed(1)},${baseY}Z`} fill="url(#pf-spark-dl-area)" />
+          <path d={dnLine} fill="none" stroke="var(--dl)" strokeWidth="4.5" strokeLinejoin="round" className="pf-chart-halo" />
+          <path d={dnLine} fill="none" stroke="var(--dl)" strokeWidth="1.5" strokeLinejoin="round" className="pf-chart-glow-hot" style={{color: 'var(--dl)'}} />
+        </>}
+        {!upIdle && <>
+          <path d={`${upLine}L${cx(lastP.t).toFixed(1)},${baseY}L${cx(first.t).toFixed(1)},${baseY}Z`} fill="url(#pf-spark-ul-area)" />
+          <path d={upLine} fill="none" stroke="var(--ul)" strokeWidth="4.5" strokeLinejoin="round" className="pf-chart-halo" />
+          <path d={upLine} fill="none" stroke="var(--ul)" strokeWidth="1.5" strokeLinejoin="round" className="pf-chart-glow-hot" style={{color: 'var(--ul)'}} />
+        </>}
 
         {/* End dots anchor the headline numerals to their line ends. */}
-        <circle cx={cx(lastP.t)} cy={yDn(lastP.dn)} r="2" fill="var(--dl)" />
-        <circle cx={cx(lastP.t)} cy={yUp(lastP.up)} r="2" fill="var(--ul)" />
+        {!dnIdle && <circle cx={cx(lastP.t)} cy={yDn(lastP.dn)} r="2" fill="var(--dl)" />}
+        {!upIdle && <circle cx={cx(lastP.t)} cy={yUp(lastP.up)} r="2" fill="var(--ul)" />}
 
         {/* Hover: hairline + dots + one readout line in the top pad lane,
             keeping to the side away from the cursor. */}
@@ -504,14 +587,19 @@ function SparkChart({buckets, bucketMs, emptyHint}: {
 // (thin line) are recessive overlays, each on its own outboard right axis added
 // only when enabled, so they never overlap the download/upload scales.
 // ---------------------------------------------------------------------------
-export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode, vis, emptyHint, height = H}: {
+export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, windowMs = 0, mode, vis, emptyHint, height = H, showUptime = false}: {
   buckets: Bucket[]
   bucketMs: number
+  /** Range window (ms); anchors the time domain so young data grows in from
+   * the right edge instead of floating mid-plot. 0 = fit the data extent. */
+  windowMs?: number
   mode: ChartMode
   vis: SeriesVisibility
   emptyHint?: string
   /** viewBox height; the plot area absorbs the change (default 260). */
   height?: number
+  /** Draw the uptime coverage strip in an extra lane below the time axis. */
+  showUptime?: boolean
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [hoverX, setHoverX] = useState<number | null>(null)
@@ -559,8 +647,16 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
 
   const view = useMemo(() => {
     if (!buckets.length || !bucketMs) return null
-    const t0 = buckets[0].t
+    // Line/candle ranges are a live feed: right-anchor to the window so young
+    // history hugs the "now" edge and grows leftward instead of floating short
+    // in the middle. Bars are historical totals — fit the data extent instead,
+    // so a sparse history (say a week of data inside the 30d window) spreads
+    // across the plot rather than cramming against the right at a tiny scale
+    // with overlapping date labels.
     const t1 = buckets[buckets.length - 1].t + bucketMs
+    const t0 = mode === 'bars'
+      ? buckets[0].t
+      : windowMs > 0 ? Math.min(buckets[0].t, t1 - windowMs) : buckets[0].t
     const span = Math.max(1, t1 - t0)
     const x = (t: number) => PAD.l + ((t - t0) / span) * plotW
 
@@ -587,7 +683,7 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
     const timeTicks = ticksFor(t0, t1, bucketMs, buckets).map(tk => ({...tk, x: x(tk.t)}))
     const nowMs = Date.now()
     return {t0, t1, span, x, left, right, yL, yR, connScale, rttScale, yConn, yRtt, timeTicks, nowMs}
-  }, [buckets, bucketMs, mode, PAD.r, showConn, showRtt])
+  }, [buckets, bucketMs, windowMs, mode, PAD.r, showConn, showRtt])
 
   const plotsTarget = useMemo(
     () => (view && mode !== 'bars' ? toPlots(buckets, bucketMs, mode, view.nowMs) : []),
@@ -595,18 +691,11 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
   )
   const plots = useTweenedPlots(plotsTarget)
 
-  const hover = useMemo(() => {
-    if (hoverX === null || !view || !buckets.length) return null
-    let best = 0
-    let bestD = Infinity
-    for (let i = 0; i < buckets.length; i++) {
-      const cx = view.x(buckets[i].t + bucketMs / 2)
-      const d = Math.abs(cx - hoverX)
-      if (d < bestD) { bestD = d; best = i }
-    }
-    const b = buckets[best]
-    return {b, cx: view.x(b.t + bucketMs / 2)}
-  }, [hoverX, view, buckets, bucketMs])
+  const hover = useMemo(
+    () => (hoverX === null || !view ? null
+      : resolveHover(hoverX, buckets, bucketMs, view.t0, view.t1, view.span, PAD.l, plotW, view.x)),
+    [hoverX, view, buckets, bucketMs, PAD.l, plotW],
+  )
 
   if (!view) {
     return (
@@ -628,17 +717,29 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
   const cx = (t: number) => x(t + bucketMs / 2)
   const dnLine = plots.map((p, i) => `${i === 0 ? 'M' : 'L'}${cx(p.t).toFixed(1)},${yL(p.dn).toFixed(1)}`).join('')
   const upLinePlots = plots.map((p, i) => `${i === 0 ? 'M' : 'L'}${cx(p.t).toFixed(1)},${yR(p.up).toFixed(1)}`).join('')
+  // Flat-zero series are not painted (see SparkChart): the baseline rule is
+  // the zero line, and two glowing strokes stacked on it just read as one
+  // wrong-colored line.
+  const dnIdle = plots.length > 0 && plots.every(p => p.dn <= 0)
+  const upIdle = plots.length > 0 && plots.every(p => p.up <= 0)
 
   // Outboard axis label x-positions (each column just right of the previous).
   const axisX = (idx: number) => plotRight + (mode === 'bars' ? 16 : 68) + idx * RIGHT_COL + 6
   const connIdx = 0
   const rttIdx = showConn ? 1 : 0
 
+  // Uptime strip: an extra lane below the time labels, so the plot geometry is
+  // unchanged whether it shows or not. Bar sits low in the lane, aligned to the
+  // same x-domain as the axis above it.
+  const svgH = showUptime ? height + UPTIME_LANE : height
+  const stripY = height + 5
+  const stripBarH = 6
+
   return (
     <div className="pf-well relative p-1.5">
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${W} ${height}`}
+        viewBox={`0 0 ${W} ${svgH}`}
         className="w-full"
         onMouseMove={e => {
           const r = svgRef.current!.getBoundingClientRect()
@@ -646,6 +747,16 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
         }}
         onMouseLeave={() => setHoverX(null)}
       >
+        {/* Clip the time-label lane to the plot's x-span so a label centered on
+            a tick near either edge is cut at the axis gridline — it slides
+            *under* the axis (paired with the edge fade below) instead of
+            spilling into the y-axis value columns or the corner axis markers. */}
+        <defs>
+          <clipPath id="pf-bw-xlabels">
+            <rect x={PAD.l} y={baseY} width={plotW} height={svgH - baseY} />
+          </clipPath>
+        </defs>
+
         {/* fine grid: horizontal at value ticks, vertical at time ticks —
             recessive; the data is the artwork */}
         <g stroke="var(--border)" strokeWidth="1" opacity="0.35">
@@ -676,19 +787,23 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
           {view.rttScale && view.rttScale.ticks.map((v, i) => v > 0 && (
             <text key={`p${i}`} x={axisX(rttIdx)} y={view.yRtt!(v) + 3.5} textAnchor="start" fill="var(--rtt)">{v}</text>
           ))}
-          {/* time labels — opacity ramps to zero toward the plot edges, so a
-              tick drifting left (live data slides the axis) fades away instead
-              of popping, new ticks fade in from the right, and no label ever
-              reaches the corner axis markers (↓ / ↑ / conns / RTT ms). */}
-          {timeTicks.map((t, i) => {
-            const fade = Math.min(1, (t.x - (PAD.l + 16)) / 26, (plotRight - 16 - t.x) / 26)
-            if (fade <= 0.02) return null
-            return (
-              <text key={`t${i}`} x={t.x} y={height - 8} textAnchor="middle" fill="var(--text-3)" opacity={fade.toFixed(2)}>
-                {t.label}
-              </text>
-            )
-          })}
+          {/* time labels — clipped to the plot x-span (above) and cross-faded
+              at both edges, so a tick drifting toward an edge (live data slides
+              the axis) dims and tucks under the axis gridline instead of
+              popping or overrunning it; a new tick fades in from the right. The
+              ramp reaches 0 exactly at the gridline (24px window), where the
+              clip has already hidden the overhang. */}
+          <g clipPath="url(#pf-bw-xlabels)">
+            {timeTicks.map((t, i) => {
+              const fade = Math.min(1, (t.x - PAD.l) / 24, (plotRight - t.x) / 24)
+              if (fade <= 0.02) return null
+              return (
+                <text key={`t${i}`} x={t.x} y={height - 8} textAnchor="middle" fill="var(--text-3)" opacity={fade.toFixed(2)}>
+                  {t.label}
+                </text>
+              )
+            })}
+          </g>
         </g>
         {/* axis names, in the time-label row's empty corners — spelled out and
             wearing their exact series color, so the outboard tick columns
@@ -719,7 +834,7 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
                 <stop offset="1" stopColor="var(--ul)" stopOpacity="0" />
               </linearGradient>
             </defs>
-            {showDn && <>
+            {showDn && !dnIdle && <>
               <path
                 d={`${dnLine}L${cx(plots[plots.length - 1].t).toFixed(1)},${baseY}L${cx(plots[0].t).toFixed(1)},${baseY}Z`}
                 fill="url(#pf-bw-dl-area)"
@@ -728,7 +843,7 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
               <path d={dnLine} fill="none" stroke="var(--dl)" strokeWidth="1.5" strokeLinejoin="round" className="pf-chart-glow-hot" style={{color: 'var(--dl)'}} />
               {plots.length === 1 && <circle cx={cx(plots[0].t)} cy={yL(plots[0].dn)} r="2.5" fill="var(--dl)" />}
             </>}
-            {showUp && <>
+            {showUp && !upIdle && <>
               <path
                 d={`${upLinePlots}L${cx(plots[plots.length - 1].t).toFixed(1)},${baseY}L${cx(plots[0].t).toFixed(1)},${baseY}Z`}
                 fill="url(#pf-bw-ul-area)"
@@ -769,7 +884,7 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
                 })}
               </g>
             ))}
-            {showUp && <path d={upLinePlots} fill="none" stroke="var(--ul)" strokeWidth="1" opacity="0.85" />}
+            {showUp && !upIdle && <path d={upLinePlots} fill="none" stroke="var(--ul)" strokeWidth="1" opacity="0.85" />}
           </>
         )}
 
@@ -794,6 +909,23 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
           )
         })}
 
+        {/* uptime coverage strip: neutral fill across the spans the app was
+            recording, faint track across downtime — the plot's quiet gaps line
+            up with the empty stretches here. */}
+        {showUptime && (
+          <g>
+            <rect x={PAD.l} y={stripY} width={plotW} height={stripBarH} rx="2" fill="var(--border)" opacity="0.6" />
+            {coverageRuns(buckets, bucketMs).map((r, i) => {
+              const rx0 = Math.max(PAD.l, x(r.a))
+              const rx1 = Math.min(plotRight, x(r.b))
+              return (
+                <rect key={`up${i}`} x={rx0} y={stripY} width={Math.max(1, rx1 - rx0)} height={stripBarH}
+                  rx="2" fill="var(--text-2)" opacity="0.8" />
+              )
+            })}
+          </g>
+        )}
+
         {/* crosshair + readout */}
         {hover && (
           <Crosshair
@@ -812,6 +944,20 @@ export function BandwidthChart({buckets: rawBuckets, bucketMs: rawBucketMs, mode
 function mergeGaugeClose(grp: Bucket[], get: (b: Bucket) => number): number {
   for (let i = grp.length - 1; i >= 0; i--) { const v = get(grp[i]); if (v >= 0) return v }
   return -1
+}
+
+/** coverageRuns collapses the buckets into the wall-clock spans the app was
+ * actually recording: adjacent buckets (starts within half a slot of the prior
+ * slot's end) join one run; a real gap starts a new one. These are the filled
+ * segments of the uptime strip — everything between them is downtime. */
+function coverageRuns(buckets: Bucket[], bucketMs: number): {a: number; b: number}[] {
+  const runs: {a: number; b: number}[] = []
+  for (const bk of buckets) {
+    const last = runs[runs.length - 1]
+    if (last && bk.t - last.b <= bucketMs * 0.5) last.b = bk.t + bucketMs
+    else runs.push({a: bk.t, b: bk.t + bucketMs})
+  }
+  return runs
 }
 
 /** stepSegments builds one path per run of known gauge buckets, drawing a

@@ -1,5 +1,9 @@
 import React from 'react'
 import {createRoot} from 'react-dom/client'
+// Self-hosted Inter Variable (wght 100-900, unicode-range subsets; non-latin
+// glyphs outside the subsets fall back to Segoe). No network fetch — the woff2
+// files ship inside the binary like every other asset.
+import '@fontsource-variable/inter/index.css'
 import './style.css'
 import App from './App'
 import {initTheme} from './theme'

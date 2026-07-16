@@ -87,7 +87,7 @@ func New(cfg *config.Config, configDir, configPath string, logger *slog.Logger) 
 	e := &Engine{cfg: cfg, configDir: configDir, configPath: configPath, logger: logger}
 	switch cfg.Role {
 	case config.RoleAgent:
-		e.Agent = agent.New(cfg, logger)
+		e.Agent = agent.New(cfg, configDir, logger)
 	case config.RoleGateway:
 		e.Gateway = gateway.New(cfg, configDir, logger)
 	default:
@@ -117,7 +117,7 @@ func New(cfg *config.Config, configDir, configPath string, logger *slog.Logger) 
 	// and does not probe, so it records only link events.)
 	if e.Agent != nil {
 		e.Agent.SetHealthObserver(func(tunnelID string, up bool) {
-			e.rec.RecordEvent(analytics.EventTunnelLocal, tunnelID, up)
+			e.rec.RecordEvent(analytics.EventTunnelLocal, e.cfg.Agent.AgentID, tunnelID, up)
 		})
 	}
 	return e, nil
@@ -172,7 +172,7 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	// Bracket this run in the uptime journal so the uptime queries can treat
 	// time between a graceful shutdown and the next start as unknown, not down.
-	e.rec.RecordEvent(analytics.EventEngine, "", true)
+	e.rec.RecordEvent(analytics.EventEngine, "", "", true)
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -210,6 +210,15 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.resolver.Run(runCtx)
 	}()
 
+	// The Prometheus endpoint (if enabled) lives exactly as long as Run and is
+	// best-effort: a bind failure never stops proxying. It must release its
+	// listener before Run returns so a restart can re-bind the same port.
+	metricsDone := make(chan struct{})
+	go func() {
+		defer close(metricsDone)
+		e.serveMetrics(runCtx)
+	}()
+
 	// First non-nil error (or first exit) wins; stop the other side, drain.
 	err := <-errCh
 	cancel()
@@ -218,10 +227,11 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 	<-samplerDone
 	<-resolverDone
+	<-metricsDone
 	// The sampler's final flush has landed and the resolver has stopped
 	// enqueuing; record the graceful stop and close. Close drains the writer,
 	// so this last event still commits.
-	e.rec.RecordEvent(analytics.EventEngine, "", false)
+	e.rec.RecordEvent(analytics.EventEngine, "", "", false)
 	if e.DB != nil {
 		if cerr := e.DB.Close(); cerr != nil {
 			e.logger.Warn("analytics: close failed", "err", cerr)
@@ -234,6 +244,16 @@ func (e *Engine) Run(ctx context.Context) error {
 	return err
 }
 
+// linkAgentID identifies the agent on the far side of the control link, for
+// attributing link-uptime events. On the agent it is our own identity; on the
+// gateway it is the connected agent's. Empty when no agent is connected.
+func (e *Engine) linkAgentID() string {
+	if e.Agent != nil {
+		return e.cfg.Agent.AgentID
+	}
+	return e.Gateway.AgentID()
+}
+
 // runSampler feeds the stats store: byte totals at 10 Hz, periodic flushes,
 // link-session-start detection, and one final flush on shutdown.
 func (e *Engine) runSampler(ctx context.Context) {
@@ -244,6 +264,10 @@ func (e *Engine) runSampler(ctx context.Context) {
 	sessionSample := time.NewTicker(sessionSampleInterval)
 	defer sessionSample.Stop()
 	var prevUpSince int64
+	// linkAgentID is the agent that owned the current link session, captured at
+	// the up transition so the matching down event attributes to the same agent
+	// even after it has disconnected.
+	var linkAgentID string
 	for {
 		select {
 		case <-ctx.Done():
@@ -281,15 +305,30 @@ func (e *Engine) runSampler(ctx context.Context) {
 			}
 			players := e.conns().PlayerCount()
 			e.Stats.Sample(now, appIn, appOut, linkIn, linkOut, conns, players, rtt, loss)
+			// Gateway: also feed each connected agent's own bandwidth history so
+			// the dashboard can scope the chart per agent. Per-agent byte totals
+			// are monotonic (conntrack folds closed conns per agent), and rtt/loss
+			// come from that agent's link. The agent role has a single series
+			// (itself) and needs no per-agent split.
+			if e.Gateway != nil {
+				for agentID, at := range e.Gateway.Conns.AgentTotals() {
+					if agentID == "" {
+						continue
+					}
+					aRtt, aLoss := e.Gateway.AgentQuality(agentID)
+					e.Stats.SampleAgent(agentID, now, at.BytesIn, at.BytesOut, at.Conns, at.Players, aRtt, aLoss)
+				}
+			}
 			// A change in upSince marks a control-link session boundary: fold it
 			// into the lifetime counter and journal the up/down transition.
 			if upSince != prevUpSince {
 				if prevUpSince != 0 {
-					e.rec.RecordEvent(analytics.EventLink, "", false)
+					e.rec.RecordEvent(analytics.EventLink, linkAgentID, "", false)
 				}
 				if upSince != 0 {
+					linkAgentID = e.linkAgentID()
 					e.Stats.LinkSessionStarted()
-					e.rec.RecordEvent(analytics.EventLink, "", true)
+					e.rec.RecordEvent(analytics.EventLink, linkAgentID, "", true)
 				}
 			}
 			prevUpSince = upSince
@@ -360,6 +399,7 @@ func (e *Engine) Status() ipc.Status {
 	case e.Agent != nil:
 		st.LinkUp = e.Agent.LinkUp()
 		st.RTTMillis = e.Agent.RTTMillis()
+		st.Transport = e.Agent.ActiveTransport()
 		st.JitterMillis = e.Agent.JitterMillis()
 		st.PacketLossPct = e.Agent.PacketLossPct()
 		st.LinkUpSinceMs = e.Agent.LinkUpSinceMs()
@@ -371,7 +411,11 @@ func (e *Engine) Status() ipc.Status {
 		st.PeerPublicIP = e.cfg.Agent.GatewayHost
 		st.HealthScore = healthScore(st.LinkUp, st.JitterMillis, st.PacketLossPct, st.LinkUpSinceMs)
 		for _, t := range e.Agent.Tunnels() {
-			ts := ipc.TunnelStatus{ID: t.ID, Name: t.Name}
+			ts := ipc.TunnelStatus{
+				ID: t.ID, Name: t.Name,
+				BandwidthLimitMbps:  t.Options.BandwidthLimitMbps,
+				BandwidthLimitScope: t.Options.BandwidthLimitScope,
+			}
 			ts.PublicPort, _ = e.Agent.TunnelPublicPort(t.ID)
 			ts.LocalUp, ts.LocalKnown = e.Agent.LocalUp(t.ID)
 			st.Tunnels = append(st.Tunnels, ts)
@@ -398,8 +442,39 @@ func (e *Engine) Status() ipc.Status {
 		st.HealthScore = healthScore(st.AgentConnected, st.JitterMillis, st.PacketLossPct, st.LinkUpSinceMs)
 		for _, t := range e.Gateway.Tunnels() {
 			st.Tunnels = append(st.Tunnels, ipc.TunnelStatus{
-				ID: t.ID, Name: t.Name, PublicPort: t.PublicPort,
+				AgentID: t.AgentID,
+				ID:      t.ID, Name: t.Name, PublicPort: t.PublicPort,
 				LocalUp: t.LocalUp, LocalKnown: t.LocalKnown,
+				BandwidthLimitMbps:  t.BandwidthLimitMbps,
+				BandwidthLimitScope: t.BandwidthLimitScope,
+			})
+		}
+		// Per-agent link records for the multi-agent dashboard. Tunnel counts
+		// come from the flat tunnel list; player counts from conntrack's
+		// per-agent totals. Agents is sorted (Gateway.Agents) and clamped.
+		tunnelCount := make(map[string]int)
+		for _, t := range st.Tunnels {
+			tunnelCount[t.AgentID]++
+		}
+		agentTraffic := e.Gateway.Conns.AgentTotals()
+		for _, ag := range e.Gateway.Agents() {
+			if len(st.Agents) >= ipc.MaxStatusAgents {
+				break
+			}
+			st.Agents = append(st.Agents, ipc.AgentStatus{
+				AgentID:       ag.AgentID,
+				Hostname:      ag.Hostname,
+				LANIPs:        ag.LANIPs,
+				RemoteIP:      ag.RemoteIP,
+				LinkUpSinceMs: ag.LinkUpSinceMs,
+				RTTMillis:     ag.RTTMillis,
+				JitterMillis:  ag.JitterMillis,
+				PacketLossPct: ag.PacketLossPct,
+				HealthScore:   healthScore(true, ag.JitterMillis, ag.PacketLossPct, ag.LinkUpSinceMs),
+				LinkBytesIn:   ag.LinkBytesIn,
+				LinkBytesOut:  ag.LinkBytesOut,
+				Tunnels:       tunnelCount[ag.AgentID],
+				Players:       agentTraffic[ag.AgentID].Players,
 			})
 		}
 		setStatusConns(&st, e.Gateway.Conns.Snapshot())

@@ -20,7 +20,7 @@ internal/
   gateway/              TLS listener, pre-auth, admission; actor.go = ONE goroutine
                         owning sessions+listeners; limits.go; per-conn RTT sampler
   relay/                Splice (the hot path) + TapConn (read-only sniff hook)
-  transport/            Session/Stream interfaces + tuned yamux impl (only yamux user)
+  transport/            Session/Stream interfaces + tuned yamux & QUIC impls (only yamux/quic-go user)
   control/              Wire protocol: envelope framing, messages, capabilities
   link/                 Pairing codes, self-signed cert + pin, backoff
   ipc/                  Named-pipe JSON-RPC (same framing); status/history/analytics
@@ -39,6 +39,7 @@ internal/
 frontend/src/           React 19 + Tailwind v4 + hand-rolled SVG charts, no router,
                         no state lib. state.ts (tick) · history/analytics/players.ts
                         (polled data layers + module caches) · devmock.ts (browser dev)
+                        · motion.ts (the gate) + rubberband.ts (scroll rubber band)
                         · styles/ = tokens → base → glass → motion · DESIGN.md charter
 frontend/wailsjs/       GENERATED bindings — never edit; regen via wails build/dev
 ```
@@ -51,6 +52,16 @@ stream↔local; Minecraft-aware tunnels wrap the client leg in `mcsniff.Tap`).
 Counters: per-conn `conntrack.Entry` (atomics) → 2 Hz status + 10 Hz `stats.Sample`
 → SQLite via the 45 s flush; gateway samples kernel RTT per conn every 5 s and ships
 it over `conn_stats` so both ends attribute per-player ping.
+
+**Bandwidth cap** (`internal/bwcap`): a tunnel's `BandwidthLimitMbps` (+ scope: combined
+| per-direction | per-connection) throttles the splice on **both** sides via
+`golang.org/x/time/rate` — one token = one byte, rate = `Mbps × 125_000` (decimal), burst
+= `relay.BufSize`, so `WaitN(n)` with n ≤ that never trips the burst. Buckets are keyed
+per **`(agentID, tunnelID)`**: the gateway hangs the `bwcap.LimiterSet` on the tunnel's
+`publicListener` (two agents' same-named tunnels cap independently), the agent keys a
+`bwcap.Registry` by tunnel ID. `mbps ≤ 0` is the byte-identical uncapped fast path (nil
+`relay.Limiter`, no per-iteration cost, no per-splice context). A throttled `WaitN`
+unblocks on the session ctx, cancelled by gateway `evict` / agent session teardown.
 
 **Go↔JS boundary**: methods on `app.App` (promise-returning bindings) + the 2 Hz
 `tick` event; attached mode proxies the same data over the pipe, analytics on its own
@@ -71,9 +82,14 @@ persisted to config.
 | Protocol version | 1 | `control.go:19` |
 | Frame caps | 64 KiB post-auth / 4 KiB pre-auth | `control.go:88-91` |
 | Pre-auth prologue deadline | 10 s | `gateway.go:43` |
+| Per-conn dial-back wait | 12 s (> data-conn pre-auth, so its failure surfaces first) | `perconn.go dataDialTimeout` |
 | Heartbeat / idle deadline / ctrl write | 5 s / 15 s / 10 s | `agent.go:38-43`, `gateway.go:45-53` |
 | yamux window / conn-write timeout | 1 MiB / 30 s | `transport/yamux.go` |
-| Splice buffer / write-stall deadline | 128 KiB pooled / 2 min | `relay.go:23-28` |
+| QUIC keepalive / idle / handshake | off / 30 s / 5 s (dial aborts at 2×) | `transport/quicconfig.go quicConfig` |
+| QUIC recv windows / max bidi streams / ALPN | 1→6 MiB stream, 2→12 MiB conn / 65536 / `pf-quic/1` | `transport/quicconfig.go quicConfig` |
+| Auto-transport re-probe cooldown | 5 min (cleared on network change) | `agent.go transportReprobeAfter` |
+| Splice buffer / write-stall deadline | 128 KiB pooled / 2 min | `relay.go` (`BufSize` / `WriteStallTimeout`) |
+| Bandwidth cap unit / burst | `Mbps × 125_000` B/s / `relay.BufSize` | `bwcap.go` |
 | Backoff | 1 s → 60 s full jitter, reset after 60 s stable | `link/backoff.go` |
 | Abuse defaults | 4096 global / 32 per-IP conns; 10 auth fails/min/IP | `config.go Default` |
 | Loss window / ping-loss timeout | 32 heartbeats / 2×interval | `agent.go:50-51`, `linkquality.go` |
@@ -91,7 +107,13 @@ persisted to config.
 | Avatars | sizes 16–128 (default 64), 8×8 master; Mojang spacing 60 s/player, 1 rps burst 3; miss TTL 15 min; evict 4000 files / 64 MiB / 6 h | `app/avatars.go:37-56` |
 | Pipe | 5 s request / 2 min idle timeouts; ACL BA+SY+IU | `ipc/server_windows.go` |
 | Cert | ECDSA P-256, 20-year validity (trust = pin, not expiry) | `link/cert.go:86` |
-| Perf floor | ≥20 MiB/s, worst cross-stream RTT ≤500 ms (64 MiB loopback burst) | `e2e_test.go:716,719` |
+| Key exchange | X25519MLKEM768 (PQ hybrid, Go default; `CurvePreferences` unset) | `link/cert.go`, `link/pq_test.go` |
+| Perf floor | ≥20 MiB/s, worst cross-stream RTT ≤500 ms (64 MiB loopback burst); per-transport twins `TestBurstThroughputPerConn` / `TestBurstThroughputQUIC` | `e2e_test.go:716,719` |
+| Blur ladder | control 10, Signal Glass 20, card frost 30, chrome 36, island 40, float 48, pop 56 px | `tokens.css` |
+| Switch geometry | 40×22 track, 1px rim + 2px seat → 16px knob (7px radius), 18px travel; ×`--ui-scale` | `tokens.css`, `ui.tsx Switch` |
+| Control height | 2.25rem + 2px = 1px rim + 0.5rem padding + 1.25rem line, per side | `tokens.css` |
+| Halo clearance | 12px dot→label (the halo ring breathes out to 5px) | `tokens.css`, `motion.css` |
+| Hero bleed | 0 → (page-pad − 8px), continuous from 640px of container width | `tokens.css`, `Overview.tsx` |
 
 ## Control-plane message flow
 
@@ -101,12 +123,62 @@ the control stream → tunnel registration:
 - Capability `tunnel-sync`: one `sync_tunnels{seq, tunnels[]}` desired-state frame;
   gateway's actor reconciles (identical specs keep listeners + live conns:
   `actor.reconcile`), answers `sync_result` (stale seq dropped agent-side).
+- Capability `gateway-config` (enrolled agents only — it is keyed to the Ed25519
+  identity, so the gateway negotiates it away for a shared-token agent, which then
+  falls back to `tunnel-sync`): the gateway is authoritative. It stores each identity's
+  desired set in the `AgentStore` (`DesiredConfig`/`AdoptConfig`) with a monotonic
+  generation, hashed by `HashTunnels`. The agent reports its `configHash`/
+  `configGeneration` in the hello; the gateway reconciles its set onto the fresh
+  session's listeners and, on drift, pushes `push_config{generation, hash, tunnels[]}`
+  (agent applies + `config_ack`s: `applyPushedConfig`). First contact is bootstrapped by
+  the `hello_ok{configSeedNeeded}` flag, which asks the agent for one
+  `propose_config{tunnels[]}` seed. A local edit is a `propose_config` the gateway
+  adopts, bumps, and re-pushes — deterministic, not last-write-wins; a proposal on a
+  stale generation is refused and the authoritative set re-pushed
+  (`pushConfigOnConnect`/`adoptProposal`).
 - Legacy: per-tunnel `register_tunnel`/`unregister_tunnel` + `register_ok|register_err`.
 Steady state: `ping/pong` both directions (RTT/jitter/loss both sides; pong echoes
 `recvUnixNano` for one-way estimates); agent pushes `health{tunnelId, localUp}` on
 probe transitions; gateway pushes `conn_stats{[{c,r}]}` (cap `conn-stats`) mapping
 kernel RTT onto agent conn entries via `ConnKey`. Data streams: gateway →
 `OpenStream` + `open_conn{tunnelId, clientAddr, connId}` header, then raw bytes.
+
+Per-conn data plane (cap `per-conn-data`; agent config `transport = "per-conn"`): the
+control plane stays on the mux, but instead of `OpenStream` the gateway sends
+`open_data{connId}` on the control stream and the agent dials back (`dialBackData`) a
+fresh `KindData` TCP+TLS connection carrying that connId. The gateway authenticates it
+through the same `Validator` and matches it to the waiting player (`perconn.go`
+`pendingConn` — an exactly-once, loser-closes handoff), then writes the same `open_conn`
+header and splices. One dedicated connection per player, so a lost segment on one
+player's connection cannot head-of-line-block another's (the one defect of yamux-over-one-
+TCP). Data conns resume the control conn's TLS session (`dialGateway` shares an LRU
+`ClientSessionCache`) and are drained on eviction alongside the mux (`agentSession`
+`dataConns`, `closeAll`). The gateway advertises the capability only because it serves
+the accept path end-to-end; a mux/legacy agent never offers it and rides `OpenStream`.
+
+QUIC data plane (agent config `transport = "quic"`; gateway `Gateway.QUICEnabled`, on by
+default): a separate wire, not a capability. The gateway binds a UDP QUIC listener on the
+**same port number** as the TCP control listener (`startQUIC`; TCP/UDP port spaces are
+independent, so the pairing code's one host:port serves both) and accepts sessions on it
+(`acceptQUIC`/`handleQUICSession`), reusing the same pre-auth guards, `Validator`, and the
+shared `buildAndAdmit`/`serveAdmitted` admission as the TCP path. A QUIC session is a
+`transport.Session` (`transport/quic.go`) that rides the existing `muxDataPlane` — control
+and every player are independent QUIC streams over one connection, so a lost packet on one
+stream can't head-of-line-block another (per-conn's benefit, one connection/handshake/NAT
+entry). No new control message or capability, and the hello frames are byte-identical.
+Liveness stays the app ping (`quicConfig` sets `KeepAlivePeriod=0`, `MaxIdleTimeout` above
+the 15 s budget); passive connection migration follows an agent whose IP changes. Eviction
+is simpler than per-conn — the session's `Close` (a `*quic.Conn`) tears down every stream,
+so `dataConns` stays empty (`closeAll` nil-guards the absent raw conn).
+
+Auto transport (agent config `transport = "auto"`, the shipped default): a connect-time
+fallback ladder, best-isolation first — QUIC → per-conn → mux (`transportPreference`).
+`runSessionAuto` tries each non-cooled rung; a rung that *connects* is served (Run backs
+off and the ladder re-evaluates on reconnect), a rung that fails to *connect* falls through
+immediately. A failed rung is cooled (`transportReprobeAfter`, cleared on `netnotify`
+change) only once a later rung succeeds — the "UDP blocked" tell; if every rung fails the
+link is simply down, so nothing is cooled. The rung that connects is reported to the GUI as
+`ActiveTransport` (tick `Status.Transport`) so a user can see what auto settled on.
 
 ## Analytics data model (`internal/analytics/schema.go`)
 
@@ -181,9 +253,15 @@ equirectangular paths (`worldgeo.ts`, generated — regenerate, don't edit).
 
 `?mock=agent|gateway|wizard` plus composable: `&link=down`, `&mode=attached`
 (gated bindings reject like the real backend), `&fatal=1`, `&fresh=1`,
-`&analytics=off`, `&geo=off|empty|error|pending`, `&fx=low|high`. The traffic model
-is deterministic functions of absolute time, so chart/tiles/replay all agree at any
-poll cadence. When you add a binding, add its stub here or the mock throws.
+`&analytics=off`, `&paired=0` (never paired to a gateway — the sidebar's role
+switcher cannot become the agent and must route to setup), `&geo=off|empty|error|pending`,
+`&fx=low|high`, `&fleet=multi|old` (gateway only — `multi`: a five-agent fleet with a
+good/fair/poor health spread instead of the default single agent, for the Agents roster
++ drill-in; `old`: a pre-roster daemon that sends no agents array → the roster's
+honest-unavailable state). The traffic model is deterministic functions of absolute time, so
+chart/tiles/replay all agree at any poll cadence. When you add a binding, add its stub
+here or the mock throws. Role setup mutates the mock's role, so the switcher flips the
+whole app live in the browser with no Go running.
 
 ## Windows integration corners
 

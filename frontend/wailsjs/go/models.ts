@@ -259,6 +259,7 @@ export namespace analytics {
 	export class PlayersQuery {
 	    search: string;
 	    sort: string;
+	    agentId: string;
 	    tunnelId: string;
 	    cc: string;
 	    offset: number;
@@ -272,6 +273,7 @@ export namespace analytics {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.search = source["search"];
 	        this.sort = source["sort"];
+	        this.agentId = source["agentId"];
 	        this.tunnelId = source["tunnelId"];
 	        this.cc = source["cc"];
 	        this.offset = source["offset"];
@@ -361,6 +363,7 @@ export namespace analytics {
 	}
 	export class SessionsQuery {
 	    playerUuid: string;
+	    agentId: string;
 	    tunnelId: string;
 	    cc: string;
 	    sinceMs: number;
@@ -374,6 +377,7 @@ export namespace analytics {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.playerUuid = source["playerUuid"];
+	        this.agentId = source["agentId"];
 	        this.tunnelId = source["tunnelId"];
 	        this.cc = source["cc"];
 	        this.sinceMs = source["sinceMs"];
@@ -531,8 +535,45 @@ export namespace analytics {
 
 export namespace app {
 	
+	export class AgentUI {
+	    agentId: string;
+	    hostname: string;
+	    lanIps: string[];
+	    remoteIp: string;
+	    linkUpSinceMs: number;
+	    rttMillis: number;
+	    jitterMillis: number;
+	    packetLossPct: number;
+	    healthScore: string;
+	    linkBytesIn: number;
+	    linkBytesOut: number;
+	    tunnels: number;
+	    players: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentUI(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agentId = source["agentId"];
+	        this.hostname = source["hostname"];
+	        this.lanIps = source["lanIps"];
+	        this.remoteIp = source["remoteIp"];
+	        this.linkUpSinceMs = source["linkUpSinceMs"];
+	        this.rttMillis = source["rttMillis"];
+	        this.jitterMillis = source["jitterMillis"];
+	        this.packetLossPct = source["packetLossPct"];
+	        this.healthScore = source["healthScore"];
+	        this.linkBytesIn = source["linkBytesIn"];
+	        this.linkBytesOut = source["linkBytesOut"];
+	        this.tunnels = source["tunnels"];
+	        this.players = source["players"];
+	    }
+	}
 	export class ConnUI {
 	    id: number;
+	    agentId?: string;
 	    tunnelName: string;
 	    clientAddr: string;
 	    startedAt: number;
@@ -549,6 +590,7 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.agentId = source["agentId"];
 	        this.tunnelName = source["tunnelName"];
 	        this.clientAddr = source["clientAddr"];
 	        this.startedAt = source["startedAt"];
@@ -610,11 +652,14 @@ export namespace app {
 	    }
 	}
 	export class TunnelUI {
+	    agentId?: string;
 	    id: string;
 	    name: string;
 	    publicPort: number;
 	    localUp: boolean;
 	    localKnown: boolean;
+	    bandwidthLimitMbps: number;
+	    bandwidthLimitScope: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TunnelUI(source);
@@ -622,11 +667,14 @@ export namespace app {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agentId = source["agentId"];
 	        this.id = source["id"];
 	        this.name = source["name"];
 	        this.publicPort = source["publicPort"];
 	        this.localUp = source["localUp"];
 	        this.localKnown = source["localKnown"];
+	        this.bandwidthLimitMbps = source["bandwidthLimitMbps"];
+	        this.bandwidthLimitScope = source["bandwidthLimitScope"];
 	    }
 	}
 	export class UIStatus {
@@ -639,6 +687,7 @@ export namespace app {
 	    linkUp: boolean;
 	    rttMillis: number;
 	    agentConnected: boolean;
+	    transport: string;
 	    jitterMillis: number;
 	    packetLossPct: number;
 	    healthScore: string;
@@ -647,6 +696,7 @@ export namespace app {
 	    peerPublicIp: string;
 	    localLanIps: string[];
 	    peerLanIps: string[];
+	    agents: AgentUI[];
 	    tunnels: TunnelUI[];
 	    connections: ConnUI[];
 	    totalBytesIn: number;
@@ -681,6 +731,7 @@ export namespace app {
 	        this.linkUp = source["linkUp"];
 	        this.rttMillis = source["rttMillis"];
 	        this.agentConnected = source["agentConnected"];
+	        this.transport = source["transport"];
 	        this.jitterMillis = source["jitterMillis"];
 	        this.packetLossPct = source["packetLossPct"];
 	        this.healthScore = source["healthScore"];
@@ -689,6 +740,7 @@ export namespace app {
 	        this.peerPublicIp = source["peerPublicIp"];
 	        this.localLanIps = source["localLanIps"];
 	        this.peerLanIps = source["peerLanIps"];
+	        this.agents = this.convertValues(source["agents"], AgentUI);
 	        this.tunnels = this.convertValues(source["tunnels"], TunnelUI);
 	        this.connections = this.convertValues(source["connections"], ConnUI);
 	        this.totalBytesIn = source["totalBytesIn"];
@@ -737,6 +789,7 @@ export namespace config {
 	    ProxyProtocolV2: boolean;
 	    OfflineMOTD: string;
 	    BandwidthLimitMbps: number;
+	    BandwidthLimitScope: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TunnelOptions(source);
@@ -748,6 +801,7 @@ export namespace config {
 	        this.ProxyProtocolV2 = source["ProxyProtocolV2"];
 	        this.OfflineMOTD = source["OfflineMOTD"];
 	        this.BandwidthLimitMbps = source["BandwidthLimitMbps"];
+	        this.BandwidthLimitScope = source["BandwidthLimitScope"];
 	    }
 	}
 	export class Tunnel {
@@ -800,6 +854,7 @@ export namespace config {
 	    CertFingerprint: string;
 	    Transport: string;
 	    Tunnels: Tunnel[];
+	    EnrollTicket: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentConfig(source);
@@ -814,6 +869,7 @@ export namespace config {
 	        this.CertFingerprint = source["CertFingerprint"];
 	        this.Transport = source["Transport"];
 	        this.Tunnels = this.convertValues(source["Tunnels"], Tunnel);
+	        this.EnrollTicket = source["EnrollTicket"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -905,6 +961,8 @@ export namespace config {
 	    MaxConnsGlobal: number;
 	    MaxConnsPerIP: number;
 	    AuthAttemptsPerMin: number;
+	    QUICEnabled: boolean;
+	    AcceptSharedToken: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GatewayConfig(source);
@@ -920,6 +978,8 @@ export namespace config {
 	        this.MaxConnsGlobal = source["MaxConnsGlobal"];
 	        this.MaxConnsPerIP = source["MaxConnsPerIP"];
 	        this.AuthAttemptsPerMin = source["AuthAttemptsPerMin"];
+	        this.QUICEnabled = source["QUICEnabled"];
+	        this.AcceptSharedToken = source["AcceptSharedToken"];
 	    }
 	}
 	export class Config {
@@ -969,6 +1029,71 @@ export namespace config {
 	
 	
 	
+
+}
+
+export namespace gateway {
+	
+	export class AgentView {
+	    agentId: string;
+	    nickname: string;
+	    enrolled: boolean;
+	    revoked: boolean;
+	    scopePorts: number[];
+	    scopeTunnels: string[];
+	    issuedAtMs: number;
+	    connected: boolean;
+	    hostname: string;
+	    remoteIp: string;
+	    linkUpSinceMs: number;
+	    tunnels: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agentId = source["agentId"];
+	        this.nickname = source["nickname"];
+	        this.enrolled = source["enrolled"];
+	        this.revoked = source["revoked"];
+	        this.scopePorts = source["scopePorts"];
+	        this.scopeTunnels = source["scopeTunnels"];
+	        this.issuedAtMs = source["issuedAtMs"];
+	        this.connected = source["connected"];
+	        this.hostname = source["hostname"];
+	        this.remoteIp = source["remoteIp"];
+	        this.linkUpSinceMs = source["linkUpSinceMs"];
+	        this.tunnels = source["tunnels"];
+	    }
+	}
+	export class GatewayEvent {
+	    seq: number;
+	    timeMs: number;
+	    kind: string;
+	    agentId?: string;
+	    tunnelId?: string;
+	    message: string;
+	    requestedPort?: number;
+	    actualPort?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new GatewayEvent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.seq = source["seq"];
+	        this.timeMs = source["timeMs"];
+	        this.kind = source["kind"];
+	        this.agentId = source["agentId"];
+	        this.tunnelId = source["tunnelId"];
+	        this.message = source["message"];
+	        this.requestedPort = source["requestedPort"];
+	        this.actualPort = source["actualPort"];
+	    }
+	}
 
 }
 

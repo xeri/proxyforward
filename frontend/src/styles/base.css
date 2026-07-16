@@ -7,12 +7,20 @@ html, body, #root {
   margin: 0;
   background: transparent;
   color: var(--text);
-  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  font-size: 13.5px;
+  font-family: "Inter Variable", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  /* The root em is the app's one scale knob: --ui-scale (tokens.css) steps it
+     by viewport width, so every rem utility and every --fs-* token resize in
+     lockstep across resolutions. 13.5px is the design-width base. */
+  font-size: calc(13.5px * var(--ui-scale));
   -webkit-font-smoothing: antialiased;
   user-select: none;
-  cursor: default;
 }
+
+/* Cursor is declared on html ONLY and inherited: the Wails runtime signals
+   frameless edge-resize by writing an inline cursor onto <html>; declaring a
+   cursor on body/#root would beat that inherited value and hide the resize
+   arrows at the window edges. */
+html { cursor: default; }
 
 /* The luminance ramp lives on html so the blob layer above it can drift with
    pure transforms (no background repaints, no ramp smearing). */

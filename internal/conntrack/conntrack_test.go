@@ -9,9 +9,9 @@ func TestOpenSnapshotClose(t *testing.T) {
 	r := NewRegistry()
 
 	// e1: splice's first arg is the client leg (inIsAToB=true).
-	e1, close1 := r.Open("t1", "Tunnel", "1.2.3.4:1111", "k1", true)
+	e1, close1 := r.Open("agentA", "t1", "Tunnel", "1.2.3.4:1111", "k1", true)
 	// e2: reversed orientation (inIsAToB=false).
-	e2, close2 := r.Open("t1", "Tunnel", "1.2.3.4:2222", "", false)
+	e2, close2 := r.Open("agentA", "t1", "Tunnel", "1.2.3.4:2222", "", false)
 
 	e1.Counters.AToB.Store(100) // in
 	e1.Counters.BToA.Store(10)  // out
@@ -28,6 +28,11 @@ func TestOpenSnapshotClose(t *testing.T) {
 	}
 	if snaps[0].ID > snaps[1].ID {
 		t.Fatalf("Snapshot not sorted by ID: %d before %d", snaps[0].ID, snaps[1].ID)
+	}
+	// AgentID passed to Open must survive into the snapshot — attribution on a
+	// multi-agent gateway depends on it.
+	if snaps[0].AgentID != "agentA" || snaps[1].AgentID != "agentA" {
+		t.Errorf("Snapshot AgentID = %q, %q, want both agentA", snaps[0].AgentID, snaps[1].AgentID)
 	}
 	if snaps[0].BytesIn != 100 || snaps[0].BytesOut != 10 {
 		t.Errorf("e1 snapshot bytes = in %d out %d, want in 100 out 10", snaps[0].BytesIn, snaps[0].BytesOut)
@@ -70,7 +75,7 @@ func TestConnKeySetBeforeHooks(t *testing.T) {
 	var seen string
 	r.SetHooks(func(e *Entry) { seen = e.ConnKey }, nil, nil, nil)
 
-	e, closeEntry := r.Open("t1", "Tunnel", "1.2.3.4:1111", "key-42", true)
+	e, closeEntry := r.Open("", "t1", "Tunnel", "1.2.3.4:1111", "key-42", true)
 	defer closeEntry()
 	if seen != "key-42" {
 		t.Fatalf("onOpen saw ConnKey %q, want key-42", seen)
@@ -87,9 +92,9 @@ func TestConnKeySetBeforeHooks(t *testing.T) {
 // keyed by UUID or (for UUID-less handshakes) by name.
 func TestPlayerCountDedupes(t *testing.T) {
 	r := NewRegistry()
-	e1, c1 := r.Open("t", "T", "1.2.3.4:1", "", true)
-	e2, c2 := r.Open("t", "T", "1.2.3.4:2", "", true)
-	e3, c3 := r.Open("t", "T", "1.2.3.4:3", "", true)
+	e1, c1 := r.Open("", "t", "T", "1.2.3.4:1", "", true)
+	e2, c2 := r.Open("", "t", "T", "1.2.3.4:2", "", true)
+	e3, c3 := r.Open("", "t", "T", "1.2.3.4:3", "", true)
 	defer c1()
 	defer c2()
 	defer c3()
@@ -114,7 +119,7 @@ func TestTotalsMonotonicDuringClose(t *testing.T) {
 	const n = 500
 	closers := make([]func(), 0, n)
 	for i := 0; i < n; i++ {
-		e, c := r.Open("t", "T", "1.2.3.4:1", "", true)
+		e, c := r.Open("", "t", "T", "1.2.3.4:1", "", true)
 		e.Counters.AToB.Store(1000)
 		closers = append(closers, c)
 	}

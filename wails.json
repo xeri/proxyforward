@@ -14,6 +14,13 @@
     "companyName": "xeri",
     "productName": "proxyforward",
     "copyright": "© xeri",
-    "comments": "Created by xeri — https://github.com/xeri"
+    "comments": "Created by xeri — https://github.com/xeri",
+    "protocols": [
+      {
+        "scheme": "pxf",
+        "description": "proxyforward pairing link",
+        "role": "Viewer"
+      }
+    ]
   }
 }

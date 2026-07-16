@@ -59,6 +59,10 @@ type App struct {
 	// engineFatal holds the engine's terminal error until the next start,
 	// so every status tick (not just the one that drained done) reports it.
 	engineFatal string
+	// pendingDeepLink holds a pxf:// pairing link delivered by the OS before the
+	// frontend was ready to receive the event (a cold start via the protocol
+	// handler); the frontend drains it once on mount via TakePendingDeepLink.
+	pendingDeepLink string
 	// historyUnsupported latches after an attached daemon fails a history
 	// request (older version): stop asking instead of eating a timeout per
 	// poll.
@@ -122,6 +126,53 @@ func (a *App) Startup(ctx context.Context) {
 	a.mu.Unlock()
 
 	go a.tickLoop(ctx)
+}
+
+// HandleDeepLink routes an OS-delivered pxf:// pairing link into the UI. Once the
+// window is up it emits a "pxf:deeplink" event and surfaces the window so the click
+// feels like it opened the app; before startup (a cold protocol launch) it stashes
+// the link for the frontend to pull via TakePendingDeepLink when it mounts.
+func (a *App) HandleDeepLink(rawURL string) {
+	if a.ctx == nil {
+		a.mu.Lock()
+		a.pendingDeepLink = rawURL
+		a.mu.Unlock()
+		return
+	}
+	runtime.EventsEmit(a.ctx, "pxf:deeplink", rawURL)
+	a.surfaceWindow()
+}
+
+// OnSecondInstance handles a second launch of the GUI: the OS forwards that
+// process's args here and exits it. A pxf:// deep link routes into pairing; either
+// way the existing window is brought to the front.
+func (a *App) OnSecondInstance(deepLink string) {
+	if deepLink != "" {
+		a.HandleDeepLink(deepLink)
+		return
+	}
+	a.surfaceWindow()
+}
+
+// TakePendingDeepLink returns and clears any pxf:// link captured before the
+// frontend was listening (a cold start via the OS protocol handler). Bound to Wails;
+// the frontend calls it once on mount.
+func (a *App) TakePendingDeepLink() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	url := a.pendingDeepLink
+	a.pendingDeepLink = ""
+	return url
+}
+
+// surfaceWindow brings the running GUI window to the foreground (un-minimising if
+// needed). A no-op before startup.
+func (a *App) surfaceWindow() {
+	if a.ctx == nil {
+		return
+	}
+	runtime.WindowUnminimise(a.ctx)
+	runtime.WindowShow(a.ctx)
 }
 
 // Shutdown is wired to Wails OnShutdown.
@@ -206,6 +257,11 @@ type UIStatus struct {
 	RTTMillis      int64 `json:"rttMillis"`
 	AgentConnected bool  `json:"agentConnected"`
 
+	// Transport is the data plane the live agent session settled on ("quic" |
+	// "per-conn" | "mux"); "" while down or on the gateway role. Shows what the
+	// auto ladder connected over.
+	Transport string `json:"transport"`
+
 	// Link quality + health rollup. Both roles run their own heartbeat and
 	// report the same stats; values are -1/"unknown" until the link is up.
 	JitterMillis  float64 `json:"jitterMillis"`
@@ -220,6 +276,11 @@ type UIStatus struct {
 	PeerPublicIP string   `json:"peerPublicIp"`
 	LocalLANIPs  []string `json:"localLanIps"`
 	PeerLANIPs   []string `json:"peerLanIps"`
+
+	// Agents is the per-agent link state on a gateway (empty on the agent
+	// role); the Agents screen and drill-in read it. Tunnels/Connections stay
+	// flat and carry agentId so the GUI groups them per agent.
+	Agents []AgentUI `json:"agents"`
 
 	Tunnels       []TunnelUI `json:"tunnels"`
 	Connections   []ConnUI   `json:"connections"`
@@ -262,16 +323,20 @@ type UIStatus struct {
 
 // TunnelUI is one tunnel's live state for the frontend.
 type TunnelUI struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	PublicPort int    `json:"publicPort"`
-	LocalUp    bool   `json:"localUp"`
-	LocalKnown bool   `json:"localKnown"`
+	AgentID             string `json:"agentId,omitempty"` // owning agent (gateway role)
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	PublicPort          int    `json:"publicPort"`
+	LocalUp             bool   `json:"localUp"`
+	LocalKnown          bool   `json:"localKnown"`
+	BandwidthLimitMbps  int    `json:"bandwidthLimitMbps"`  // configured cap (0 = unlimited)
+	BandwidthLimitScope string `json:"bandwidthLimitScope"` // combined | per-direction | per-connection
 }
 
 // ConnUI is one live connection for the frontend.
 type ConnUI struct {
 	ID         uint64 `json:"id"`
+	AgentID    string `json:"agentId,omitempty"` // owning agent (gateway role)
 	TunnelName string `json:"tunnelName"`
 	ClientAddr string `json:"clientAddr"`
 	StartedAt  int64  `json:"startedAt"` // unix millis
@@ -282,6 +347,24 @@ type ConnUI struct {
 	PlayerUUID string `json:"playerUuid,omitempty"`
 	// RttMs is the gateway-measured round-trip time to this client; -1 unknown.
 	RttMs float64 `json:"rttMs"`
+}
+
+// AgentUI is one connected agent's link state on a gateway, mirroring
+// ipc.AgentStatus for the Agents dashboard and drill-in.
+type AgentUI struct {
+	AgentID       string   `json:"agentId"`
+	Hostname      string   `json:"hostname"`
+	LANIPs        []string `json:"lanIps"`
+	RemoteIP      string   `json:"remoteIp"`
+	LinkUpSinceMs int64    `json:"linkUpSinceMs"`
+	RTTMillis     int64    `json:"rttMillis"`
+	JitterMillis  float64  `json:"jitterMillis"`
+	PacketLossPct float64  `json:"packetLossPct"`
+	HealthScore   string   `json:"healthScore"`
+	LinkBytesIn   int64    `json:"linkBytesIn"`
+	LinkBytesOut  int64    `json:"linkBytesOut"`
+	Tunnels       int      `json:"tunnels"`
+	Players       int      `json:"players"`
 }
 
 // applyIPCStatus copies a daemon snapshot into the UI shape.
@@ -297,6 +380,7 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 	}
 	st.LinkUp = s.LinkUp
 	st.RTTMillis = s.RTTMillis
+	st.Transport = s.Transport
 	st.JitterMillis = s.JitterMillis
 	st.PacketLossPct = s.PacketLossPct
 	st.HealthScore = s.HealthScore
@@ -317,11 +401,25 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 	st.AllTimeBytesOut = s.AllTimeBytesOut
 	st.CumulativeUptimeMs = s.CumulativeUptimeMs
 	st.LinkSessions = s.LinkSessions
+	st.Agents = make([]AgentUI, 0, len(s.Agents))
+	for _, ag := range s.Agents {
+		st.Agents = append(st.Agents, AgentUI{
+			AgentID: ag.AgentID, Hostname: ag.Hostname, LANIPs: ag.LANIPs,
+			RemoteIP: ag.RemoteIP, LinkUpSinceMs: ag.LinkUpSinceMs,
+			RTTMillis: ag.RTTMillis, JitterMillis: ag.JitterMillis,
+			PacketLossPct: ag.PacketLossPct, HealthScore: ag.HealthScore,
+			LinkBytesIn: ag.LinkBytesIn, LinkBytesOut: ag.LinkBytesOut,
+			Tunnels: ag.Tunnels, Players: ag.Players,
+		})
+	}
 	st.Tunnels = make([]TunnelUI, 0, len(s.Tunnels))
 	for _, t := range s.Tunnels {
 		st.Tunnels = append(st.Tunnels, TunnelUI{
-			ID: t.ID, Name: t.Name, PublicPort: t.PublicPort,
+			AgentID: t.AgentID,
+			ID:      t.ID, Name: t.Name, PublicPort: t.PublicPort,
 			LocalUp: t.LocalUp, LocalKnown: t.LocalKnown,
+			BandwidthLimitMbps:  t.BandwidthLimitMbps,
+			BandwidthLimitScope: t.BandwidthLimitScope,
 		})
 	}
 	st.ConnectionsTruncated = s.ConnectionsTruncated
@@ -329,7 +427,7 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 	st.Connections = make([]ConnUI, 0, len(s.Connections))
 	for _, c := range s.Connections {
 		st.Connections = append(st.Connections, ConnUI{
-			ID: c.ID, TunnelName: c.TunnelName, ClientAddr: c.ClientAddr,
+			ID: c.ID, AgentID: c.AgentID, TunnelName: c.TunnelName, ClientAddr: c.ClientAddr,
 			StartedAt: c.StartedAt, BytesIn: c.BytesIn, BytesOut: c.BytesOut,
 			PlayerName: c.PlayerName, PlayerUUID: c.PlayerUUID, RttMs: c.RttMs,
 		})
@@ -449,8 +547,18 @@ func (a *App) SetupAgent(pairingCode, localAddr string, publicPort int) error {
 	}
 	a.cfg.Agent.GatewayHost = code.Host
 	a.cfg.Agent.GatewayPort = code.Port
-	a.cfg.Agent.Token = code.Token
 	a.cfg.Agent.CertFingerprint = code.Fingerprint
+	// The code's token is self-describing: a tkt_ ticket enrolls a per-agent
+	// identity (the default), a bare-hex token is legacy shared-token auth. Route it
+	// to exactly one field — the composite validator treats a failed enrollment as
+	// definitive (no shared-token fallback), so the two must never both be set.
+	if link.IsEnrollTicket(code.Token) {
+		a.cfg.Agent.EnrollTicket = code.Token
+		a.cfg.Agent.Token = ""
+	} else {
+		a.cfg.Agent.Token = code.Token
+		a.cfg.Agent.EnrollTicket = ""
+	}
 	if localAddr == "" {
 		localAddr = "127.0.0.1:25565"
 	}

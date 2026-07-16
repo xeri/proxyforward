@@ -18,7 +18,8 @@ capability semantic change, or wire-field meaning change is an escalation trigge
    `MaxFrame` — chunk like `MaxConnStatsPerFrame` does; never raise the cap.
 4. Test both mixed-version directions: e2e `harnessOpts.offerCaps: []string{}`
    simulates a legacy agent (`TestLegacyRegisterFallback`).
-5. Implement fully before advertising the capability — `CapTunnelUDP` is the
-   standing counterexample (advertised, unimplemented, live protocol-bug risk).
+5. Implement fully before advertising the capability — offering one the peer can't
+   honor is a live protocol-bug risk (the `tunnel-udp` capability was exactly this
+   until it was un-advertised; don't reintroduce the pattern).
 6. Protocol and implementation never change in the same commit.
 7. Gate: control + e2e suites; a mixed-version manual run if the change is risky.

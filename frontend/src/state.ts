@@ -58,6 +58,18 @@ export function fmtRate(bytesPerSec: number): string {
   return `${fmtBytes(bytesPerSec)}/s`
 }
 
+// Bandwidth-cap scope options and their labels — shared by the agent Tunnels
+// editor (select + summary chip) and the gateway Agents drill-in. Values match
+// config.go's BandwidthScope* constants; empty normalizes to combined.
+export const BANDWIDTH_SCOPES = [
+  {value: 'combined', label: 'Combined'},
+  {value: 'per-direction', label: 'Per-direction'},
+  {value: 'per-connection', label: 'Per-connection'},
+]
+export function scopeLabel(s: string): string {
+  return BANDWIDTH_SCOPES.find(o => o.value === (s || 'combined'))?.label ?? 'Combined'
+}
+
 export function fmtDuration(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
   const h = Math.floor(s / 3600)
@@ -72,6 +84,19 @@ export function fmtDuration(ms: number): string {
  * sample" sentinels, so anything ≤ 0 renders as unknown. */
 export function hasRtt(ms: number): boolean {
   return ms > 0
+}
+
+/** worstHealth: the fleet rollup — the least-healthy agent sets the verdict, so
+ * one struggling machine is never hidden behind healthy ones. Unknown among
+ * healthy reads as caution. Empty is 'good' (callers gate on count). The one
+ * definition, shared by the connection pill and the Agents roster. */
+export function worstHealth(items: {healthScore: string}[]): 'good' | 'warn' | 'bad' {
+  let tone: 'good' | 'warn' | 'bad' = 'good'
+  for (const it of items) {
+    if (it.healthScore === 'bad') return 'bad'
+    if (it.healthScore === 'warn' || it.healthScore === 'unknown') tone = 'warn'
+  }
+  return tone
 }
 
 /** fmtRtt renders a known round-trip time ("34 ms"). Guard with hasRtt. */

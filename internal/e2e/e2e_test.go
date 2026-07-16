@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -80,6 +81,7 @@ type harness struct {
 	gw        *gateway.Gateway
 	gwCancel  context.CancelFunc
 	agentCfg  *config.Config
+	agentDir  string
 	tunnelID  string
 	agent     *agent.Agent
 	agentCtx  context.Context
@@ -96,6 +98,24 @@ type harnessOpts struct {
 	offerCaps []string
 	// mcAware marks the tunnel Minecraft-aware so both seams sniff logins.
 	mcAware bool
+	// offlineMOTD, when set, configures the tunnel's offline responder message.
+	offlineMOTD string
+	// bandwidthMbps/bandwidthScope cap the default tunnel (0 = uncapped).
+	bandwidthMbps  int
+	bandwidthScope string
+	// transport selects the agent's data-plane transport (config.TransportMux,
+	// config.TransportPerConn, or config.TransportQUIC); empty leaves the config
+	// default (mux). The gateway binds its QUIC listener by default, so a QUIC
+	// agent needs no extra gateway tweak.
+	transport string
+	// interpose, if set, is called with the real gateway "host:port" and
+	// returns the address the agent should dial instead — e.g. a transparent
+	// TCP proxy that observes the agent→gateway connections.
+	interpose func(gwAddr string) string
+	// enroll drives per-agent identity: the harness issues a single-use pairing
+	// ticket from the gateway, sets it on the agent, and clears the shared token so
+	// the agent authenticates purely by its Ed25519 identity.
+	enroll bool
 }
 
 func newHarness(t *testing.T, localAddr string) *harness {
@@ -130,10 +150,34 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 	agentCfg := config.Default()
 	agentCfg.Role = config.RoleAgent
 	agentCfg.Agent.AgentID = config.NewID()
-	agentCfg.Agent.GatewayHost = "127.0.0.1"
-	agentCfg.Agent.GatewayPort = gw.ControlAddr().(*net.TCPAddr).Port
+	dialAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(gw.ControlAddr().(*net.TCPAddr).Port))
+	if opts.interpose != nil {
+		dialAddr = opts.interpose(dialAddr)
+	}
+	dialHost, dialPortStr, err := net.SplitHostPort(dialAddr)
+	if err != nil {
+		t.Fatalf("interpose returned a bad address %q: %v", dialAddr, err)
+	}
+	dialPort, _ := strconv.Atoi(dialPortStr)
+	agentCfg.Agent.GatewayHost = dialHost
+	agentCfg.Agent.GatewayPort = dialPort
 	agentCfg.Agent.Token = gwCfg.Gateway.Token
 	agentCfg.Agent.CertFingerprint = gw.Fingerprint()
+	if opts.enroll {
+		ticket, err := gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		agentCfg.Agent.EnrollTicket = ticket
+		agentCfg.Agent.Token = "" // authenticate purely by Ed25519 identity
+	}
+	// Pin mux as the harness default so existing tests keep exercising the mux
+	// path even though the shipped default is "auto"; per-transport coverage is
+	// opt-in via opts.transport.
+	agentCfg.Agent.Transport = config.TransportMux
+	if opts.transport != "" {
+		agentCfg.Agent.Transport = opts.transport
+	}
 	agentCfg.Agent.Tunnels = []config.Tunnel{{
 		ID:         tunnelID,
 		Name:       "test",
@@ -141,10 +185,15 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 		LocalAddr:  localAddr,
 		PublicPort: 0, // gateway picks
 		Enabled:    true,
-		Options:    config.TunnelOptions{MinecraftAware: opts.mcAware},
+		Options: config.TunnelOptions{
+			MinecraftAware:      opts.mcAware,
+			OfflineMOTD:         opts.offlineMOTD,
+			BandwidthLimitMbps:  opts.bandwidthMbps,
+			BandwidthLimitScope: opts.bandwidthScope,
+		},
 	}}
 
-	h := &harness{t: t, gw: gw, gwCancel: gwCancel, agentCfg: agentCfg, tunnelID: tunnelID, offerCaps: opts.offerCaps}
+	h := &harness{t: t, gw: gw, gwCancel: gwCancel, agentCfg: agentCfg, agentDir: t.TempDir(), tunnelID: tunnelID, offerCaps: opts.offerCaps}
 	h.startAgent()
 	t.Cleanup(h.stopAgent)
 	return h
@@ -154,7 +203,7 @@ func (h *harness) startAgent() {
 	h.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	h.agentCtx, h.agentStop = ctx, cancel
-	h.agent = agent.New(h.agentCfg, testLogger(h.t).With("side", "agent"))
+	h.agent = agent.New(h.agentCfg, h.agentDir, testLogger(h.t).With("side", "agent"))
 	if h.offerCaps != nil {
 		h.agent.SetCapabilityOffer(h.offerCaps)
 	}
@@ -210,6 +259,142 @@ func roundTrip(t *testing.T, addr string, payload []byte) {
 	}
 	if !bytes.Equal(got, payload) {
 		t.Fatal("echo mismatch")
+	}
+}
+
+// TestPerConnRoundTrip: the per-conn transport moves bytes end to end over a
+// dedicated, agent-dialed data connection, and that connection's payload is
+// counted into the agent's link totals (not just the control chatter) so the
+// GUI's link card stays honest.
+func TestPerConnRoundTrip(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportPerConn})
+	addr := h.waitPublicPort()
+
+	beforeIn, beforeOut := h.agent.LinkTotalBytes()
+	payload := bytes.Repeat([]byte("per-conn transport works "), 4096) // ~100 KiB
+	roundTrip(t, addr, payload)
+
+	// The data conn's bytes must land in the link totals; a control-only count
+	// would be far below the payload size.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		in, out := h.agent.LinkTotalBytes()
+		if in-beforeIn >= int64(len(payload)) && out-beforeOut >= int64(len(payload)) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	in, out := h.agent.LinkTotalBytes()
+	t.Fatalf("per-conn data bytes not counted: in delta %d, out delta %d, want ≥ %d each",
+		in-beforeIn, out-beforeOut, len(payload))
+}
+
+// TestQUICRoundTrip: the QUIC transport moves bytes end to end over a single
+// agent-dialed QUIC connection (one stream per player), and that stream's
+// payload is counted into the agent's link totals so the GUI's link card stays
+// honest — the QUIC twin of TestPerConnRoundTrip.
+func TestQUICRoundTrip(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportQUIC})
+	addr := h.waitPublicPort()
+
+	beforeIn, beforeOut := h.agent.LinkTotalBytes()
+	payload := bytes.Repeat([]byte("quic transport works "), 4096) // ~90 KiB
+	roundTrip(t, addr, payload)
+
+	// The data stream's payload must land in the link totals; a control-only
+	// count would be far below the payload size.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		in, out := h.agent.LinkTotalBytes()
+		if in-beforeIn >= int64(len(payload)) && out-beforeOut >= int64(len(payload)) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	in, out := h.agent.LinkTotalBytes()
+	t.Fatalf("quic stream bytes not counted: in delta %d, out delta %d, want ≥ %d each",
+		in-beforeIn, out-beforeOut, len(payload))
+}
+
+// TestQUICMultiplexesPlayers: several players are served concurrently over one
+// QUIC connection (one stream each), with no per-player dial-back. Two live
+// connections that both echo while open prove the single connection multiplexes
+// players — QUIC's whole point, delivered without the extra connections per-conn
+// needs. (Cross-stream loss isolation under load is covered by the burst twin.)
+func TestQUICMultiplexesPlayers(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportQUIC})
+	addr := h.waitPublicPort()
+
+	const players = 3
+	conns := make([]net.Conn, players)
+	for i := range conns {
+		c, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			t.Fatalf("player %d dial: %v", i, err)
+		}
+		defer c.Close()
+		conns[i] = c
+	}
+	// Interleave so all three streams are live at once, not served serially.
+	buf := make([]byte, 4)
+	for round := 0; round < 3; round++ {
+		for i, c := range conns {
+			c.SetDeadline(time.Now().Add(10 * time.Second))
+			if _, err := c.Write([]byte("pkt!")); err != nil {
+				t.Fatalf("player %d write (round %d): %v", i, round, err)
+			}
+		}
+		for i, c := range conns {
+			if _, err := io.ReadFull(c, buf); err != nil {
+				t.Fatalf("player %d read (round %d): %v", i, round, err)
+			}
+			if !bytes.Equal(buf, []byte("pkt!")) {
+				t.Fatalf("player %d echo mismatch: %q", i, buf)
+			}
+		}
+	}
+}
+
+// TestAutoFallsBackWhenQUICBlocked: with the gateway's QUIC listener disabled
+// (simulating an ISP/firewall that blocks UDP), an auto-transport agent's QUIC
+// handshake fails and it falls through to per-conn over TCP — serving players and
+// reporting the transport it settled on. This is the ladder's core promise: QUIC
+// by default, graceful degradation when UDP won't pass.
+func TestAutoFallsBackWhenQUICBlocked(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{
+		transport: config.TransportAuto,
+		tweakGateway: func(cfg *config.Config) {
+			cfg.Gateway.QUICEnabled = false // no UDP listener → QUIC dial fails
+		},
+	})
+	addr := h.waitPublicPort()
+	roundTrip(t, addr, []byte("auto falls back to per-conn when UDP is blocked"))
+
+	if got := h.agent.ActiveTransport(); got != config.TransportPerConn {
+		t.Fatalf("active transport = %q, want %q (should fall back from blocked QUIC)", got, config.TransportPerConn)
+	}
+}
+
+// TestAutoUsesQUICWhenAvailable: the ladder's happy path — when the gateway
+// serves QUIC, an auto agent connects over it (top of the preference list) rather
+// than falling back.
+func TestAutoUsesQUICWhenAvailable(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportAuto})
+	addr := h.waitPublicPort()
+	roundTrip(t, addr, []byte("auto prefers quic"))
+
+	if got := h.agent.ActiveTransport(); got != config.TransportQUIC {
+		t.Fatalf("active transport = %q, want %q (QUIC available, should be preferred)", got, config.TransportQUIC)
 	}
 }
 
@@ -604,29 +789,478 @@ func TestAgentRestartRebinds(t *testing.T) {
 	}
 }
 
-// TestSecondAgentRejected: a different agent identity with the same token
-// must be refused while the first is connected — and the refusal is fatal
-// (no retry hammering).
-func TestSecondAgentRejected(t *testing.T) {
+// tcpTunnel is a minimal enabled TCP tunnel spec for the two-agent tests.
+func tcpTunnel(id, localAddr string, publicPort int) config.Tunnel {
+	return config.Tunnel{
+		ID: id, Name: "t-" + id, Type: config.TunnelTCP,
+		LocalAddr: localAddr, PublicPort: publicPort, Enabled: true,
+	}
+}
+
+// addAgent starts another agent against the same gateway with a fresh agentID
+// and its own tunnels, and registers its shutdown. Drive it via
+// waitPublicPortOf / roundTrip.
+func (h *harness) addAgent(t *testing.T, agentID string, tunnels []config.Tunnel) *agent.Agent {
+	t.Helper()
+	cfg := config.Default()
+	*cfg = *h.agentCfg
+	cfg.Agent.AgentID = agentID
+	cfg.Agent.Tunnels = tunnels
+	ag := agent.New(cfg, t.TempDir(), testLogger(t).With("side", "agent-"+agentID[:4]))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- ag.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("added agent did not stop within 10s")
+		}
+	})
+	return ag
+}
+
+// waitPublicPortOf polls until ag's tunnel is registered, returning its address.
+func waitPublicPortOf(t *testing.T, ag *agent.Agent, tunnelID string) string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if port, ok := ag.TunnelPublicPort(tunnelID); ok {
+			return fmt.Sprintf("127.0.0.1:%d", port)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("tunnel %s never became live", tunnelID)
+	return ""
+}
+
+// TestSecondAgentAdmitted: on the shared token, a second agent with a distinct
+// identity is admitted alongside the first (was rejected before multi-agent).
+func TestSecondAgentAdmitted(t *testing.T) {
+	echoA, closeA := echoServer(t)
+	defer closeA()
+	echoB, closeB := echoServer(t)
+	defer closeB()
+	h := newHarness(t, echoA)
+	addrA := h.waitPublicPort()
+	roundTrip(t, addrA, []byte("A up"))
+
+	bTun := config.NewID()
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(bTun, echoB, 0)})
+	addrB := waitPublicPortOf(t, agB, bTun)
+
+	// Both serve concurrently; A is unharmed by B's admission.
+	roundTrip(t, addrB, []byte("B up"))
+	roundTrip(t, addrA, []byte("A still up"))
+
+	if tunnels := h.gw.Tunnels(); len(tunnels) != 2 {
+		t.Fatalf("gateway tunnels = %d, want 2 (one per agent)", len(tunnels))
+	}
+}
+
+// TestTwoAgentsSameTunnelID (T1) is the namespacing thesis: two agents use the
+// SAME tunnelID string and each binds/serves independently on its own port.
+// With a bare-tunnelID listener key, B would steal A's listener and A's port
+// would stop serving.
+func TestTwoAgentsSameTunnelID(t *testing.T) {
+	echoA, closeA := echoServer(t)
+	defer closeA()
+	echoB, closeB := echoServer(t)
+	defer closeB()
+	h := newHarness(t, echoA) // agent A serves h.tunnelID → echoA
+	addrA := h.waitPublicPort()
+
+	// Agent B reuses the very same tunnelID with its own backend and port.
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(h.tunnelID, echoB, 0)})
+	addrB := waitPublicPortOf(t, agB, h.tunnelID)
+
+	if addrA == addrB {
+		t.Fatalf("agents sharing tunnelID %q must bind distinct ports, both got %s", h.tunnelID, addrA)
+	}
+	roundTrip(t, addrA, []byte("A's tunnel"))
+	roundTrip(t, addrB, []byte("B's tunnel"))
+}
+
+// TestConcurrentPortRace (T2): two agents race to bind the same public port.
+// Exactly one wins it (global FCFS); the loser is not failed but auto-reassigned
+// to a free port, so *both* come up and serve — the conflict is surfaced (a GUI
+// card), never a dead tunnel. (conflict, #2)
+func TestConcurrentPortRace(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarness(t, echoAddr)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close() // free it so both agents can contend
+
+	h := newHarness(t, echoAddr) // gateway + agent A (its own ephemeral tunnel)
 	h.waitPublicPort()
 
-	intruderCfg := config.Default()
-	*intruderCfg = *h.agentCfg
-	intruderCfg.Agent.AgentID = config.NewID() // different identity
-	intruderCfg.Agent.Tunnels = nil
+	bTun, cTun := config.NewID(), config.NewID()
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(bTun, echoAddr, port)})
+	agC := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(cTun, echoAddr, port)})
 
-	intruder := agent.New(intruderCfg, testLogger(t).With("side", "intruder"))
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	err := intruder.Run(ctx)
-	if !errors.Is(err, agent.ErrAgentConflict) {
-		t.Fatalf("want ErrAgentConflict, got %v", err)
+	var pB, pC int
+	var bOK, cOK bool
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		pB, bOK = agB.TunnelPublicPort(bTun)
+		pC, cOK = agC.TunnelPublicPort(cTun)
+		if bOK && cOK {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	// The original session must be unharmed.
-	roundTrip(t, h.waitPublicPort(), []byte("still alive"))
+	if !bOK || !cOK {
+		t.Fatalf("both agents should come up (one wins %d, the other is reassigned); bOK=%v cOK=%v", port, bOK, cOK)
+	}
+	if pB == pC {
+		t.Fatalf("contending agents must bind distinct ports, both got %d", pB)
+	}
+	if (pB == port) == (pC == port) {
+		t.Fatalf("exactly one agent must win the requested port %d; got pB=%d pC=%d", port, pB, pC)
+	}
+	// Both serve — the winner on the requested port, the loser on its reassignment.
+	roundTrip(t, fmt.Sprintf("127.0.0.1:%d", pB), []byte("B serves"))
+	roundTrip(t, fmt.Sprintf("127.0.0.1:%d", pC), []byte("C serves"))
+}
+
+// TestAgentChurnPreservesOtherAgent (T3): one agent disconnecting and
+// reconnecting (which bumps the global generation) must not invalidate another
+// agent's session — currency is decided by map identity, not a generation
+// comparison.
+func TestAgentChurnPreservesOtherAgent(t *testing.T) {
+	echoA, closeA := echoServer(t)
+	defer closeA()
+	echoB, closeB := echoServer(t)
+	defer closeB()
+	h := newHarness(t, echoA)
+	h.waitPublicPort()
+
+	bTun := config.NewID()
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(bTun, echoB, 0)})
+	addrB := waitPublicPortOf(t, agB, bTun)
+	roundTrip(t, addrB, []byte("B before"))
+
+	// Churn agent A: stop and restart it (each readmit bumps a.generation).
+	h.stopAgent()
+	roundTrip(t, addrB, []byte("B while A down"))
+	h.startAgent()
+	h.waitPublicPort() // A back
+
+	roundTrip(t, addrB, []byte("B after A back"))
+	if p, ok := agB.TunnelPublicPort(bTun); !ok || fmt.Sprintf("127.0.0.1:%d", p) != addrB {
+		t.Fatalf("agent B's port changed during agent A churn: ok=%v port=%d want %s", ok, p, addrB)
+	}
+}
+
+// TestEvictionIsolatesAndDrains (T5): evicting one agent closes its listeners
+// AND terminates its live connections (the mux is the drain boundary), while
+// another agent keeps serving untouched.
+func TestEvictionIsolatesAndDrains(t *testing.T) {
+	echoA, closeA := echoServer(t)
+	defer closeA()
+	echoB, closeB := echoServer(t)
+	defer closeB()
+	h := newHarness(t, echoA)
+	addrA := h.waitPublicPort()
+
+	bTun := config.NewID()
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{tcpTunnel(bTun, echoB, 0)})
+	addrB := waitPublicPortOf(t, agB, bTun)
+
+	// Open a long-lived connection through agent A and confirm it echoes.
+	connA, err := net.DialTimeout("tcp", addrA, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connA.Close()
+	connA.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := connA.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(connA, buf); err != nil {
+		t.Fatalf("A conn echo before eviction: %v", err)
+	}
+
+	// Evict agent A by stopping it.
+	h.stopAgent()
+
+	// A's public port stops accepting.
+	portDead := false
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		c, derr := net.DialTimeout("tcp", addrA, 500*time.Millisecond)
+		if derr != nil {
+			portDead = true
+			break
+		}
+		c.Close()
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !portDead {
+		t.Fatal("agent A's public port still accepting after eviction")
+	}
+
+	// A's live connection is torn down (the read returns an error).
+	connA.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := connA.Read(buf); err == nil {
+		t.Fatal("agent A's live connection did not terminate on eviction")
+	}
+
+	// Agent B is unharmed.
+	roundTrip(t, addrB, []byte("B survives A eviction"))
+}
+
+// TestPerConnEvictionDrains: evicting a per-conn agent tears down its live
+// per-conn data connection. Under per-conn transport the mux is no longer the
+// whole drain boundary — the data splices ride dedicated conns — so closeAll
+// must also close them (an uncapped splice parked in Read only unblocks on
+// conn close). This is the per-conn twin of the drain half of T5.
+func TestPerConnEvictionDrains(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportPerConn})
+	addr := h.waitPublicPort()
+
+	// A long-lived connection with a confirmed echo, so its per-conn data conn
+	// is live and spliced.
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := conn.Write([]byte("live")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("echo before eviction: %v", err)
+	}
+
+	// Evict the agent; the live data connection must terminate, proving
+	// closeAll closed the dedicated data conn and not merely the mux.
+	h.stopAgent()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Read(buf); err == nil {
+		t.Fatal("per-conn data connection did not terminate on eviction")
+	}
+}
+
+// TestQUICEvictionDrains: evicting a QUIC agent tears down its live player
+// stream. Under QUIC the session (a *quic.Conn) is the whole drain boundary —
+// closing it kills every stream — so closeAll needs no dataConns (they ride the
+// session, not dedicated conns). The QUIC twin of the drain half of T5.
+func TestQUICEvictionDrains(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportQUIC})
+	addr := h.waitPublicPort()
+
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := conn.Write([]byte("live")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("echo before eviction: %v", err)
+	}
+
+	// Evict the agent; the live stream must terminate as the QUIC session closes.
+	h.stopAgent()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Read(buf); err == nil {
+		t.Fatal("quic player stream did not terminate on eviction")
+	}
+}
+
+// --- Bandwidth cap ---
+//
+// These assert the average download throughput over ~1s (far steadier than the
+// burst test's tail-RTT metric), so they run under -short/-race with generous
+// bounds. The precise unit (Mbps*125000, burst = relay.BufSize) is proven in
+// internal/bwcap; here we prove the cap bites end to end and is per-agent.
+const (
+	capMbps    = 40      // 5 MB/s: ~1.3% of uncapped loopback, so the cap is the bottleneck
+	capPayload = 5 << 20 // ~1s at 40 Mbps; burst (128 KiB) is <3% of this
+)
+
+// sourceServer accepts connections and streams payloadSize bytes to each, then
+// half-closes. Measured at the receiver, its throughput reflects the download
+// (server→client) direction's cap.
+func sourceServer(t *testing.T, payloadSize int) (addr string, closeFn func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			wg.Add(1)
+			go func(c net.Conn) {
+				defer wg.Done()
+				defer c.Close()
+				buf := make([]byte, 128*1024)
+				for sent := 0; sent < payloadSize; {
+					n := len(buf)
+					if payloadSize-sent < n {
+						n = payloadSize - sent
+					}
+					if _, err := c.Write(buf[:n]); err != nil {
+						return
+					}
+					sent += n
+				}
+				if tc, ok := c.(*net.TCPConn); ok {
+					tc.CloseWrite()
+				}
+			}(c)
+		}
+	}()
+	return ln.Addr().String(), func() {
+		ln.Close()
+		wg.Wait()
+	}
+}
+
+// downloadMbps drains expectBytes from addr and returns the observed decimal
+// Mbps. It returns an error (never t.Fatal) so it is safe to call from a
+// goroutine for concurrent-stream tests.
+func downloadMbps(addr string, expectBytes int) (float64, error) {
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	start := time.Now()
+	got, err := io.CopyN(io.Discard, conn, int64(expectBytes))
+	elapsed := time.Since(start)
+	if err != nil {
+		return 0, fmt.Errorf("read %d/%d bytes: %w", got, expectBytes, err)
+	}
+	return float64(got) * 8 / 1e6 / elapsed.Seconds(), nil
+}
+
+// cappedTunnel is tcpTunnel with a bandwidth cap, for the two-agent tests.
+func cappedTunnel(id, localAddr string, mbps int, scope string) config.Tunnel {
+	tun := tcpTunnel(id, localAddr, 0)
+	tun.Options.BandwidthLimitMbps = mbps
+	tun.Options.BandwidthLimitScope = scope
+	return tun
+}
+
+// checkCapped asserts a stream's throughput bracket: throttled (not uncapped)
+// yet not throttled below ~half the cap (which would signal a shared bucket).
+func checkCapped(t *testing.T, label string, mbps float64) {
+	t.Helper()
+	t.Logf("%s: %.1f Mbps (cap %d)", label, mbps, capMbps)
+	if mbps < capMbps*0.6 {
+		t.Errorf("%s throttled to %.1f Mbps (< %.0f): cap too aggressive / bucket shared?", label, mbps, capMbps*0.6)
+	}
+	if mbps > capMbps*1.4 {
+		t.Errorf("%s ran at %.1f Mbps (> %.0f): cap not enforced", label, mbps, capMbps*1.4)
+	}
+}
+
+// TestBandwidthCapThrottlesDownload: a capped tunnel throttles a single stream
+// to ~cap, in both combined and per-direction scope (a single direction is
+// capped identically by either).
+func TestBandwidthCapThrottlesDownload(t *testing.T) {
+	for _, scope := range []string{config.BandwidthScopeCombined, config.BandwidthScopePerDirection} {
+		t.Run(scope, func(t *testing.T) {
+			srcAddr, closeSrc := sourceServer(t, capPayload)
+			defer closeSrc()
+			h := newHarnessWith(t, srcAddr, harnessOpts{bandwidthMbps: capMbps, bandwidthScope: scope})
+			addr := h.waitPublicPort()
+			mbps, err := downloadMbps(addr, capPayload)
+			if err != nil {
+				t.Fatalf("download: %v", err)
+			}
+			checkCapped(t, scope, mbps)
+		})
+	}
+}
+
+// TestBandwidthCapPerConnectionScope: per-connection scope gives each connection
+// its own bucket, so two concurrent streams each sustain ~cap (a shared bucket
+// would halve them).
+func TestBandwidthCapPerConnectionScope(t *testing.T) {
+	srcAddr, closeSrc := sourceServer(t, capPayload)
+	defer closeSrc()
+	h := newHarnessWith(t, srcAddr, harnessOpts{bandwidthMbps: capMbps, bandwidthScope: config.BandwidthScopePerConnection})
+	addr := h.waitPublicPort()
+
+	type res struct {
+		mbps float64
+		err  error
+	}
+	ch := make(chan res, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			mbps, err := downloadMbps(addr, capPayload)
+			ch <- res{mbps, err}
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		r := <-ch
+		if r.err != nil {
+			t.Fatalf("download: %v", r.err)
+		}
+		checkCapped(t, "per-connection stream", r.mbps)
+	}
+}
+
+// TestBandwidthCapPerAgentIsolation guards the (agentID, tunnelID) keying: two
+// agents share the SAME tunnelID, each capped at cap. Correct per-agent
+// bucketing lets each sustain ~cap concurrently; a tunnelID-only key would make
+// them share one bucket (~cap/2 each).
+func TestBandwidthCapPerAgentIsolation(t *testing.T) {
+	srcA, closeA := sourceServer(t, capPayload)
+	defer closeA()
+	srcB, closeB := sourceServer(t, capPayload)
+	defer closeB()
+
+	h := newHarnessWith(t, srcA, harnessOpts{bandwidthMbps: capMbps, bandwidthScope: config.BandwidthScopeCombined})
+	addrA := h.waitPublicPort()
+
+	agB := h.addAgent(t, config.NewID(), []config.Tunnel{cappedTunnel(h.tunnelID, srcB, capMbps, config.BandwidthScopeCombined)})
+	addrB := waitPublicPortOf(t, agB, h.tunnelID)
+
+	type res struct {
+		mbps float64
+		err  error
+	}
+	ch := make(chan res, 2)
+	for _, addr := range []string{addrA, addrB} {
+		go func() {
+			mbps, err := downloadMbps(addr, capPayload)
+			ch <- res{mbps, err}
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		r := <-ch
+		if r.err != nil {
+			t.Fatalf("download: %v", r.err)
+		}
+		checkCapped(t, "per-agent stream", r.mbps)
+	}
 }
 
 // TestBadTokenRejected: wrong token → fatal ErrBadToken.
@@ -642,7 +1276,7 @@ func TestBadTokenRejected(t *testing.T) {
 	thiefCfg.Agent.Token = config.NewToken() // wrong
 	thiefCfg.Agent.Tunnels = nil
 
-	thief := agent.New(thiefCfg, testLogger(t).With("side", "thief"))
+	thief := agent.New(thiefCfg, t.TempDir(), testLogger(t).With("side", "thief"))
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	err := thief.Run(ctx)
@@ -651,16 +1285,91 @@ func TestBadTokenRejected(t *testing.T) {
 	}
 }
 
+// TestEnrollAndRevoke drives per-agent identity end to end: an agent enrolls with a
+// single-use pairing ticket, joins the gateway allowlist, moves traffic over the
+// identity-authenticated link, and after revocation gives up fatally on reconnect
+// instead of retry-hammering.
+func TestEnrollAndRevoke(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{enroll: true})
+	addr := h.waitPublicPort()
+
+	// Enrolled exactly once, with a derived agt_ id and a stored public key.
+	agents := h.gw.ListAgents()
+	if len(agents) != 1 {
+		t.Fatalf("want 1 enrolled agent, got %d: %+v", len(agents), agents)
+	}
+	rec := agents[0]
+	if len(rec.AgentID) < 5 || rec.AgentID[:4] != "agt_" || len(rec.PubKey) == 0 {
+		t.Fatalf("enrolled record looks wrong: %+v", rec)
+	}
+	// Traffic flows over the identity-authenticated link (no shared token).
+	roundTrip(t, addr, []byte("identity works"))
+
+	// Revoke: the live session is evicted and the agent, on reconnect, is refused
+	// fatally rather than looping.
+	if !h.gw.RevokeAgent(rec.AgentID) {
+		t.Fatal("revoke reported the agent was not found")
+	}
+	select {
+	case err := <-h.agentDone:
+		if !errors.Is(err, agent.ErrRevoked) {
+			t.Fatalf("revoked agent: want ErrRevoked, got %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("revoked agent did not give up after eviction")
+	}
+	h.agentStop()     // release the ctx now that Run has returned
+	h.agentStop = nil // we already drained agentDone; keep cleanup from blocking
+}
+
 // TestBurstThroughputAndCrossStreamLatency pushes 64 MiB through one
 // connection while a second connection does small echo round-trips; the
-// burst must move fast and must not starve the small stream.
+// burst must move fast and must not starve the small stream. This is the
+// hot-path floor gate (mux transport); TestBurstThroughputPerConn is its
+// per-conn twin.
 func TestBurstThroughputAndCrossStreamLatency(t *testing.T) {
 	if testing.Short() {
 		t.Skip("burst benchmark skipped in -short")
 	}
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarness(t, echoAddr)
+	runBurst(t, newHarness(t, echoAddr))
+}
+
+// TestBurstThroughputPerConn is the per-conn transport twin of the burst floor
+// gate: dedicated per-player connections must clear the same throughput floor
+// and, having no shared mux, must not degrade cross-stream latency.
+func TestBurstThroughputPerConn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("burst benchmark skipped in -short")
+	}
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	runBurst(t, newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportPerConn}))
+}
+
+// TestBurstThroughputQUIC is the QUIC twin of the burst floor gate. Userspace
+// QUIC is CPU-heavier than kernel TCP (and GSO/GRO support varies on Windows),
+// so this is the load-bearing check that QUIC clears the SAME floor: ≥20 MiB/s
+// round-trip and worst cross-stream RTT ≤500 ms — the latter also proving one
+// player's saturating stream doesn't head-of-line-block another's over the one
+// shared QUIC connection. Do not lower the floor to make this pass.
+func TestBurstThroughputQUIC(t *testing.T) {
+	if testing.Short() {
+		t.Skip("burst benchmark skipped in -short")
+	}
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	runBurst(t, newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportQUIC}))
+}
+
+// runBurst drives the burst-and-probe floor check against a live harness:
+// ≥20 MiB/s round-trip and worst cross-stream RTT ≤500 ms (bounds in
+// docs/agent/architecture.md "The numbers").
+func runBurst(t *testing.T, h *harness) {
+	t.Helper()
 	addr := h.waitPublicPort()
 
 	const burstSize = 64 << 20

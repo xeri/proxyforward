@@ -591,6 +591,76 @@ func TestLoadLegacyJSONV1(t *testing.T) {
 	}
 }
 
+// TestSampleAgentEquivalence: with one agent whose traffic is all the traffic,
+// its per-agent history must match the global series bucket-for-bucket. This is
+// the single-agent-equivalence proof that per-agent sampling is faithful.
+func TestSampleAgentEquivalence(t *testing.T) {
+	s := fresh(t)
+	const agentID = "agent-1"
+	var appIn, appOut int64
+	for i := int64(0); i <= 650; i++ {
+		ts := time.UnixMilli(base + i*100)
+		conns := int(3 + i%4)
+		s.Sample(ts, appIn, appOut, 0, 0, conns, 2, 25, 0)
+		s.SampleAgent(agentID, ts, appIn, appOut, conns, 2, 25, 0)
+		appIn += 1000
+		appOut += 10_000
+	}
+	end := base + 650*100
+	s.mu.Lock()
+	g := s.global.historyAt(end, 60_000, 300)
+	a := s.agents[agentID].historyAt(end, 60_000, 300)
+	s.mu.Unlock()
+	if len(a.Buckets) != len(g.Buckets) || len(g.Buckets) == 0 {
+		t.Fatalf("agent history %d buckets, global %d", len(a.Buckets), len(g.Buckets))
+	}
+	for i := range g.Buckets {
+		if a.Buckets[i] != g.Buckets[i] {
+			t.Fatalf("bucket %d: agent %+v != global %+v", i, a.Buckets[i], g.Buckets[i])
+		}
+	}
+	// An unknown/never-sampled agent has no history.
+	if h := s.AgentHistory("nope", 60_000, 300); len(h.Buckets) != 0 {
+		t.Fatalf("unknown agent returned %d buckets", len(h.Buckets))
+	}
+	// The '' series is Sample's job; SampleAgent("") is a no-op.
+	s.SampleAgent("", time.UnixMilli(end), 1, 1, 1, 1, 1, 1)
+	s.mu.Lock()
+	_, empty := s.agents[""]
+	s.mu.Unlock()
+	if empty {
+		t.Fatal(`SampleAgent("") must not create a series`)
+	}
+}
+
+// TestAgentHistoryLRUCap: more distinct agents than the cap keeps the map
+// bounded and evicts the least-recently-sampled.
+func TestAgentHistoryLRUCap(t *testing.T) {
+	s := fresh(t)
+	for i := 0; i < maxAgentHistories+5; i++ {
+		id := "agent-" + strconv.Itoa(i)
+		s.SampleAgent(id, time.UnixMilli(base+int64(i)), 0, 0, 1, 0, -1, -1)
+	}
+	s.mu.Lock()
+	n := len(s.agents)
+	_, stalestAlive := s.agents["agent-0"]
+	_, newestAlive := s.agents["agent-"+strconv.Itoa(maxAgentHistories+4)]
+	nEvicted := len(s.evicted)
+	s.mu.Unlock()
+	if n > maxAgentHistories {
+		t.Fatalf("agent histories = %d, want ≤ %d", n, maxAgentHistories)
+	}
+	if stalestAlive {
+		t.Fatal("stalest agent (agent-0) should have been evicted")
+	}
+	if !newestAlive {
+		t.Fatal("newest agent should be retained")
+	}
+	if nEvicted == 0 {
+		t.Fatal("evicted agents should be marked for rrd deletion")
+	}
+}
+
 func TestCountingConn(t *testing.T) {
 	// A pipe-backed conn check would drag in networking; the arithmetic is
 	// what matters and lives in LinkCounters via countingConn's Add calls.

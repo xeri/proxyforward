@@ -14,6 +14,27 @@
 //   &fx=high         — high-fx glass: refraction filter on the palette
 //   &fx=low          — low-fx glass: solid cards, no caustics/chart glow
 //   &analytics=off   — daemon without the analytics store (unsupported state)
+//   &fleet=multi|old — gateway only. multi: a five-agent fleet (good/fair/poor
+//                      health spread) instead of the default single agent, to
+//                      exercise the Agents roster, its sort/filter, and drill-in.
+//                      The ListAgents roster ALSO carries two offline-enrolled
+//                      agents and one revoked agent in every gateway scenario
+//                      (they never appear in status.agents), so the roster's
+//                      connected/offline/revoked states render without any axis.
+//                      old: a pre-roster daemon (no agents array) → the Agents
+//                      screen's honest-unavailable state (ListAgents also [])
+//   &conflict=port|clone|both
+//                    — gateway only. Seeds GatewayEvents so the Agents screen's
+//                      conflict callout cards + event log have data: port →
+//                      one port-reassigned event; clone → one clone-suspected
+//                      event (references agent0, always linkable); both → both
+//                      plus an older historical reassign. No axis → no events
+//                      (event log shows its written-empty state, no cards).
+//                      Pair with &fleet=multi so the port event links to its
+//                      contesting agent in the roster.
+//   &paired=0        — this machine has never been paired to a gateway, so the
+//                      sidebar's role switcher can't become the agent and must
+//                      route to setup instead (pair with ?mock=gateway)
 //   &geo=off|empty|error|pending
 //                    — GeoIP axes: unconfigured / configured-but-no-locations /
 //                      database failed to open / picked but engine not restarted
@@ -33,7 +54,10 @@ export function installDevMock() {
   const axisFatal = params.get('fatal') === '1'
   const axisFresh = params.get('fresh') === '1'
   const axisAnalyticsOff = params.get('analytics') === 'off'
+  const axisUnpaired = params.get('paired') === '0'
   const axisGeo = params.get('geo') || '' // off | empty | error | pending
+  const axisFleet = params.get('fleet') || '' // '' (single agent) | multi | old
+  const axisConflict = params.get('conflict') || '' // '' | port | clone | both
   const fx = params.get('fx')
   if (fx) document.documentElement.dataset.fx = fx // &fx=high | &fx=low
 
@@ -165,6 +189,39 @@ export function installDevMock() {
     return {windowMs, bucketMs, buckets}
   }
 
+  // Per-agent bandwidth (Agents drill-in): the gateway-wide history scaled to
+  // each agent's share, with the RTT overlay shifted to that agent's baseline,
+  // so every agent's chart looks distinct and agrees with its roster card.
+  const AGENT_SCALE: Record<string, {factor: number; rtt: number}> = {
+    agentid: {factor: 1, rtt: 24},
+    '7788990011223344aabbccddeeff0011': {factor: 0.4, rtt: 74},
+    ccddeeff001122334455667788990011: {factor: 0.06, rtt: 180},
+    aa00bb11cc22dd33ee44ff5566778899: {factor: 0.6, rtt: 30},
+    f0e1d2c3b4a5968778695a4b3c2d1e0f: {factor: 0.25, rtt: 55},
+  }
+  const agentBandwidth = (agentId: string, windowMs: number, maxBuckets: number) => {
+    const {factor, rtt} = AGENT_SCALE[agentId] ?? {factor: 0.25, rtt: 40}
+    const h = bandwidthHistory(windowMs, maxBuckets)
+    const k = rtt / 24
+    // Scale the byte/candle series by the agent's share and the connections and
+    // players gauges too, so each agent's overlay is genuinely its own (the -1
+    // "unknown" sentinel is preserved). RTT shifts to the agent's baseline; loss
+    // is a rate, not volume, so it rides the shared curve.
+    const g = (v: number): number => (v >= 0 ? Math.round(v * factor) : -1)
+    return {
+      ...h,
+      buckets: h.buckets.map((b: any) => ({
+        ...b,
+        out: Math.round(b.out * factor), in: Math.round(b.in * factor),
+        oo: b.oo * factor, oh: b.oh * factor, ol: b.ol * factor, oc: b.oc * factor,
+        io: b.io * factor, ih: b.ih * factor, il: b.il * factor, ic: b.ic * factor,
+        co: g(b.co), ch: g(b.ch), cl: g(b.cl), cc: g(b.cc),
+        po: g(b.po), ph: g(b.ph), pl: g(b.pl), pc: g(b.pc),
+        ...(b.ro >= 0 ? {ro: b.ro * k, rh: b.rh * k, rl: b.rl * k, rc: b.rc * k} : {}),
+      })),
+    }
+  }
+
   // Lifetime peer records; the first two are the live connections' IPs.
   const now0 = Date.now()
   const peerSeeds = [
@@ -188,6 +245,175 @@ export function installDevMock() {
 
   // ---- mutable world state ----
   const tunnelID = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
+
+  // Extra agents for the multi-agent gateway fleet (?mock=gateway&fleet=multi).
+  // Each carries its own tunnels, live sessions, health, and remote identity so
+  // the roster, its sort axes, the hostname filter, and the drill-in all have
+  // real spread to render. With agent0 the fleet is five machines whose health
+  // spans good / fair (jitter>30) / poor (loss>5). `upSinceMs` is stamped ONCE
+  // here (a fixed epoch), never recomputed per tick, so the uptime readouts
+  // actually advance like agent0's.
+  const NOW0 = Date.now()
+  const extraAgents = [
+    {
+      agentId: '7788990011223344aabbccddeeff0011', hostname: 'SURVIVAL-RIG',
+      lan: ['10.0.0.9'], remote: '198.51.100.7', upSinceMs: NOW0 - 42 * 60_000,
+      jitter: 41, loss: 1.3, rtt: 74, factor: 0.4,
+      tunnels: [
+        {id: 'bb11223344556677889900aabbccddee', name: 'Survival', port: 25566, localUp: true, bandwidthLimitMbps: 100, bandwidthLimitScope: 'combined'},
+        {id: 'cc22334455667788990011aabbccddff', name: 'Lobby', port: 25567, localUp: false},
+      ],
+      conns: [{
+        id: 8801, tunnelName: 'Survival', clientAddr: '92.99.11.4:53001',
+        startedAt: NOW0 - 600_000, bytesIn: 900_000, bytesOut: 5_400_000,
+        playerName: 'DiggerDan', playerUuid: '11112222-3333-4444-5555-666677778888', rttMs: 76,
+      }] as any[],
+    },
+    {
+      agentId: 'ccddeeff001122334455667788990011', hostname: 'MINIGAMES-PI',
+      lan: ['192.168.1.30'], remote: '92.184.100.23', upSinceMs: NOW0 - 12 * 60_000,
+      jitter: 22, loss: 7.5, rtt: 180, factor: 0.06,
+      tunnels: [{id: 'dd33445566778899001122aabbccdd00', name: 'Minigames', port: 25568, localUp: true}],
+      conns: [] as any[],
+    },
+    {
+      agentId: 'aa00bb11cc22dd33ee44ff5566778899', hostname: 'CREATIVE-HUB',
+      lan: ['10.0.0.12'], remote: '84.113.9.201', upSinceMs: NOW0 - 6 * 3_600_000,
+      jitter: 5, loss: 0, rtt: 30, factor: 0.6,
+      tunnels: [{id: 'ab00cd11ef22ab33cd44ef5566778890', name: 'Creative', port: 25569, localUp: true}],
+      conns: [{
+        id: 8811, tunnelName: 'Creative', clientAddr: '176.10.44.8:51900',
+        startedAt: NOW0 - 1_800_000, bytesIn: 1_400_000, bytesOut: 9_800_000,
+        playerName: 'BuilderBeth', playerUuid: '22223333-4444-5555-6666-777788889999', rttMs: 31,
+      }] as any[],
+    },
+    {
+      agentId: 'f0e1d2c3b4a5968778695a4b3c2d1e0f', hostname: 'SKYBLOCK-BOX',
+      lan: ['192.168.0.20'], remote: '51.68.220.14', upSinceMs: NOW0 - 95 * 60_000,
+      jitter: 34, loss: 0.4, rtt: 55, factor: 0.25,
+      tunnels: [{id: 'c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f', name: 'Skyblock', port: 25570, localUp: true, bandwidthLimitMbps: 20, bandwidthLimitScope: 'per-connection'}],
+      conns: [{
+        id: 8821, tunnelName: 'Skyblock', clientAddr: '203.0.113.77:52210',
+        startedAt: NOW0 - 300_000, bytesIn: 420_000, bytesOut: 2_100_000,
+        playerName: 'IslandIvy', playerUuid: '33334444-5555-6666-7777-88889999aaaa', rttMs: 57,
+      }] as any[],
+    },
+  ]
+  const agentHealthOf = (jitter: number, loss: number): string =>
+    loss > 5 || jitter > 100 ? 'bad' : loss > 1 || jitter > 30 ? 'warn' : 'good'
+
+  // ---- agent directory (roster: ListAgents / RenameAgent / SetAgentScope /
+  //      RevokeAgent) ----
+  // The gateway's enrollment store as the roster sees it: every enrolled agent
+  // (online or offline) plus the connected shared-token agent. Connected entries
+  // mirror the live fleet (agent0 + the &fleet=multi extras) by agentId, so the
+  // roster, the status.agents health join, and the drill-in all agree; the
+  // offline and revoked entries exist ONLY here (never in status.agents), which
+  // is what exercises the roster's offline/revoked states. Renames, scope edits,
+  // and revokes land in `agentOverrides` and surface on the next ListAgents poll
+  // — the same write-then-repoll loop the real bindings drive. agentId carries
+  // the agt_ prefix for enrolled identities and the self-asserted string for the
+  // shared-token agent (agent0), matching link.AgentID / the gateway store.
+  const mkView = (o: any) => ({
+    agentId: o.agentId, nickname: o.nickname || '', enrolled: o.enrolled !== false,
+    revoked: !!o.revoked, scopePorts: o.scopePorts || [], scopeTunnels: o.scopeTunnels || [],
+    issuedAtMs: o.issuedAtMs || 0, connected: !!o.connected, hostname: o.hostname || '',
+    remoteIp: o.remoteIp || '', linkUpSinceMs: o.linkUpSinceMs || 0, tunnels: o.tunnels || 0,
+  })
+  // Enrollment metadata for the connected extras (nickname/scope/enrolled age),
+  // keyed by the same agentId the live fleet and AGENT_SCALE use.
+  const EXTRA_ENROLL: Record<string, {nick: string; ports: number[]; tuns: string[]; days: number}> = {
+    '7788990011223344aabbccddeeff0011': {nick: 'Survival server', ports: [25566, 25567], tuns: [], days: 26},
+    ccddeeff001122334455667788990011: {nick: '', ports: [25568], tuns: [], days: 12},
+    aa00bb11cc22dd33ee44ff5566778899: {nick: 'Creative hub', ports: [], tuns: [], days: 47},
+    f0e1d2c3b4a5968778695a4b3c2d1e0f: {nick: 'Skyblock island', ports: [], tuns: ['c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f'], days: 9},
+  }
+  const connectedViews = () => {
+    if (!state.linkUp) return []
+    // agent0 is the connected shared-token agent: no nickname (→ hostname title),
+    // enrolled:false, unrestricted. Its id is self-asserted, not agt_-prefixed.
+    const a0 = mkView({
+      agentId: 'agentid', enrolled: false, connected: true, hostname: 'DESKTOP-DEV',
+      remoteIp: '84.23.101.7', linkUpSinceMs: LINK_UP_SINCE, tunnels: 1, issuedAtMs: INSTALLED_AT,
+    })
+    if (axisFleet !== 'multi') return [a0]
+    const extras = extraAgents.map(a => {
+      const e = EXTRA_ENROLL[a.agentId] ?? {nick: '', ports: [], tuns: [], days: 20}
+      return mkView({
+        agentId: a.agentId, nickname: e.nick, enrolled: true, connected: true,
+        hostname: a.hostname, remoteIp: a.remote, linkUpSinceMs: a.upSinceMs,
+        tunnels: a.tunnels.length, scopePorts: e.ports, scopeTunnels: e.tuns,
+        issuedAtMs: now0 - e.days * 86_400_000,
+      })
+    })
+    return [a0, ...extras]
+  }
+  // Enrolled agents that are NOT currently connected, plus one revoked — always
+  // in the roster regardless of link state, so their states always render.
+  const offlineViews = [
+    mkView({agentId: 'agt_h4t2q9zm', nickname: 'Backup box', enrolled: true, hostname: 'BACKUP-NAS', scopePorts: [25580], issuedAtMs: now0 - 18 * 86_400_000}),
+    mkView({agentId: 'agt_b7k3n5pd', enrolled: true, hostname: 'SEASONAL-SMP', issuedAtMs: now0 - 40 * 86_400_000}),
+  ]
+  const revokedViews = [
+    mkView({agentId: 'agt_x2m8r6ct', nickname: 'Old laptop', enrolled: true, revoked: true, hostname: 'LAPTOP-OLD', issuedAtMs: now0 - 63 * 86_400_000}),
+  ]
+  const knownAgentIds = new Set<string>([
+    'agentid', ...extraAgents.map(a => a.agentId),
+    ...offlineViews.map(v => v.agentId), ...revokedViews.map(v => v.agentId),
+  ])
+  // Mutations from the write bindings, applied over the composed roster.
+  const agentOverrides = new Map<string, any>()
+  const applyOverride = (v: any) => {
+    const o = agentOverrides.get(v.agentId)
+    if (!o) return v
+    return {
+      ...v,
+      ...(o.nickname !== undefined ? {nickname: o.nickname} : {}),
+      ...(o.scopePorts !== undefined ? {scopePorts: o.scopePorts} : {}),
+      ...(o.scopeTunnels !== undefined ? {scopeTunnels: o.scopeTunnels} : {}),
+      ...(o.revoked !== undefined ? {revoked: o.revoked, connected: o.revoked ? false : v.connected} : {}),
+    }
+  }
+  const listAgents = () => {
+    // The roster is a gateway surface; an agent (or a pre-roster daemon) has none.
+    if (state.role !== 'gateway' || axisFleet === 'old') return []
+    return [...connectedViews(), ...offlineViews, ...revokedViews].map(applyOverride)
+  }
+
+  // ---- gateway conflict / auto-fix events (GatewayEvents) ----
+  // Seeded once from the &conflict axis. Both event kinds ARE conflicts (there
+  // is no benign kind), so with no axis the ring is empty — the event log shows
+  // its written-empty state and no conflict cards appear. GatewayEvents(seq) is
+  // incremental by cursor, so the first poll returns all seeds and later polls
+  // return [] (a quiet ring), which is exactly what the since-cursor tail wants.
+  let evSeq = 0
+  const gwEvents: any[] = []
+  const evNow = Date.now()
+  const pushEvent = (o: any) => gwEvents.push({seq: ++evSeq, ...o})
+  if (axisConflict === 'both') {
+    pushEvent({
+      timeMs: evNow - 52 * 60_000, kind: 'port-reassigned',
+      agentId: 'aa00bb11cc22dd33ee44ff5566778899', tunnelId: 'ab00cd11ef22ab33cd44ef5566778890',
+      requestedPort: 25569, actualPort: 25574,
+      message: 'Requested public port 25569 was busy; CREATIVE-HUB’s "Creative" tunnel was auto-assigned 25574.',
+    })
+  }
+  if (axisConflict === 'port' || axisConflict === 'both') {
+    pushEvent({
+      timeMs: evNow - 8 * 60_000, kind: 'port-reassigned',
+      agentId: '7788990011223344aabbccddeeff0011', tunnelId: 'cc22334455667788990011aabbccddff',
+      requestedPort: 25567, actualPort: 25572,
+      message: 'Requested public port 25567 was already bound; SURVIVAL-RIG’s "Lobby" tunnel was auto-assigned 25572 instead.',
+    })
+  }
+  if (axisConflict === 'clone' || axisConflict === 'both') {
+    pushEvent({
+      timeMs: evNow - 3 * 60_000, kind: 'clone-suspected', agentId: 'agentid',
+      message: 'Agent "agentid" reconnected from 203.0.113.77:52210 while still linked from 84.23.101.7:53880 — possible cloned identity or a shared token in use on two machines.',
+    })
+  }
+  const gatewayEvents = (sinceSeq: number) => gwEvents.filter(e => e.seq > (sinceSeq || 0))
+
   const up = !isWizard && !axisLinkDown && !axisFatal
   const state = {
     role: isGateway ? 'gateway' : 'agent',
@@ -203,15 +429,23 @@ export function installDevMock() {
   }
   const config = {
     Role: state.role,
-    Agent: {AgentID: 'agentid', GatewayHost: 'play.example.com', GatewayPort: 8474, Token: 'tok', CertFingerprint: 'sha256:ab', Transport: 'mux',
+    Agent: {AgentID: 'agentid', GatewayHost: 'play.example.com', GatewayPort: 8474, Token: 'tok', CertFingerprint: 'sha256:ab', Transport: 'auto',
       Tunnels: [{ID: tunnelID, Name: 'Minecraft', Type: 'tcp', LocalAddr: '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
-        Options: {MinecraftAware: true, ProxyProtocolV2: false, OfflineMOTD: 'Server is offline — back soon', BandwidthLimitMbps: 0}}]},
+        Options: {MinecraftAware: true, ProxyProtocolV2: false, OfflineMOTD: 'Server is offline — back soon', BandwidthLimitMbps: 40, BandwidthLimitScope: 'per-direction'}}]},
     Gateway: {BindAddr: '0.0.0.0', ControlPort: 8474, Token: 'tok', PublicHost: 'play.example.com', PortAllowlist: [],
       MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10},
     Metrics: {PrometheusEnabled: false, PrometheusAddr: '127.0.0.1:9464'},
     Logging: {Level: 'info', FileEnabled: true},
     UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: true, Autostart: false},
     Analytics: {RetentionDays: 180, MojangLookups: true, GeoIPCityPath: '', GeoIPASNPath: ''},
+  }
+  // A machine that has never been paired holds no agent credentials — the
+  // gateway half of the config is complete, the agent half is empty. This is
+  // the one state where the role switcher cannot simply flip.
+  if (axisUnpaired) {
+    config.Agent.Token = ''
+    config.Agent.GatewayHost = ''
+    config.Agent.CertFingerprint = ''
   }
 
   // Link-quality mock: healthy jitter/loss on the agent; the gateway leaves
@@ -228,25 +462,77 @@ export function installDevMock() {
   const status = () => {
     const jitter = isWizard || !state.linkUp ? -1 : jitterMs()
     const loss = isWizard || !state.linkUp ? -1 : lossPct()
+    // Read the LIVE role, not the URL scenario: the sidebar's role switcher
+    // flips state.role, and every identity below has to follow it or the app
+    // would keep wearing the old role's peer after a switch.
+    const gw = state.role === 'gateway'
+
+    // Gateway fleet: agent0 is the always-present peer (its identity mirrors the
+    // coarse peer* fields so the other gateway screens stay populated); the
+    // extras appear only under &fleet=multi. Tunnels and connections flatten
+    // across the fleet, each stamped with its agentId so the Agents drill-in can
+    // scope them. A downed gateway link means zero agents. The agent role sends
+    // no roster at all (undefined), like the real backend.
+    const agent0 = {
+      agentId: 'agentid', hostname: 'DESKTOP-DEV', lanIps: ['10.0.0.5'], remoteIp: '84.23.101.7',
+      linkUpSinceMs: LINK_UP_SINCE, rttMillis: state.rtt, jitterMillis: jitter, packetLossPct: loss,
+      healthScore: healthOf(jitter, loss),
+      linkBytesIn: Math.round(state.bytesIn * 1.06) + 2_400_000,
+      linkBytesOut: Math.round(state.bytesOut * 1.06) + 3_100_000,
+      tunnels: 1, players: state.conns.length,
+    }
+    const fleetExtras = gw && state.linkUp && axisFleet === 'multi' ? extraAgents : []
+    const gwAgents = gw && state.linkUp ? [agent0, ...fleetExtras.map(a => ({
+      agentId: a.agentId, hostname: a.hostname, lanIps: a.lan, remoteIp: a.remote,
+      linkUpSinceMs: a.upSinceMs, rttMillis: a.rtt, jitterMillis: a.jitter, packetLossPct: a.loss,
+      healthScore: agentHealthOf(a.jitter, a.loss),
+      linkBytesIn: Math.round(a.factor * (state.bytesIn * 1.06 + 2_400_000) * 0.7),
+      linkBytesOut: Math.round(a.factor * (state.bytesOut * 1.06 + 3_100_000)),
+      tunnels: a.tunnels.length, players: a.conns.length,
+    }))] : []
+    // &fleet=old simulates a pre-roster background service: the gateway reports
+    // no agents array at all, so the Agents screen shows its honest-unavailable
+    // state (told apart from a live gateway with zero agents connected).
+    const rosterOld = gw && axisFleet === 'old'
+    const gwTunnels = gw
+      ? (state.linkUp
+        ? [{id: tunnelID, name: 'Minecraft', publicPort: 25565, localUp: true, localKnown: true, agentId: 'agentid', bandwidthLimitMbps: 40, bandwidthLimitScope: 'per-direction'},
+          ...fleetExtras.flatMap(a => a.tunnels.map((t: any) => ({
+            id: t.id, name: t.name, publicPort: t.port, localUp: t.localUp, localKnown: true, agentId: a.agentId,
+            bandwidthLimitMbps: t.bandwidthLimitMbps ?? 0, bandwidthLimitScope: t.bandwidthLimitScope ?? '',
+          })))]
+        : [])
+      : [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true}]
+    const gwConns = gw
+      ? (state.linkUp
+        ? [...state.conns.map((c: any) => ({...c, agentId: 'agentid'})),
+          ...fleetExtras.flatMap(a => a.conns.map(c => ({...c, agentId: a.agentId})))]
+        : [])
+      : (state.linkUp ? state.conns : [])
+
     return {
     mode: isWizard ? 'wizard' : axisAttached ? 'attached' : 'engine',
     role: isWizard ? '' : state.role,
-    version: '0.1.0-dev', hostname: 'DESKTOP-DEV', pid: 4242, configPath: 'C\\\\Users\\\\you\\\\AppData\\\\Roaming\\\\proxyforward\\\\config.toml',
+    // A real Windows path, escaped once — the config-file row is sized against
+    // exactly this string, so an over-escaped mock would flatter it.
+    version: '0.1.0-dev', hostname: 'DESKTOP-DEV', pid: 4242, configPath: 'C:\\Users\\you\\AppData\\Roaming\\proxyforward\\config.toml',
     linkUp: state.linkUp, rttMillis: state.linkUp ? state.rtt : 0, agentConnected: state.agentConnected,
+    transport: !isWizard && !gw && state.linkUp ? 'quic' : '',
     jitterMillis: jitter,
     packetLossPct: loss,
     healthScore: isWizard ? 'unknown' : healthOf(jitter, loss),
-    peerHostname: isWizard ? '' : isGateway ? 'DESKTOP-DEV' : 'GATEWAY-VPS-01',
-    publicIp: isWizard ? '' : isGateway ? '203.0.113.9' : '84.23.101.7',
-    peerPublicIp: isWizard ? '' : isGateway ? '84.23.101.7' : 'play.example.com',
-    localLanIps: isWizard ? [] : isGateway ? ['10.0.0.5'] : ['192.168.1.24'],
-    peerLanIps: isWizard ? [] : isGateway ? ['192.168.1.24'] : ['10.0.0.5'],
-    tunnels: [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true}],
-    connections: state.linkUp ? state.conns : [],
+    peerHostname: isWizard ? '' : gw ? 'DESKTOP-DEV' : 'GATEWAY-VPS-01',
+    publicIp: isWizard ? '' : gw ? '203.0.113.9' : '84.23.101.7',
+    peerPublicIp: isWizard ? '' : gw ? '84.23.101.7' : 'play.example.com',
+    localLanIps: isWizard ? [] : gw ? ['10.0.0.5'] : ['192.168.1.24'],
+    peerLanIps: isWizard ? [] : gw ? ['192.168.1.24'] : ['10.0.0.5'],
+    agents: gw ? (rosterOld ? undefined : gwAgents) : undefined,
+    tunnels: gwTunnels,
+    connections: gwConns,
     totalBytesIn: state.bytesIn, totalBytesOut: state.bytesOut,
     linkUpSinceMs: isWizard || !state.linkUp ? 0 : LINK_UP_SINCE,
     processStartMs: isWizard ? 0 : PROCESS_START,
-    peerAddr: isWizard ? '' : isGateway ? '84.23.101.7' : 'play.example.com:8474',
+    peerAddr: isWizard ? '' : gw ? '84.23.101.7' : 'play.example.com:8474',
     linkBytesIn: Math.round(state.bytesIn * 1.06) + 2_400_000,
     linkBytesOut: Math.round(state.bytesOut * 1.06) + 3_100_000,
     allTimeBytesIn: Math.round(3.4 * 1024 ** 3) + state.bytesIn,
@@ -591,6 +877,14 @@ export function installDevMock() {
     }
   }
 
+  // A role flip in the mock is the same one-field change it is in the engine:
+  // the config's Role and the status the tick reports. Peers/addresses are
+  // derived from state.role in status(), so they follow automatically.
+  const becomeRole = (r: string) => {
+    config.Role = r
+    state.role = r
+  }
+
   const ok = <T,>(v: T) => Promise.resolve(v)
   // Attached mode: a service owns the engine — gated bindings reject exactly
   // like the real backend so the UI's disabled/degraded states can be tested.
@@ -601,6 +895,7 @@ export function installDevMock() {
   const App: Record<string, AnyFn> = {
     Status: () => ok(status()),
     BandwidthHistory: (windowMs: number, maxBuckets: number) => ok(bandwidthHistory(windowMs, maxBuckets)),
+    AgentBandwidthHistory: (agentId: string, windowMs: number, maxBuckets: number) => ok(agentBandwidth(agentId, windowMs, maxBuckets)),
     PeerStats: () => ok(isWizard || axisFresh ? [] : peerStats()),
     // Analytics reads work in attached mode too (they ride the IPC envelope).
     Players: (q: any) => ok(playersPage(q)),
@@ -618,14 +913,66 @@ export function installDevMock() {
     // field + status badge can be exercised.
     BrowseMMDB: (title: string) => ok(/asn/i.test(title) ? 'C:\\maxmind\\GeoLite2-ASN.mmdb' : 'C:\\maxmind\\GeoLite2-City.mmdb'),
     GetConfig: () => ok(config),
-    PairingCode: () => gated(() => 'pf1://play.example.com:8474/3f8a1c9e2b7d4056a1b2c3d4e5f60718#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'),
+    PairingCode: () => gated(() => 'pxf://play.example.com:8474/v1/pair/3f8a1c9e2b7d4056a1b2c3d4e5f60718#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'),
+    // Phase 8 agent management: the roster (ListAgents) + the gateway event ring
+    // (GatewayEvents) are reads (ok); the write bindings are gated and mutate the
+    // mock world (agentOverrides) so the UI updates on the next poll, mirroring
+    // the real write-then-repoll loop.
+    ListAgents: () => ok(listAgents()),
+    GatewayEvents: (sinceSeq: number) => ok(gatewayEvents(sinceSeq)),
+    IssuePairingCode: (_reusable: boolean, _ttlSecs: number, _ports: number[], _tunnels: string[]) =>
+      gated(() => {
+        // Each call mints a fresh enrollment ticket → a different token segment,
+        // so "New code" and the reusable toggle visibly change the shown code.
+        const tok = Array.from({length: 16}, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('')
+        return `pxf://play.example.com:8474/v1/pair/${tok}#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08`
+      }),
+    RenameAgent: (agentId: string, nickname: string) => gated(() => {
+      const o = agentOverrides.get(agentId) ?? {}
+      o.nickname = nickname
+      agentOverrides.set(agentId, o)
+      return undefined
+    }),
+    SetAgentScope: (agentId: string, ports: number[], tunnels: string[]) => gated(() => {
+      const o = agentOverrides.get(agentId) ?? {}
+      o.scopePorts = ports; o.scopeTunnels = tunnels
+      agentOverrides.set(agentId, o)
+      return undefined
+    }),
+    // Rejects when the agent is unknown, exactly as the real RevokeAgent does.
+    RevokeAgent: (agentId: string) => gated(() =>
+      knownAgentIds.has(agentId)
+        ? (() => {
+          const o = agentOverrides.get(agentId) ?? {}
+          o.revoked = true; o.connected = false
+          agentOverrides.set(agentId, o)
+          return undefined
+        })()
+        : Promise.reject(new Error(`agent ${agentId} not found (it may have already disconnected or been removed)`))),
+    // No OS deep link in browser dev; the real app pulls this once on mount to open
+    // straight into pairing when launched via a clicked pxf:// link.
+    TakePendingDeepLink: () => ok(''),
     Version: () => ok('0.1.0-dev'),
     LogsSince: (seq: number) => ok(axisAttached ? [] : logs.filter(l => l.seq > seq)),
     TestReachability: () => new Promise(r => setTimeout(() => r('Reachable: play.example.com:25565 answered in 38ms — players can connect.'), 700)),
-    SetupGateway: () => gated(() => undefined),
-    SetupAgent: () => gated(() => undefined),
+    // Role setup actually flips the mock's role: state.role is read on every
+    // tick, so the whole app (accent ramp, screens, sidebar) swaps live in the
+    // browser with no Go running — which is the only way to exercise the
+    // sidebar's role switcher on both axes.
+    SetupGateway: () => gated(() => { becomeRole('gateway'); return undefined }),
+    SetupAgent: () => gated(() => { becomeRole('agent'); return undefined }),
     SaveTunnels: (t: any) => { config.Agent.Tunnels = t; return ok(undefined) },
-    SaveSettings: () => ok(undefined),
+    SaveSettings: (c: any) => {
+      // The real SaveSettings validates before it writes: an agent with no
+      // pairing token is refused and nothing is persisted (config.go
+      // validateAgent). Mirror that, or the switcher's error path can't be seen.
+      if (c?.Role === 'agent' && !(config.Agent.Token && config.Agent.GatewayHost)) {
+        return Promise.reject(new Error('agent.token: required (pair with a gateway first)'))
+      }
+      if (c?.Role) becomeRole(c.Role)
+      if (c?.Logging) config.Logging = c.Logging
+      return ok(undefined)
+    },
     SetTheme: (t: string) => { config.UI.Theme = t; return ok(undefined) },
     RestartEngine: () => gated(() => undefined),
     RegenerateToken: () => gated(() => undefined),
