@@ -78,6 +78,10 @@ type Gateway struct {
 
 	fingerprint string
 	controlLn   net.Listener
+	// quicLn is the UDP QUIC control listener bound alongside controlLn on the
+	// same port when Gateway.QUICEnabled; nil otherwise. Its Transport and socket
+	// are shared by every QUIC agent session (closed once, on Shutdown).
+	quicLn *transport.QUICListener
 
 	// actor is published by Start while status surfaces (the engine's stats
 	// sampler, the GUI) may already be polling: the reads below genuinely race
@@ -87,10 +91,14 @@ type Gateway struct {
 	authLim *authLimiter
 	gate    *connGate
 	// validator authenticates every hello, on the control accept path and (with
-	// the per-conn data plane) the data accept path. v1 checks the shared token;
-	// swapping it in adds per-agent identity + revocation without touching the
-	// accept paths or the wire.
+	// the per-conn data plane) the data accept path. It is a compositeValidator:
+	// per-agent Ed25519 identity backed by agents, with the shared token as a
+	// migration fallback.
 	validator Validator
+	// agents is the per-agent identity allowlist + outstanding enrollment tickets;
+	// gatewayID is this gateway's derived gw_ display label (from its cert).
+	agents    *AgentStore
+	gatewayID string
 
 	// Conns tracks live proxied connections for the GUI.
 	Conns *conntrack.Registry
@@ -148,6 +156,12 @@ func (g *Gateway) Start(ctx context.Context) error {
 		return err
 	}
 	g.fingerprint = fp
+	g.gatewayID = link.GatewayID(cert.Certificate[0])
+	store, err := LoadAgentStore(g.dir)
+	if err != nil {
+		return err
+	}
+	g.agents = store
 
 	addr := net.JoinHostPort(g.cfg.Gateway.BindAddr, strconv.Itoa(g.cfg.Gateway.ControlPort))
 	ln, err := net.Listen("tcp", addr)
@@ -160,7 +174,14 @@ func (g *Gateway) Start(ctx context.Context) error {
 	g.cancel = cancel
 	g.authLim = newAuthLimiter(g.cfg.Gateway.AuthAttemptsPerMin)
 	g.gate = newConnGate(g.cfg.Gateway.MaxConnsGlobal, g.cfg.Gateway.MaxConnsPerIP)
-	g.validator = sharedTokenValidator{token: g.cfg.Gateway.Token}
+	var shared *sharedTokenValidator
+	if g.cfg.Gateway.AcceptSharedToken {
+		shared = &sharedTokenValidator{token: g.cfg.Gateway.Token}
+	}
+	g.validator = compositeValidator{
+		identity: identityValidator{store: g.agents, now: time.Now},
+		shared:   shared,
+	}
 	a := newActor(g.logger)
 	g.actor.Store(a)
 	g.wg.Add(2)
@@ -172,7 +193,42 @@ func (g *Gateway) Start(ctx context.Context) error {
 		defer g.wg.Done()
 		g.acceptControl(runCtx)
 	}()
+	if g.cfg.Gateway.QUICEnabled {
+		// A QUIC bind failure must never take the gateway down — TCP transports
+		// still serve every agent. Log and carry on with QUIC disabled.
+		if err := g.startQUIC(runCtx, cert); err != nil {
+			g.logger.Error("quic control listener disabled: bind failed", "err", err)
+		}
+	}
 	g.logger.Info("control listener up", "addr", g.controlLn.Addr().String(), "fingerprint", fp)
+	return nil
+}
+
+// startQUIC binds a UDP socket on the TCP control port and starts accepting QUIC
+// agent sessions on it. TCP and UDP port spaces are independent, so the shared
+// port number keeps the pairing code (one host:port) valid for both transports.
+func (g *Gateway) startQUIC(ctx context.Context, cert tls.Certificate) error {
+	port := g.controlLn.Addr().(*net.TCPAddr).Port // resolved even when ControlPort==0
+	udpAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(g.cfg.Gateway.BindAddr, strconv.Itoa(port)))
+	if err != nil {
+		return fmt.Errorf("resolve quic addr: %w", err)
+	}
+	pc, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		return fmt.Errorf("bind quic port: %w", err)
+	}
+	ln, err := transport.ListenQUIC(pc, link.GatewayTLSConfig(cert), &g.linkTotals)
+	if err != nil {
+		pc.Close()
+		return err
+	}
+	g.quicLn = ln
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		g.acceptQUIC(ctx)
+	}()
+	g.logger.Info("quic control listener up", "addr", ln.Addr().String())
 	return nil
 }
 
@@ -181,6 +237,11 @@ func (g *Gateway) Start(ctx context.Context) error {
 func (g *Gateway) Shutdown() {
 	g.cancel()
 	g.controlLn.Close()
+	if g.quicLn != nil {
+		// Joins quic-go's transport goroutines and releases the UDP socket; the
+		// cancel above already unblocked acceptQUIC and every serving ctx.
+		g.quicLn.Close()
+	}
 	g.wg.Wait()
 }
 
@@ -191,6 +252,57 @@ func (g *Gateway) ControlAddr() net.Addr {
 	return g.controlLn.Addr()
 }
 func (g *Gateway) Fingerprint() string { return g.fingerprint }
+
+// GatewayID returns this gateway's derived gw_ display identity (empty before Start).
+func (g *Gateway) GatewayID() string { return g.gatewayID }
+
+// IssuePairingTicket mints a fresh enrollment ticket. reusable=false is single-use
+// (the safe default); a zero exp never expires; scope restricts what the enrolling
+// agent may bind.
+func (g *Gateway) IssuePairingTicket(reusable bool, exp time.Time, scope Scope) (string, error) {
+	if g.agents == nil {
+		return "", fmt.Errorf("gateway not started")
+	}
+	return g.agents.IssueEnrollment(reusable, exp, scope)
+}
+
+// ListAgents returns the per-agent identity allowlist (nil before Start).
+func (g *Gateway) ListAgents() []AgentRecord {
+	if g.agents == nil {
+		return nil
+	}
+	return g.agents.List()
+}
+
+// RevokeAgent removes an agent from the allowlist and immediately evicts any live
+// session it holds, so revocation takes effect at once rather than only on the next
+// connect. Reports whether the agent was found in the allowlist.
+func (g *Gateway) RevokeAgent(agentID string) bool {
+	if g.agents == nil {
+		return false
+	}
+	ok := g.agents.Revoke(agentID)
+	if a := g.act(); a != nil {
+		// One actor hop: read the live session and evict it in the same fn. (Calling
+		// a.session here would nest a.do inside a.do and deadlock.)
+		a.do(func() {
+			if s := a.agents[agentID]; s != nil {
+				a.evict(s, "agent revoked")
+			}
+		})
+	}
+	return ok
+}
+
+// RenameAgent sets an agent's display nickname; SetAgentScope replaces its bind
+// scope. Both report whether the agent was found.
+func (g *Gateway) RenameAgent(agentID, nickname string) bool {
+	return g.agents != nil && g.agents.Rename(agentID, nickname)
+}
+
+func (g *Gateway) SetAgentScope(agentID string, scope Scope) bool {
+	return g.agents != nil && g.agents.SetScope(agentID, scope)
+}
 
 // TunnelPort reports the actual bound public port of a tunnel (0, false if
 // not currently bound). Used by status surfaces and tests.
@@ -471,6 +583,151 @@ func (g *Gateway) acceptControl(ctx context.Context) {
 	}
 }
 
+func (g *Gateway) acceptQUIC(ctx context.Context) {
+	for {
+		sess, err := g.quicLn.Accept(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			g.logger.Error("quic accept failed", "err", err)
+			return
+		}
+		g.wg.Add(1)
+		go func() {
+			defer g.wg.Done()
+			g.handleQUICSession(ctx, sess)
+		}()
+	}
+}
+
+// handleQUICSession walks one accepted QUIC connection through the same pre-auth
+// prologue and admission as handleControlConn, differing only in the transport:
+// the QUIC (and thus TLS) handshake is already complete, so the hello rides the
+// first stream instead of a raw TLS conn, and that same stream becomes the
+// control stream. Pre-auth guards mirror the TCP path — per-IP rate limit, a
+// preAuthTimeout deadline on the hello read, the PreAuthMaxFrame cap — and
+// QUIC's own Retry/address validation covers amplification.
+func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session) {
+	remote := sess.RemoteAddr().String()
+	ip := ipFromAddr(sess.RemoteAddr())
+	logger := g.logger.With("remote", remote, "transport", "quic")
+
+	// --- Pre-auth boundary: rate limit before spending a stream on an unauth peer. ---
+	if !g.authLim.allow(ip) {
+		logger.Debug("pre-auth: rate limited after repeated failures")
+		sess.Close()
+		return
+	}
+	// The agent opens the control stream first; the hello is its first frame.
+	ctrl, err := acceptStreamTimeout(sess, preAuthTimeout)
+	if err != nil {
+		logger.Debug("pre-auth: no control stream", "err", err)
+		g.authLim.fail(ip)
+		sess.Close()
+		return
+	}
+	ctrl.SetReadDeadline(time.Now().Add(preAuthTimeout))
+	env, err := control.ReadMsg(ctrl, control.PreAuthMaxFrame)
+	if err != nil {
+		logger.Debug("pre-auth read failed", "err", err)
+		g.authLim.fail(ip)
+		sess.Close()
+		return
+	}
+	if env.Type != control.TypeHello {
+		logger.Debug("pre-auth: first frame was not hello", "type", env.Type)
+		g.authLim.fail(ip)
+		sess.Close()
+		return
+	}
+	hello, err := control.Decode[control.Hello](env)
+	if err != nil {
+		logger.Debug("pre-auth: bad hello", "err", err)
+		g.authLim.fail(ip)
+		sess.Close()
+		return
+	}
+	if hello.ProtocolVersion != control.ProtocolVersion {
+		control.WriteMsg(ctrl, control.TypeHelloErr, control.HelloErr{
+			Code:    control.ErrCodeVersion,
+			Message: fmt.Sprintf("gateway speaks protocol %d, agent sent %d — update the older side", control.ProtocolVersion, hello.ProtocolVersion),
+		})
+		sess.Close()
+		return
+	}
+	identity, err := g.validator.Validate(hello, g.fingerprint)
+	if err != nil {
+		code, msg, countFail := authErrorReply(err)
+		if countFail {
+			g.authLim.fail(ip)
+		}
+		logger.Warn("agent rejected", "code", code)
+		control.WriteMsg(ctrl, control.TypeHelloErr, control.HelloErr{Code: code, Message: msg})
+		sess.Close()
+		return
+	}
+	// QUIC has no per-conn dial-back — data streams ride this same connection, so
+	// only a control kind is valid; a data hello would have nothing to match.
+	if hello.Kind != control.KindControl {
+		control.WriteMsg(ctrl, control.TypeHelloErr, control.HelloErr{
+			Code:    control.ErrCodeVersion,
+			Message: fmt.Sprintf("connection kind %q not supported over quic", hello.Kind),
+		})
+		sess.Close()
+		return
+	}
+
+	// --- Admission (shared with the TCP path; conn is nil — the session's own
+	// Close is the whole drain boundary). ---
+	admitted, negotiated, err := g.buildAndAdmit(ctx, nil, hello, identity, ip, logger)
+	if err != nil {
+		sess.Close()
+		return
+	}
+	defer g.act().disconnected(admitted)
+	admitted.setSession(sess)
+	defer sess.Close()
+
+	gwHost, _ := os.Hostname()
+	okMsg := control.HelloOK{
+		ProtocolVersion:   control.ProtocolVersion,
+		SessionGeneration: admitted.gen,
+		AppVersion:        version.String(),
+		Capabilities:      negotiated,
+		Hostname:          gwHost,
+		LocalIPs:          netid.LocalIPv4s(),
+		ObservedIP:        ip,
+	}
+	if identity.PubKey != nil {
+		okMsg.AssignedAgentID = identity.AgentID
+		okMsg.GatewayID = g.gatewayID
+		okMsg.ConfigSeedNeeded = g.needsConfigSeed(identity, negotiated)
+	}
+	if err := control.WriteMsg(ctrl, control.TypeHelloOK, okMsg); err != nil {
+		logger.Debug("hello_ok write failed", "err", err)
+		return
+	}
+	ctrl.SetReadDeadline(time.Time{}) // pre-auth over; liveness moves to the control stream
+
+	g.serveAdmitted(ctx, admitted, ctrl, hello, negotiated)
+}
+
+// authErrorReply maps a validator error to a hello error code, a user-facing
+// message, and whether it counts as a failed credential for the per-IP limiter.
+func authErrorReply(err error) (code, msg string, countFail bool) {
+	switch {
+	case errors.Is(err, ErrRevoked):
+		return control.ErrCodeRevoked, "this gateway revoked this agent — re-pair with a fresh code", true
+	case errors.Is(err, ErrTicketUnknown), errors.Is(err, ErrTicketConsumed), errors.Is(err, ErrTicketExpired):
+		return control.ErrCodeBadToken, err.Error(), true
+	case errors.Is(err, ErrMissingAgentID):
+		return control.ErrCodeBadToken, "hello is missing agentId", false
+	default: // ErrBadToken and anything unexpected
+		return control.ErrCodeBadToken, "invalid token — re-pair with the gateway's current pairing code", true
+	}
+}
+
 // handleControlConn walks one agent connection through the pre-auth
 // prologue, admission, and then serves its control stream until the session
 // dies.
@@ -514,25 +771,16 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		conn.Close()
 		return
 	}
-	identity, err := g.validator.Validate(hello)
+	identity, err := g.validator.Validate(hello, g.fingerprint)
 	if err != nil {
-		// A bad token is a credential failure — log it and count it toward the
-		// per-IP auth limiter. A missing agentID is a malformed hello, not a
-		// failed credential, so it does not count.
-		switch {
-		case errors.Is(err, ErrBadToken):
-			logger.Warn("agent rejected: bad token")
+		// A credential failure counts toward the per-IP auth limiter; a malformed
+		// hello (missing agentID) does not.
+		code, msg, countFail := authErrorReply(err)
+		if countFail {
 			g.authLim.fail(ip)
-			control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
-				Code:    control.ErrCodeBadToken,
-				Message: "invalid token — re-pair with the gateway's current pairing code",
-			})
-		case errors.Is(err, ErrMissingAgentID):
-			control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
-				Code:    control.ErrCodeBadToken,
-				Message: "hello is missing agentId",
-			})
 		}
+		logger.Warn("agent rejected", "code", code)
+		control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{Code: code, Message: msg})
 		conn.Close()
 		return
 	}
@@ -554,48 +802,29 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 	}
 
 	// --- Admission: supersede same agentID, admit distinct agents alongside. ---
-	negotiated := control.IntersectCaps(hello.Capabilities, control.SupportedCapabilities)
-	// Session ctx: a child of the serving ctx, cancelled on eviction so throttled
-	// splices unblock per-agent (evict) and on shutdown (parent).
-	sctx, cancel := context.WithCancel(ctx)
-	sess := &agentSession{
-		agentID:     identity.AgentID,
-		conn:        conn,
-		logger:      logger.With("agent", hello.AgentID),
-		connectedAt: time.Now(),
-		remoteIP:    ip,
-		hostname:    hello.Hostname,
-		localIPs:    hello.LocalIPs,
-		caps:        control.NewCapSet(negotiated),
-		quality:     linkquality.New(lossWindow),
-		ctx:         sctx,
-		cancel:      cancel,
-	}
-	gen, err := g.act().admit(sess)
+	sess, negotiated, err := g.buildAndAdmit(ctx, conn, hello, identity, ip, logger)
 	if err != nil {
-		// The only admission refusals left are transient — anti-flap dampening
-		// of a same-agentID contest, or a shutting-down gateway. Neither is
-		// fatal: close the connection without a HelloOK so the agent sees a
-		// read error and retries with backoff, rather than stopping. (A fatal
-		// HelloErr like agent_conflict would tell it to give up.)
-		logger.Warn("agent admission deferred", "agent", hello.AgentID, "err", err)
-		cancel() // never entered the map, so evict won't cancel it
 		conn.Close()
 		return
 	}
-	sess.gen = gen
 	defer g.act().disconnected(sess)
 
 	gwHost, _ := os.Hostname()
-	if err := control.WriteMsg(conn, control.TypeHelloOK, control.HelloOK{
-		ProtocolVersion: control.ProtocolVersion,
-		Generation:      gen,
-		AppVersion:      version.String(),
-		Capabilities:    negotiated,
-		Hostname:        gwHost,
-		LocalIPs:        netid.LocalIPv4s(),
-		ObservedIP:      ip,
-	}); err != nil {
+	okMsg := control.HelloOK{
+		ProtocolVersion:   control.ProtocolVersion,
+		SessionGeneration: sess.gen,
+		AppVersion:        version.String(),
+		Capabilities:      negotiated,
+		Hostname:          gwHost,
+		LocalIPs:          netid.LocalIPv4s(),
+		ObservedIP:        ip,
+	}
+	if identity.PubKey != nil {
+		okMsg.AssignedAgentID = identity.AgentID
+		okMsg.GatewayID = g.gatewayID
+		okMsg.ConfigSeedNeeded = g.needsConfigSeed(identity, negotiated)
+	}
+	if err := control.WriteMsg(conn, control.TypeHelloOK, okMsg); err != nil {
 		logger.Debug("hello_ok write failed", "err", err)
 		conn.Close()
 		return
@@ -620,9 +849,91 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		logger.Warn("agent never opened control stream", "err", err)
 		return
 	}
-	sess.logger.Info("agent connected", "generation", gen, "agent_version", hello.AppVersion, "capabilities", negotiated)
+	g.serveAdmitted(ctx, sess, ctrl, hello, negotiated)
+}
+
+// buildAndAdmit intersects capabilities, constructs the agent session, and
+// admits it on the actor. conn may be nil (the QUIC accept path, where the
+// session's own Close is the whole drain boundary). On a transient admission
+// refusal it cancels the session ctx and returns the error, leaving the caller
+// to close its transport without a HelloOK so the agent retries with backoff.
+// The returned session already has gen set.
+// needsConfigSeed reports whether the gateway should ask an enrolled gateway-config
+// agent to seed its tunnel set (send a propose_config). It is true only on first
+// contact, when the gateway holds no authoritative config for this identity yet;
+// afterwards the gateway is the source of truth and pushes, so the agent never
+// volunteers a set (which would race the connect-time push).
+func (g *Gateway) needsConfigSeed(identity Identity, negotiated []string) bool {
+	if identity.PubKey == nil || !control.NewCapSet(negotiated).Has(control.CapGatewayConfig) {
+		return false
+	}
+	_, gen, ok := g.agents.DesiredConfig(identity.AgentID)
+	return ok && gen == 0
+}
+
+// withoutCap returns caps with one capability removed, preserving order. Used to
+// negotiate away a capability the peer offered but this session can't honor.
+func withoutCap(caps []string, drop string) []string {
+	out := caps[:0:0]
+	for _, c := range caps {
+		if c != drop {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func (g *Gateway) buildAndAdmit(ctx context.Context, conn net.Conn, hello *control.Hello, identity Identity, peerIP string, logger *slog.Logger) (*agentSession, []string, error) {
+	negotiated := control.IntersectCaps(hello.Capabilities, control.SupportedCapabilities)
+	// Gateway-authoritative config is keyed to a durable Ed25519 identity, so it is
+	// negotiated only for enrolled agents. A shared-token agent that offered the cap
+	// has it dropped here and keeps the agent-push SyncTunnels path.
+	enrolled := identity.PubKey != nil
+	if !enrolled {
+		negotiated = withoutCap(negotiated, control.CapGatewayConfig)
+	}
+	caps := control.NewCapSet(negotiated)
+	// Session ctx: a child of the serving ctx, cancelled on eviction so throttled
+	// splices unblock per-agent (evict) and on shutdown (parent).
+	sctx, cancel := context.WithCancel(ctx)
+	sess := &agentSession{
+		agentID:     identity.AgentID,
+		scope:       identity.Scope,
+		conn:        conn,
+		logger:      logger.With("agent", hello.AgentID),
+		connectedAt: time.Now(),
+		remoteIP:    peerIP,
+		hostname:    hello.Hostname,
+		localIPs:    hello.LocalIPs,
+		caps:        caps,
+		dp:          g.pickDataPlane(caps),
+		quality:     linkquality.New(lossWindow),
+		ctx:         sctx,
+		cancel:      cancel,
+
+		enrolled:           enrolled,
+		reportedConfigHash: hello.ConfigHash,
+	}
+	sess.agentConfigGen.Store(hello.ConfigGeneration)
+	gen, err := g.act().admit(sess)
+	if err != nil {
+		// The only admission refusals left are transient — anti-flap dampening
+		// of a same-agentID contest, or a shutting-down gateway. Neither is fatal.
+		logger.Warn("agent admission deferred", "agent", hello.AgentID, "err", err)
+		cancel() // never entered the map, so evict won't cancel it
+		return nil, nil, err
+	}
+	sess.gen = gen
+	return sess, negotiated, nil
+}
+
+// serveAdmitted is the shared serving tail for both accept paths: it brackets
+// serveControl with the connected/disconnected log lines. The caller has already
+// published sess.session() and deferred the session teardown + actor disconnect.
+func (g *Gateway) serveAdmitted(ctx context.Context, sess *agentSession, ctrl transport.Stream, hello *control.Hello, negotiated []string) {
+	sess.logger.Info("agent connected", "generation", sess.gen, "agent_version", hello.AppVersion, "capabilities", negotiated)
 	g.serveControl(ctx, sess, ctrl)
-	sess.logger.Info("agent disconnected", "generation", gen)
+	sess.logger.Info("agent disconnected", "generation", sess.gen)
 }
 
 func acceptStreamTimeout(sess transport.Session, d time.Duration) (transport.Stream, error) {
@@ -659,6 +970,12 @@ func (g *Gateway) serveControl(ctx context.Context, sess *agentSession, ctrl tra
 	defer sess.setCtrl(nil)
 	go g.pingLoop(ctx, sess)
 	go g.rttSampler(ctx, sess)
+	// A fresh session starts with no listeners, so an enrolled gateway-config agent
+	// gets its authoritative set reconciled (and pushed on drift) before the read
+	// loop; a legacy/shared-token agent instead pushes its own set via SyncTunnels.
+	if sess.enrolled && sess.Has(control.CapGatewayConfig) {
+		g.pushConfigOnConnect(sess)
+	}
 	for {
 		if ctx.Err() != nil {
 			return
@@ -807,6 +1124,31 @@ func (g *Gateway) handleControlMsg(sess *agentSession, ctrl transport.Stream, en
 		}
 		return write(control.TypeSyncResult, g.syncTunnels(sess, sync))
 
+	case control.TypeProposeConfig:
+		// The agent promotes a local edit (or seeds the gateway on first contact).
+		// Only enrolled gateway-config sessions reach the authoritative store.
+		if !sess.enrolled || !sess.Has(control.CapGatewayConfig) {
+			sess.logger.Warn("ignoring propose_config: not an enrolled gateway-config session")
+			return nil
+		}
+		prop, err := control.Decode[control.ProposeConfig](env)
+		if err != nil {
+			return err
+		}
+		g.adoptProposal(sess, prop.Tunnels)
+		return nil
+
+	case control.TypeConfigAck:
+		// The agent confirms it applied a pushed generation; track it so a later
+		// propose is checked against the right basis.
+		ack, err := control.Decode[control.ConfigAck](env)
+		if err != nil {
+			return err
+		}
+		sess.agentConfigGen.Store(ack.Generation)
+		sess.logger.Debug("agent acked config", "generation", ack.Generation)
+		return nil
+
 	case control.TypeHealth:
 		h, err := control.Decode[control.Health](env)
 		if err != nil {
@@ -830,12 +1172,21 @@ type bindError struct {
 
 // validateSpec checks a tunnel spec against protocol and policy limits; it is
 // shared by the legacy register path and the desired-state sync path.
-func (g *Gateway) validateSpec(spec control.TunnelSpec) *bindError {
+func (g *Gateway) validateSpec(spec control.TunnelSpec, scope Scope) *bindError {
 	if spec.ID == "" || spec.Type != config.TunnelTCP {
 		return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q: only tcp tunnels with an id are supported", spec.Name)}
 	}
 	if spec.PublicPort < 0 || spec.PublicPort > 65535 {
 		return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q: invalid public port %d", spec.Name, spec.PublicPort)}
+	}
+	// Per-agent scope: a scoped agent may bind only its allowed ports/tunnels. An
+	// ephemeral (0) port is gateway-chosen, so it is not port-scoped (mirrors the
+	// PortAllowlist rule below).
+	if spec.PublicPort != 0 && !scope.AllowsPort(spec.PublicPort) {
+		return &bindError{control.ErrCodePortNotAllowed, fmt.Sprintf("port %d is outside this agent's allowed ports", spec.PublicPort)}
+	}
+	if !scope.AllowsTunnel(spec.ID) {
+		return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q is outside this agent's allowed scope", spec.ID)}
 	}
 	if len(g.cfg.Gateway.PortAllowlist) > 0 && spec.PublicPort != 0 {
 		ok := false
@@ -855,7 +1206,7 @@ func (g *Gateway) validateSpec(spec control.TunnelSpec) *bindError {
 // bindTunnel validates a spec and asks the actor to bind its public
 // listener; accepted client conns are spliced onto fresh streams.
 func (g *Gateway) bindTunnel(sess *agentSession, spec control.TunnelSpec) (int, *bindError) {
-	if berr := g.validateSpec(spec); berr != nil {
+	if berr := g.validateSpec(spec, sess.scope); berr != nil {
 		return 0, berr
 	}
 	port, err := g.act().bindTunnel(sess, spec, g.cfg.Gateway.BindAddr, g.handleClient)
@@ -872,7 +1223,7 @@ func (g *Gateway) syncTunnels(sess *agentSession, sync *control.SyncTunnels) con
 	results := make([]control.SyncTunnelResult, 0, len(sync.Tunnels))
 	valid := make([]control.TunnelSpec, 0, len(sync.Tunnels))
 	for _, spec := range sync.Tunnels {
-		if berr := g.validateSpec(spec); berr != nil {
+		if berr := g.validateSpec(spec, sess.scope); berr != nil {
 			sess.logger.Warn("tunnel sync rejected spec", "tunnel", spec.Name, "port", spec.PublicPort, "err", berr.msg)
 			results = append(results, control.SyncTunnelResult{TunnelID: spec.ID, Code: berr.code, Message: berr.msg})
 			continue
@@ -896,6 +1247,98 @@ func (g *Gateway) syncTunnels(sess *agentSession, sync *control.SyncTunnels) con
 	}
 	sess.logger.Info("tunnel set synced", "desired", len(sync.Tunnels), "live", len(valid))
 	return control.SyncResult{Seq: sync.Seq, Results: results}
+}
+
+// validSpecs drops specs that fail validation against the agent's scope/policy,
+// logging each, and returns the survivors — the set actually reconciled onto
+// listeners under gateway-authoritative config.
+func (g *Gateway) validSpecs(sess *agentSession, specs []control.TunnelSpec) []control.TunnelSpec {
+	valid := make([]control.TunnelSpec, 0, len(specs))
+	for _, spec := range specs {
+		if berr := g.validateSpec(spec, sess.scope); berr != nil {
+			sess.logger.Warn("config spec rejected", "tunnel", spec.Name, "port", spec.PublicPort, "err", berr.msg)
+			continue
+		}
+		valid = append(valid, spec)
+	}
+	return valid
+}
+
+// resolvePorts returns specs with each PublicPort replaced by the port the gateway
+// actually bound (from reconcile outcomes), so the stored + pushed config carries
+// concrete ports even when the agent proposed an ephemeral (0) port.
+func resolvePorts(specs []control.TunnelSpec, outcomes []reconcileOutcome) []control.TunnelSpec {
+	bound := make(map[string]int, len(outcomes))
+	for _, o := range outcomes {
+		if o.Err == nil && o.Port != 0 {
+			bound[o.ID] = o.Port
+		}
+	}
+	out := make([]control.TunnelSpec, 0, len(specs))
+	for _, s := range specs {
+		if p, ok := bound[s.ID]; ok {
+			s.PublicPort = p
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// pushConfigOnConnect reconciles the gateway-authoritative tunnel set into this
+// fresh session's listeners and, when the agent's reported view has drifted, pushes
+// the authoritative config so the agent re-syncs. When the gateway holds no config
+// yet (generation 0) it does nothing — the agent seeds it with a propose_config.
+func (g *Gateway) pushConfigOnConnect(sess *agentSession) {
+	stored, gen, ok := g.agents.DesiredConfig(sess.agentID)
+	if !ok || gen == 0 {
+		return // bootstrap: await the agent's seed propose_config
+	}
+	g.act().reconcile(sess, g.validSpecs(sess, stored), g.cfg.Gateway.BindAddr, g.handleClient)
+	hash := control.HashTunnels(stored)
+	if sess.reportedConfigHash == hash && sess.agentConfigGen.Load() == gen {
+		return // agent is already in sync; listeners are (re)bound, nothing to push
+	}
+	if err := sess.writeControl(control.TypePushConfig, control.PushConfig{Generation: gen, Hash: hash, Tunnels: stored}); err != nil {
+		sess.logger.Warn("push_config on connect failed", "err", err)
+		return
+	}
+	sess.logger.Info("pushed authoritative config", "generation", gen, "tunnels", len(stored))
+}
+
+// adoptProposal handles a propose_config from an enrolled gateway-config agent: a
+// promoted local edit, or the seed on first contact. The gateway is authoritative,
+// so a proposal is adopted only when it is based on the current generation (or the
+// gateway holds no config yet); a stale proposal is refused and the authoritative
+// set re-pushed, so config reconciles deterministically instead of last-write-wins.
+func (g *Gateway) adoptProposal(sess *agentSession, proposed []control.TunnelSpec) {
+	stored, storedGen, ok := g.agents.DesiredConfig(sess.agentID)
+	if !ok {
+		return // unknown agent — cannot happen on an enrolled session
+	}
+	if storedGen != 0 && sess.agentConfigGen.Load() != storedGen {
+		sess.logger.Warn("refusing stale config proposal; re-pushing authoritative set",
+			"agent_gen", sess.agentConfigGen.Load(), "gateway_gen", storedGen)
+		hash := control.HashTunnels(stored)
+		_ = sess.writeControl(control.TypePushConfig, control.PushConfig{Generation: storedGen, Hash: hash, Tunnels: stored})
+		return
+	}
+	valid := g.validSpecs(sess, proposed)
+	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.handleClient)
+	if !ran {
+		return // gateway shutting down
+	}
+	resolved := resolvePorts(valid, outcomes)
+	gen, ok := g.agents.AdoptConfig(sess.agentID, resolved)
+	if !ok {
+		return
+	}
+	sess.agentConfigGen.Store(gen)
+	hash := control.HashTunnels(resolved)
+	if err := sess.writeControl(control.TypePushConfig, control.PushConfig{Generation: gen, Hash: hash, Tunnels: resolved}); err != nil {
+		sess.logger.Warn("push_config after propose failed", "err", err)
+		return
+	}
+	sess.logger.Info("adopted proposed config", "generation", gen, "tunnels", len(resolved))
 }
 
 // handleClient runs per accepted public connection: open a stream to the
@@ -933,35 +1376,19 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	entry, closeEntry := g.Conns.Open(sess.agentID, spec.ID, spec.Name, clientConn.RemoteAddr().String(), connID, true)
 	defer closeEntry()
 
-	// Acquire the data leg. Per-conn transport signals the agent to dial back a
-	// dedicated TCP+TLS connection for this player (no cross-player head-of-line
-	// blocking on the gateway↔agent hop); mux transport opens a stream on the
-	// shared session. Either way the leg is a relay.Conn spliced identically
-	// below.
-	var stream relay.Conn
-	if sess.Has(control.CapPerConn) {
-		raw := g.openDataConn(sess, connID)
-		if raw == nil {
-			g.serveOffline(clientConn, spec)
-			return
-		}
-		rc, ok := raw.(relay.Conn)
-		if !ok {
-			raw.Close()
-			return
-		}
-		sess.dataConns.Store(connID, raw)
-		defer sess.dataConns.Delete(connID)
-		stream = rc
-	} else {
-		st, err := mux.OpenStream()
-		if err != nil {
-			sess.logger.Debug("open stream for client failed", "client", clientConn.RemoteAddr().String(), "err", err)
-			g.serveOffline(clientConn, spec)
-			return
-		}
-		stream = st
+	// Acquire the data leg through the session's data plane. Per-conn transport
+	// signals the agent to dial back a dedicated TCP+TLS connection for this
+	// player (no cross-player head-of-line blocking on the gateway↔agent hop);
+	// mux transport opens a stream on the shared session. Either way the leg is a
+	// relay.Conn spliced identically below, and an unavailable leg falls back to
+	// the offline responder.
+	stream, releaseFlow, err := sess.dp.openFlow(sess, connID)
+	if err != nil {
+		sess.logger.Debug("open data leg failed", "client", clientConn.RemoteAddr().String(), "err", err)
+		g.serveOffline(clientConn, spec)
+		return
 	}
+	defer releaseFlow()
 	defer stream.Close()
 
 	stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
