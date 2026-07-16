@@ -621,13 +621,6 @@ func (a *actor) sessions() []*agentSession {
 	return out
 }
 
-// session returns the live session for one agentID, or nil.
-func (a *actor) session(agentID string) *agentSession {
-	var sess *agentSession
-	a.do(func() { sess = a.agents[agentID] })
-	return sess
-}
-
 // TunnelSnapshot is one registered tunnel's live state, for status surfaces.
 type TunnelSnapshot struct {
 	AgentID    string // the agent that registered this tunnel
