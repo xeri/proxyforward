@@ -20,4 +20,6 @@ description: Playbook for UI-only changes to proxyforward's React frontend — p
    escalation trigger.
 6. Gate: `npm run build` (tsc is the only checker), walk the relevant mock axes,
    then spot-check in `wails dev` (WebView2 ≠ your browser: clipboard, native
-   controls, input icons).
+   controls, input icons). The axis walk can be delegated: dispatch the
+   `ui-design-reviewer` agent (`.claude/agents/ui-design-reviewer.md`) to run it
+   out-of-context and report findings.

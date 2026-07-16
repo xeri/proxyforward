@@ -29,6 +29,23 @@ func simulateEngineDeath(a *App, err error) {
 	a.mu.Unlock()
 }
 
+// TestDeepLinkColdStartIntake covers the observable half of the deep-link path: a
+// pxf:// link delivered before the window is up (ctx nil — a cold protocol launch)
+// is stashed and then drained exactly once, so the frontend opens pairing on mount
+// and never re-opens it on a later mount. The warm path emits a Wails event and
+// needs a live runtime context, so it is exercised manually, not here.
+func TestDeepLinkColdStartIntake(t *testing.T) {
+	a := newTestApp()
+	const link = "pxf://gw.example.com:8474/v1/pair/tok#sha256:abc"
+	a.HandleDeepLink(link)
+	if got := a.TakePendingDeepLink(); got != link {
+		t.Fatalf("TakePendingDeepLink = %q, want the stashed link %q", got, link)
+	}
+	if got := a.TakePendingDeepLink(); got != "" {
+		t.Fatalf("second TakePendingDeepLink = %q, want empty (drains once)", got)
+	}
+}
+
 func TestEngineFatalPersistsAcrossTicks(t *testing.T) {
 	a := newTestApp()
 	simulateEngineDeath(a, errors.New("boom"))

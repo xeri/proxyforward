@@ -25,6 +25,13 @@ func Lookup(port int) (Owner, bool) {
 	return lookup(port)
 }
 
+// IsAddrInUse reports whether err is a "port already in use" bind failure
+// (EADDRINUSE / WSAEADDRINUSE), as opposed to a permission or other bind error —
+// so a caller can reassign only genuine port clashes and surface the rest.
+func IsAddrInUse(err error) bool {
+	return isAddrInUse(err)
+}
+
 // DecorateBindError enriches a failed-bind error with the owning process
 // when the failure is a port conflict and an owner can be found.
 func DecorateBindError(port int, err error) error {

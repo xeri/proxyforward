@@ -5,9 +5,11 @@ package agent
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"proxyforward/internal/bwcap"
 	"proxyforward/internal/config"
 	"proxyforward/internal/conntrack"
 	"proxyforward/internal/control"
@@ -49,14 +52,26 @@ const (
 	// positive, and lands well inside controlIdleTimeout).
 	lossWindow  = 32
 	lossTimeout = 2 * pingInterval
+
+	// transportReprobeAfter is how long the auto ladder parks a transport that
+	// failed to connect before trying it again (a network change re-probes
+	// immediately). Long enough that a UDP-blocked network doesn't re-cost a
+	// handshake every reconnect, short enough to recover without a restart.
+	transportReprobeAfter = 5 * time.Minute
 )
 
 // Fatal configuration errors: retrying cannot fix these, so Run returns
 // instead of hammering the gateway.
 var (
-	ErrBadToken      = errors.New("gateway rejected our token — re-pair with the gateway's current pairing code")
-	ErrAgentConflict = errors.New("gateway already has a different agent connected — each gateway serves one agent identity")
+	ErrBadToken = errors.New("gateway rejected our token — re-pair with the gateway's current pairing code")
+	// ErrAgentConflict is retained for back-compat: a current gateway admits
+	// several agents and never sends agent_conflict, but a legacy single-agent
+	// gateway still can, and the agent must treat it as fatal rather than retry.
+	ErrAgentConflict = errors.New("this gateway (older build) already serves a different agent — use a distinct gateway or agent identity")
 	ErrVersion       = errors.New("protocol version mismatch — update the older side")
+	// ErrRevoked: the gateway removed this agent from its per-agent allowlist.
+	// Fatal — retrying cannot fix it; re-pair to enroll a fresh identity.
+	ErrRevoked = errors.New("this gateway revoked this agent — re-pair with a fresh code")
 )
 
 type Agent struct {
@@ -99,26 +114,124 @@ type Agent struct {
 	curSession atomic.Pointer[session]
 
 	// offerCaps overrides the capabilities offered in the hello; nil means
-	// control.SupportedCapabilities. Tests set an explicit empty slice via
-	// SetCapabilityOffer to simulate a legacy agent.
+	// defaultOffer(). Tests set an explicit empty slice via SetCapabilityOffer
+	// to simulate a legacy agent.
 	offerCaps []string
+
+	// activeTransport is the transport the current session is using ("quic" |
+	// "per-conn" | "mux"); "" while down. Under auto mode it reflects the rung
+	// the fallback ladder settled on, so the GUI can show what actually connected.
+	activeTransport atomic.Pointer[string]
+	// transportCooldown tracks transports the auto ladder has parked after a
+	// failed connect (transport → re-probe-after time), guarded by ladderMu.
+	// Cleared on a successful connect of that transport and on network changes.
+	ladderMu          sync.Mutex
+	transportCooldown map[string]time.Time
 
 	// Conns tracks live proxied connections for the GUI.
 	Conns *conntrack.Registry
+
+	// bwLimiters holds each tunnel's shared bandwidth-cap limiters, keyed by
+	// tunnel ID (unique within one agent). Uncapped tunnels resolve to nil.
+	bwLimiters *bwcap.Registry
+
+	// sessionCache lets per-conn data connections resume the control
+	// connection's TLS session, skipping the full handshake on every player
+	// join. Process-lifetime, shared across the control conn and every data
+	// conn. The fingerprint pin runs on full handshakes and is inherited by
+	// resumed ones, so trust is preserved.
+	sessionCache tls.ClientSessionCache
+
+	// dir is the config directory; the agent's long-term Ed25519 identity key
+	// (agent_identity.key) lives here. identOnce guards a one-time load of it.
+	dir       string
+	identOnce sync.Once
+	identPriv ed25519.PrivateKey
+	identPub  ed25519.PublicKey
+	identErr  error
+
+	// configGen is the gateway-authoritative config generation the agent currently
+	// holds (CapGatewayConfig); 0 until the first push. Reported in the hello and
+	// advanced by applyPushedConfig. In-memory in this build — the gateway re-pushes
+	// on reconnect, and disk persistence rides the optional configPersister below.
+	configGen atomic.Uint64
+	// configSeedNeeded is the gateway's hello_ok answer to "should I seed you?": true
+	// only on first contact, when the gateway holds no config for this identity. The
+	// agent seeds iff it is set, so a reconnect never volunteers a set that would race
+	// the gateway's authoritative push. Set per hello, read by registerTunnels.
+	configSeedNeeded atomic.Bool
+	// configPersister, when set by the app, persists a pushed tunnel set + generation
+	// so it survives a restart. nil keeps the pushed set in memory only.
+	configPersister atomic.Pointer[ConfigPersister]
 }
 
-func New(cfg *config.Config, logger *slog.Logger) *Agent {
-	return &Agent{cfg: cfg, logger: logger, Conns: conntrack.NewRegistry()}
+// ConfigPersister persists a gateway-pushed tunnel set and its generation to disk so
+// it survives a restart. The app wires one; with none set the agent keeps the pushed
+// set in memory and the gateway re-pushes on the next reconnect.
+type ConfigPersister func(tunnels []config.Tunnel, generation uint64) error
+
+// SetConfigPersister installs the disk-persistence hook for gateway-pushed config.
+func (a *Agent) SetConfigPersister(fn ConfigPersister) { a.configPersister.Store(&fn) }
+
+func New(cfg *config.Config, dir string, logger *slog.Logger) *Agent {
+	return &Agent{
+		cfg:               cfg,
+		dir:               dir,
+		logger:            logger,
+		Conns:             conntrack.NewRegistry(),
+		bwLimiters:        bwcap.NewRegistry(),
+		sessionCache:      tls.NewLRUClientSessionCache(0),
+		transportCooldown: map[string]time.Time{},
+	}
+}
+
+// identity lazily loads (or generates on first run) the agent's long-term Ed25519
+// identity from its config dir; the public key is the canonical identity the
+// gateway allowlists, and agt_<fingerprint> is derived from it.
+func (a *Agent) identity() (ed25519.PrivateKey, ed25519.PublicKey, error) {
+	a.identOnce.Do(func() {
+		a.identPriv, a.identPub, a.identErr = link.LoadOrCreateIdentity(a.dir)
+	})
+	return a.identPriv, a.identPub, a.identErr
+}
+
+// authFields returns the per-agent identity fields for a hello: the public key, a
+// proof-of-possession signature bound to the gateway's pinned fingerprint, and any
+// pending enrollment ticket. All empty if the identity can't be loaded, so the
+// hello falls back to shared-token auth.
+func (a *Agent) authFields() (pub, sig []byte, ticket string) {
+	priv, pubKey, err := a.identity()
+	if err != nil {
+		a.logger.Warn("agent identity unavailable; using shared token", "err", err)
+		return nil, nil, ""
+	}
+	return pubKey, link.SignAgentAuth(priv, a.cfg.Agent.CertFingerprint), a.cfg.Agent.EnrollTicket
 }
 
 // SetCapabilityOffer overrides the capabilities offered in the hello
-// exchange; nil restores the default (control.SupportedCapabilities) and an
-// explicit empty slice simulates a legacy agent. Call before Run.
+// exchange; nil restores the default (defaultOffer) and an explicit empty
+// slice simulates a legacy agent. Call before Run.
 func (a *Agent) SetCapabilityOffer(caps []string) { a.offerCaps = caps }
 
+// offerFor is the capability set to offer when connecting over a specific
+// transport. It is transport-independent (tunnel-sync + conn-stats + gateway-config)
+// plus per-conn-data only for the per-conn transport — deliberately NOT
+// control.SupportedCapabilities, which would offer per-conn regardless and force
+// it on every agent. QUIC and mux offer no per-conn-data (QUIC rides the mux data
+// plane; the auto ladder computes this per rung). gateway-config is offered by every
+// agent but the gateway negotiates it away unless the agent is enrolled (it is keyed
+// to a durable identity), so a shared-token agent falls back to tunnel-sync.
+func offerFor(transport string) []string {
+	caps := []string{control.CapTunnelSync, control.CapConnStats, control.CapGatewayConfig}
+	if transport == config.TransportPerConn {
+		caps = append(caps, control.CapPerConn)
+	}
+	return caps
+}
+
 // Run is the blocking entrypoint used by the CLI.
-func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
-	return New(cfg, logger).Run(ctx)
+func Run(ctx context.Context, cfg *config.Config, dir string, logger *slog.Logger) error {
+	return New(cfg, dir, logger).Run(ctx)
 }
 
 func (a *Agent) LinkUp() bool     { return a.linkUp.Load() }
@@ -244,7 +357,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if errors.Is(err, ErrBadToken) || errors.Is(err, ErrAgentConflict) || errors.Is(err, ErrVersion) {
+		if errors.Is(err, ErrBadToken) || errors.Is(err, ErrAgentConflict) || errors.Is(err, ErrVersion) || errors.Is(err, ErrRevoked) {
 			a.logger.Error("giving up: configuration problem", "err", err)
 			return err
 		}
@@ -256,105 +369,126 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-netChanged:
 			a.logger.Info("network changed — reconnecting now")
 			backoff.Reset()
+			a.clearAllCooldowns() // a new network may unblock a parked transport (e.g. UDP)
 		case <-ctx.Done():
 			return nil
 		}
 	}
 }
 
-// runSession performs one full connect → serve cycle and returns why the
-// session ended.
-func (a *Agent) runSession(ctx context.Context) error {
+// dialGateway opens a TCP+TLS connection to the gateway's control port: DNS is
+// re-resolved every call, Nagle is off, and the TLS config carries the shared
+// client-session cache so per-conn data connections can resume the control
+// session instead of doing a full handshake per player. Used by runSession for
+// the control conn and by dialBackData for each data conn.
+func (a *Agent) dialGateway(ctx context.Context) (*tls.Conn, error) {
 	addr := net.JoinHostPort(a.cfg.Agent.GatewayHost, strconv.Itoa(a.cfg.Agent.GatewayPort))
-	dialer := &net.Dialer{Timeout: dialTimeout}
-	rawConn, err := dialer.DialContext(ctx, "tcp", addr) // resolves DNS per attempt
+	rawConn, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return fmt.Errorf("dial gateway %s: %w", addr, err)
+		return nil, fmt.Errorf("dial gateway %s: %w", addr, err)
 	}
 	if tcp, ok := rawConn.(*net.TCPConn); ok {
 		tcp.SetNoDelay(true)
 	}
-	conn := tls.Client(rawConn, link.AgentTLSConfig(a.cfg.Agent.CertFingerprint))
-	defer conn.Close()
+	cfg := link.AgentTLSConfig(a.cfg.Agent.CertFingerprint)
+	cfg.ClientSessionCache = a.sessionCache
+	return tls.Client(rawConn, cfg), nil
+}
 
-	// Hello exchange, pre-mux, under one deadline.
-	offer := a.offerCaps
-	if offer == nil {
-		offer = control.SupportedCapabilities
+// runSession performs one full connect → serve cycle and returns why the
+// session ended. It picks a transport-specific connector (each yields an
+// established transport.Session, its control stream, and the negotiated caps),
+// then runs the shared serve tail. The two connectors differ only in where the
+// hello rides: yamux does it pre-mux on the raw TLS conn; QUIC does it on the
+// control stream of an already-handshaked session.
+func (a *Agent) runSession(ctx context.Context) error {
+	if a.cfg.Agent.Transport == config.TransportAuto {
+		return a.runSessionAuto(ctx)
 	}
-	conn.SetDeadline(time.Now().Add(helloTimeout))
-	hn, _ := os.Hostname()
-	err = control.WriteMsg(conn, control.TypeHello, control.Hello{
-		ProtocolVersion: control.ProtocolVersion,
-		Kind:            control.KindControl,
-		AgentID:         a.cfg.Agent.AgentID,
-		Token:           a.cfg.Agent.Token,
-		AppVersion:      version.String(),
-		Capabilities:    offer,
-		Hostname:        hn,
-		LocalIPs:        netid.LocalIPv4s(),
-	})
-	if err != nil {
-		return fmt.Errorf("send hello: %w", err)
-	}
-	env, err := control.ReadMsg(conn, control.PreAuthMaxFrame)
-	if err != nil {
-		return fmt.Errorf("read hello reply: %w", err)
-	}
-	var caps control.CapSet
-	switch env.Type {
-	case control.TypeHelloOK:
-		ok, err := control.Decode[control.HelloOK](env)
-		if err != nil {
+	_, err := a.runSessionWith(ctx, a.cfg.Agent.Transport)
+	return err
+}
+
+// transportPreference is the auto ladder, best-isolation first: QUIC (one UDP
+// connection, per-stream flow control) → per-conn (dedicated TCP per player,
+// works where UDP is blocked) → mux (one TCP, max compatibility).
+var transportPreference = []string{config.TransportQUIC, config.TransportPerConn, config.TransportMux}
+
+// runSessionAuto walks the fallback ladder for one connect cycle. It tries each
+// non-cooled transport in preference order; a transport that *connects* is used
+// (and its session served until it ends, at which point Run backs off and the
+// ladder re-evaluates). A transport that fails to *connect* falls through
+// immediately to the next. The UDP-blocked heuristic: a transport that failed to
+// connect is only cooled once a LATER one succeeds — if every transport fails
+// the link is simply down, so nothing is cooled and the full ladder is retried.
+func (a *Agent) runSessionAuto(ctx context.Context) error {
+	var failedBefore []string
+	var lastErr error
+	for _, tr := range a.ladderOrder() {
+		connected, err := a.runSessionWith(ctx, tr)
+		if connected {
+			a.coolTransports(failedBefore) // the ones UDP/TCP-blocked before this success
+			a.clearCooldown(tr)
 			return err
 		}
-		caps = control.NewCapSet(ok.Capabilities)
-		a.peer.Store(&peerIdentity{hostname: ok.Hostname, localIPs: ok.LocalIPs, observedIP: ok.ObservedIP})
-		a.logger.Info("connected to gateway", "gateway", addr, "generation", ok.Generation, "gateway_version", ok.AppVersion, "gateway_host", ok.Hostname, "observed_ip", ok.ObservedIP, "capabilities", ok.Capabilities)
-	case control.TypeHelloErr:
-		he, err := control.Decode[control.HelloErr](env)
-		if err != nil {
+		if ctx.Err() != nil {
 			return err
 		}
-		switch he.Code {
-		case control.ErrCodeBadToken:
-			return fmt.Errorf("%w (gateway said: %s)", ErrBadToken, he.Message)
-		case control.ErrCodeAgentConflict:
-			return fmt.Errorf("%w (gateway said: %s)", ErrAgentConflict, he.Message)
-		case control.ErrCodeVersion:
-			return fmt.Errorf("%w (gateway said: %s)", ErrVersion, he.Message)
-		default:
-			return fmt.Errorf("gateway refused connection: %s: %s", he.Code, he.Message)
+		if isFatal(err) {
+			return err // bad token/version/conflict — no other transport will help
 		}
-	default:
-		return fmt.Errorf("unexpected reply to hello: %q", env.Type)
+		a.logger.Warn("transport failed to connect — trying next", "transport", tr, "err", err)
+		lastErr = err
+		failedBefore = append(failedBefore, tr)
 	}
-	conn.SetDeadline(time.Time{})
+	return lastErr
+}
 
-	// Count every byte crossing the link from here on (yamux framing and
-	// control chatter included) — the "agent ↔ gateway" hop the GUI shows.
+// runSessionWith performs one connect+serve cycle over a specific transport. The
+// bool reports whether the transport *connected* (got past the hello): false
+// means the caller (the auto ladder) may fall through to another transport; true
+// means the session served and this is a normal disconnect to back off from.
+func (a *Agent) runSessionWith(ctx context.Context, tr string) (bool, error) {
+	// Count every byte crossing the link (framing and control chatter included) —
+	// the "agent ↔ gateway" hop the GUI shows. The counter is live for the whole
+	// session; peer identity is cleared on any exit.
 	sessCounters := &stats.LinkCounters{}
 	a.linkSession.Store(sessCounters)
 	defer a.linkSession.Store(nil)
+	defer a.peer.Store(nil)
 
-	mux, err := transport.NewMuxClient(stats.NewCountingConn(conn, &a.linkTotals, sessCounters))
+	offer := a.offerCaps
+	if offer == nil {
+		offer = offerFor(tr)
+	}
+
+	var (
+		mux  transport.Session
+		ctrl transport.Stream
+		caps control.CapSet
+		err  error
+	)
+	switch tr {
+	case config.TransportQUIC:
+		mux, ctrl, caps, err = a.connectQUIC(ctx, sessCounters, offer)
+	default:
+		mux, ctrl, caps, err = a.connectMux(ctx, sessCounters, offer)
+	}
 	if err != nil {
-		return err
+		return false, err // connect/handshake failed — not serving
 	}
 	defer mux.Close()
-
-	ctrl, err := mux.OpenStream()
-	if err != nil {
-		return fmt.Errorf("open control stream: %w", err)
-	}
 	defer ctrl.Close()
 
-	sess := &session{agent: a, mux: mux, ctrl: ctrl, caps: caps, quality: linkquality.New(lossWindow)}
+	active := tr
+	a.activeTransport.Store(&active)
+	defer a.activeTransport.Store(nil)
+
+	sess := &session{agent: a, mux: mux, ctrl: ctrl, caps: caps, quality: linkquality.New(lossWindow), linkCounters: sessCounters}
 	a.curSession.Store(sess)
 	defer a.curSession.Store(nil)
-	defer a.peer.Store(nil)
 	if err := sess.registerTunnels(); err != nil {
-		return err
+		return true, err // connected, so no fallback; Run backs off
 	}
 	a.linkUp.Store(true)
 	a.linkUpSinceMs.Store(time.Now().UnixMilli())
@@ -362,7 +496,208 @@ func (a *Agent) runSession(ctx context.Context) error {
 		a.linkUp.Store(false)
 		a.linkUpSinceMs.Store(0)
 	}()
-	return sess.serve(ctx)
+	return true, sess.serve(ctx)
+}
+
+// ladderOrder returns the auto preference list with any transport still inside
+// its post-failure cooldown dropped. If everything is cooled (shouldn't happen —
+// mux is never cooled), it returns the full list so a connect is always tried.
+func (a *Agent) ladderOrder() []string {
+	a.ladderMu.Lock()
+	defer a.ladderMu.Unlock()
+	now := time.Now()
+	out := make([]string, 0, len(transportPreference))
+	for _, tr := range transportPreference {
+		if until, cooled := a.transportCooldown[tr]; cooled && now.Before(until) {
+			continue
+		}
+		out = append(out, tr)
+	}
+	if len(out) == 0 {
+		return transportPreference
+	}
+	return out
+}
+
+func (a *Agent) coolTransports(trs []string) {
+	if len(trs) == 0 {
+		return
+	}
+	a.ladderMu.Lock()
+	defer a.ladderMu.Unlock()
+	until := time.Now().Add(transportReprobeAfter)
+	for _, tr := range trs {
+		a.transportCooldown[tr] = until
+		a.logger.Info("cooling transport after failed connect — will re-probe", "transport", tr, "after", transportReprobeAfter)
+	}
+}
+
+func (a *Agent) clearCooldown(tr string) {
+	a.ladderMu.Lock()
+	defer a.ladderMu.Unlock()
+	delete(a.transportCooldown, tr)
+}
+
+// clearAllCooldowns re-arms every transport for an immediate re-probe — called on
+// a network change, where a previously-blocked transport (e.g. UDP) may now work.
+func (a *Agent) clearAllCooldowns() {
+	a.ladderMu.Lock()
+	defer a.ladderMu.Unlock()
+	clear(a.transportCooldown)
+}
+
+// ActiveTransport reports the transport the current session is using ("quic" |
+// "per-conn" | "mux"), or "" while the link is down.
+func (a *Agent) ActiveTransport() string {
+	if p := a.activeTransport.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// isFatal reports whether an error means retrying (on any transport) is futile.
+func isFatal(err error) bool {
+	return errors.Is(err, ErrBadToken) || errors.Is(err, ErrAgentConflict) || errors.Is(err, ErrVersion) || errors.Is(err, ErrRevoked)
+}
+
+// connectMux dials the gateway over TCP+TLS, performs the pre-mux hello exchange
+// on the raw conn, then wraps it in a yamux client session and opens the control
+// stream. The returned session owns the conn (its Close closes it).
+func (a *Agent) connectMux(ctx context.Context, sessCounters *stats.LinkCounters, offer []string) (transport.Session, transport.Stream, control.CapSet, error) {
+	conn, err := a.dialGateway(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	caps, err := a.helloExchange(conn, conn.RemoteAddr().String(), offer)
+	if err != nil {
+		conn.Close()
+		return nil, nil, nil, err
+	}
+	mux, err := transport.NewMuxClient(stats.NewCountingConn(conn, &a.linkTotals, sessCounters))
+	if err != nil {
+		conn.Close()
+		return nil, nil, nil, err
+	}
+	ctrl, err := mux.OpenStream()
+	if err != nil {
+		mux.Close() // closes the underlying conn too
+		return nil, nil, nil, fmt.Errorf("open control stream: %w", err)
+	}
+	return mux, ctrl, caps, nil
+}
+
+// connectQUIC dials the gateway over QUIC (the QUIC handshake carries TLS), opens
+// the control stream, and does the hello exchange on it — the gateway accepts
+// that first stream as the control stream. The returned session owns its UDP
+// socket and transport (its Close closes both).
+func (a *Agent) connectQUIC(ctx context.Context, sessCounters *stats.LinkCounters, offer []string) (transport.Session, transport.Stream, control.CapSet, error) {
+	sess, err := a.dialGatewayQUIC(ctx, sessCounters)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	ctrl, err := sess.OpenStream()
+	if err != nil {
+		sess.Close()
+		return nil, nil, nil, fmt.Errorf("open control stream: %w", err)
+	}
+	caps, err := a.helloExchange(ctrl, sess.RemoteAddr().String(), offer)
+	if err != nil {
+		sess.Close()
+		return nil, nil, nil, err
+	}
+	return sess, ctrl, caps, nil
+}
+
+// dialGatewayQUIC opens a client QUIC connection to the gateway over a fresh
+// ephemeral UDP socket. Nagle has no analogue (QUIC paces itself); DNS is
+// re-resolved inside DialQUIC. One socket carries one session, so both process
+// and per-session link bytes are exact. DialQUIC closes the socket on failure.
+func (a *Agent) dialGatewayQUIC(ctx context.Context, sessCounters *stats.LinkCounters) (transport.Session, error) {
+	udp, err := net.ListenUDP("udp", nil) // ephemeral local socket
+	if err != nil {
+		return nil, fmt.Errorf("quic local socket: %w", err)
+	}
+	addr := net.JoinHostPort(a.cfg.Agent.GatewayHost, strconv.Itoa(a.cfg.Agent.GatewayPort))
+	return transport.DialQUIC(ctx, udp, addr, link.AgentTLSConfig(a.cfg.Agent.CertFingerprint), &a.linkTotals, sessCounters)
+}
+
+// helloConn is the minimal surface the hello exchange needs: it reads and writes
+// frames under one deadline. Both *tls.Conn (mux) and transport.Stream (quic)
+// satisfy it, so a single hello exchange serves both transports.
+type helloConn interface {
+	io.Reader
+	io.Writer
+	SetDeadline(time.Time) error
+}
+
+// helloExchange sends the agent's hello and processes the gateway's reply under
+// one deadline, returning the negotiated capability set. remoteAddr is only for
+// the connected-gateway log line. On success it records the gateway's identity
+// (a.peer) and clears the deadline; a fatal HelloErr maps to a sentinel error so
+// Run stops instead of retry-hammering.
+func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (control.CapSet, error) {
+	rw.SetDeadline(time.Now().Add(helloTimeout))
+	hn, _ := os.Hostname()
+	pub, sig, ticket := a.authFields()
+	// Report our gateway-config view only when offering the capability, so an agent
+	// that doesn't participate sends a hello byte-identical to a legacy peer.
+	var cfgHash string
+	var cfgGen uint64
+	if control.NewCapSet(offer).Has(control.CapGatewayConfig) {
+		cfgHash, cfgGen = a.configState()
+	}
+	if err := control.WriteMsg(rw, control.TypeHello, control.Hello{
+		ProtocolVersion:  control.ProtocolVersion,
+		Kind:             control.KindControl,
+		AgentID:          a.cfg.Agent.AgentID,
+		Token:            a.cfg.Agent.Token,
+		AppVersion:       version.String(),
+		Capabilities:     offer,
+		Hostname:         hn,
+		LocalIPs:         netid.LocalIPv4s(),
+		AgentPubKey:      pub,
+		AgentSig:         sig,
+		EnrollTicket:     ticket,
+		ConfigHash:       cfgHash,
+		ConfigGeneration: cfgGen,
+	}); err != nil {
+		return nil, fmt.Errorf("send hello: %w", err)
+	}
+	env, err := control.ReadMsg(rw, control.PreAuthMaxFrame)
+	if err != nil {
+		return nil, fmt.Errorf("read hello reply: %w", err)
+	}
+	switch env.Type {
+	case control.TypeHelloOK:
+		ok, err := control.Decode[control.HelloOK](env)
+		if err != nil {
+			return nil, err
+		}
+		a.peer.Store(&peerIdentity{hostname: ok.Hostname, localIPs: ok.LocalIPs, observedIP: ok.ObservedIP})
+		a.configSeedNeeded.Store(ok.ConfigSeedNeeded)
+		a.logger.Info("connected to gateway", "gateway", remoteAddr, "generation", ok.SessionGeneration, "gateway_version", ok.AppVersion, "gateway_host", ok.Hostname, "observed_ip", ok.ObservedIP, "capabilities", ok.Capabilities)
+		rw.SetDeadline(time.Time{})
+		return control.NewCapSet(ok.Capabilities), nil
+	case control.TypeHelloErr:
+		he, err := control.Decode[control.HelloErr](env)
+		if err != nil {
+			return nil, err
+		}
+		switch he.Code {
+		case control.ErrCodeBadToken:
+			return nil, fmt.Errorf("%w (gateway said: %s)", ErrBadToken, he.Message)
+		case control.ErrCodeAgentConflict:
+			return nil, fmt.Errorf("%w (gateway said: %s)", ErrAgentConflict, he.Message)
+		case control.ErrCodeVersion:
+			return nil, fmt.Errorf("%w (gateway said: %s)", ErrVersion, he.Message)
+		case control.ErrCodeRevoked:
+			return nil, fmt.Errorf("%w (gateway said: %s)", ErrRevoked, he.Message)
+		default:
+			return nil, fmt.Errorf("gateway refused connection: %s: %s", he.Code, he.Message)
+		}
+	default:
+		return nil, fmt.Errorf("unexpected reply to hello: %q", env.Type)
+	}
 }
 
 // session is one live connection's state and goroutines.
@@ -370,6 +705,10 @@ type session struct {
 	agent *Agent
 	mux   transport.Session
 	ctrl  transport.Stream
+	// ctx is the session's serve ctx, cancelled when the session dies. Each
+	// splice is parented on it so a throttled WaitN unblocks promptly on
+	// teardown instead of waiting out its rate delay.
+	ctx context.Context
 	// caps is the capability set negotiated in the hello exchange; immutable
 	// for the session's lifetime.
 	caps control.CapSet
@@ -384,6 +723,11 @@ type session struct {
 	// probe, when non-nil, is an in-flight on-demand latency measurement that
 	// steals matching pongs; see probe.go.
 	probe atomic.Pointer[linkquality.ProbeCollector]
+
+	// linkCounters counts this session's link bytes — the control conn and
+	// every per-conn data conn — mirrored into a.linkTotals. Without counting
+	// the data conns the GUI's link card would under-report per-conn payload.
+	linkCounters *stats.LinkCounters
 }
 
 // Has reports whether the session negotiated a capability.
@@ -397,17 +741,32 @@ func (s *session) write(msgType string, payload any) error {
 	return control.WriteMsg(s.ctrl, msgType, payload)
 }
 
-// specFromTunnel builds the wire spec the gateway needs; agent-side options
-// (PP2, Minecraft awareness, bandwidth caps) stay local.
+// specFromTunnel builds the wire spec the gateway needs; the bandwidth cap
+// travels so the gateway can throttle its half too, while purely agent-local
+// options (PP2) stay local.
 func specFromTunnel(t config.Tunnel) control.TunnelSpec {
 	return control.TunnelSpec{
-		ID:             t.ID,
-		Name:           t.Name,
-		Type:           t.Type,
-		PublicPort:     t.PublicPort,
-		OfflineMOTD:    t.Options.OfflineMOTD,
-		MinecraftAware: t.Options.MinecraftAware,
+		ID:                  t.ID,
+		Name:                t.Name,
+		Type:                t.Type,
+		PublicPort:          t.PublicPort,
+		OfflineMOTD:         t.Options.OfflineMOTD,
+		MinecraftAware:      t.Options.MinecraftAware,
+		BandwidthLimitMbps:  t.Options.BandwidthLimitMbps,
+		BandwidthLimitScope: t.Options.BandwidthLimitScope,
 	}
+}
+
+// enabledSpecs is the wire form of the enabled tunnels in a set — the shared
+// desired-state payload for SyncTunnels, ProposeConfig, and the hello's config hash.
+func enabledSpecs(tunnels []config.Tunnel) []control.TunnelSpec {
+	specs := make([]control.TunnelSpec, 0, len(tunnels))
+	for _, t := range tunnels {
+		if t.Enabled {
+			specs = append(specs, specFromTunnel(t))
+		}
+	}
+	return specs
 }
 
 // syncTunnels sends the full desired tunnel set in one frame (CapTunnelSync
@@ -415,19 +774,48 @@ func specFromTunnel(t config.Tunnel) control.TunnelSpec {
 // SyncResult carrying per-tunnel outcomes.
 func (s *session) syncTunnels(tunnels []config.Tunnel) error {
 	seq := s.syncSeq.Add(1)
-	specs := make([]control.TunnelSpec, 0, len(tunnels))
+	return s.write(control.TypeSyncTunnels, control.SyncTunnels{Seq: seq, Tunnels: enabledSpecs(tunnels)})
+}
+
+// proposeConfig promotes the agent's local tunnel set to a gateway-authoritative
+// gateway (CapGatewayConfig): a first-contact seed, or a user-promoted edit. The
+// gateway validates, adopts, bumps the generation, and pushes the resolved set back.
+func (s *session) proposeConfig(tunnels []config.Tunnel) error {
+	return s.write(control.TypeProposeConfig, control.ProposeConfig{Tunnels: enabledSpecs(tunnels)})
+}
+
+// configState is the agent's current gateway-config view for a hello: the content
+// hash of its enabled tunnel set and the generation it last applied.
+func (a *Agent) configState() (string, uint64) {
+	return control.HashTunnels(enabledSpecs(a.snapshotTunnels())), a.configGen.Load()
+}
+
+// seedPublicPorts publishes the concrete public ports already recorded in the agent's
+// tunnels, so a gateway-config session that stays in sync (no push) still surfaces
+// them to the GUI without waiting for a frame.
+func (a *Agent) seedPublicPorts(tunnels []config.Tunnel) {
 	for _, t := range tunnels {
-		if t.Enabled {
-			specs = append(specs, specFromTunnel(t))
+		if t.Enabled && t.PublicPort != 0 {
+			a.publicPorts.Store(t.ID, t.PublicPort)
 		}
 	}
-	return s.write(control.TypeSyncTunnels, control.SyncTunnels{Seq: seq, Tunnels: specs})
 }
 
 func (s *session) registerTunnels() error {
 	tunnels := s.agent.snapshotTunnels()
 	if len(tunnels) == 0 {
 		s.agent.logger.Warn("no enabled tunnels in config — connected but idle")
+	}
+	if s.Has(control.CapGatewayConfig) {
+		// Gateway-authoritative: the gateway owns the desired set. It tells us in the
+		// hello_ok whether to seed (first contact); otherwise it reconciles its set and
+		// pushes only on drift, so we just reflect the concrete ports we already hold.
+		if s.agent.configSeedNeeded.Load() {
+			s.agent.logger.Info("seeding gateway with local tunnel set", "enabled", len(enabledSpecs(tunnels)))
+			return s.proposeConfig(tunnels)
+		}
+		s.agent.seedPublicPorts(tunnels)
+		return nil
 	}
 	if s.Has(control.CapTunnelSync) {
 		if err := s.syncTunnels(tunnels); err != nil {
@@ -446,6 +834,12 @@ func (s *session) registerTunnels() error {
 // serve pumps the session until it dies: a reader goroutine dispatches
 // control frames, the main loop drives pings and accepts data streams.
 func (s *session) serve(ctx context.Context) error {
+	// Parent each splice on a ctx cancelled when this session ends, so a
+	// throttled WaitN unblocks promptly on teardown instead of waiting out its
+	// rate delay.
+	sctx, cancel := context.WithCancel(ctx)
+	s.ctx = sctx
+	defer cancel()
 	errCh := make(chan error, 3)
 
 	// Route health transitions to the gateway for this session's lifetime,
@@ -476,7 +870,10 @@ func (s *session) serve(ctx context.Context) error {
 		}
 	}()
 
-	// Data stream acceptor.
+	// Data stream acceptor. Feeds the same handleDataStream sink as the per-conn
+	// dial-back path. Not mode-gated: under per-conn transport the gateway never
+	// opens data streams, so this simply blocks on AcceptStream for the session's
+	// life — left unconditional so a mux-opened stream is always served.
 	go func() {
 		for {
 			st, err := s.mux.AcceptStream()
@@ -582,6 +979,16 @@ func (s *session) handleControlMsg(env *control.Envelope) error {
 		}
 		return nil
 
+	case control.TypePushConfig:
+		// Gateway-authoritative config: replace our enabled set with the gateway's,
+		// then confirm the generation so a later propose is checked against it.
+		pc, err := control.Decode[control.PushConfig](env)
+		if err != nil {
+			return err
+		}
+		s.agent.applyPushedConfig(pc.Tunnels, pc.Generation)
+		return s.write(control.TypeConfigAck, control.ConfigAck{Generation: pc.Generation, Hash: pc.Hash})
+
 	case control.TypeConnStats:
 		cs, err := control.Decode[control.ConnStats](env)
 		if err != nil {
@@ -603,6 +1010,16 @@ func (s *session) handleControlMsg(env *control.Envelope) error {
 		}
 		return nil
 
+	case control.TypeOpenData:
+		od, err := control.Decode[control.OpenData](env)
+		if err != nil {
+			return err
+		}
+		// Dial back a dedicated data connection for this player. Spawn it so a
+		// slow dial never blocks the control reader (which owns liveness).
+		go s.dialBackData(od.ConnID)
+		return nil
+
 	default:
 		s.agent.logger.Debug("ignoring unknown control message", "type", env.Type)
 		return nil
@@ -610,8 +1027,10 @@ func (s *session) handleControlMsg(env *control.Envelope) error {
 }
 
 // handleDataStream serves one proxied client connection: read the OpenConn
-// header, dial the local backend, splice.
-func (s *session) handleDataStream(st transport.Stream) {
+// header, dial the local backend, splice. The leg is a relay.Conn — a mux
+// stream under mux transport, or a byte-counted per-conn data conn under
+// per-conn transport — acquired by the caller (accept loop or dialBackData).
+func (s *session) handleDataStream(st relay.Conn) {
 	defer st.Close()
 	st.SetReadDeadline(time.Now().Add(openConnTimeout))
 	env, err := control.ReadMsg(st, control.MaxFrame)
@@ -656,7 +1075,7 @@ func (s *session) handleDataStream(st transport.Stream) {
 	// connection for control-link RTT reports; an old gateway sends "" and
 	// EntryByConnKey("") already guards. Passed into Open (never written
 	// post-hoc) because the control goroutine reads ConnKey concurrently.
-	entry, closeEntry := s.agent.Conns.Open(tun.ID, tun.Name, oc.ClientAddr, oc.ConnID, false)
+	entry, closeEntry := s.agent.Conns.Open(s.agent.cfg.Agent.AgentID, tun.ID, tun.Name, oc.ClientAddr, oc.ConnID, false)
 	defer closeEntry()
 
 	// Minecraft-aware tunnels sniff the client's login handshake (which flows
@@ -667,10 +1086,57 @@ func (s *session) handleDataStream(st transport.Stream) {
 	if tun.Options.MinecraftAware {
 		src = mcsniff.Tap(st, entry)
 	}
-	if err := relay.Splice(tcp, src, entry.Counters); err != nil {
+	// Splice(local, stream): AToB is local→client (outbound), BToA is
+	// client→local (inbound). Parent on the session ctx so teardown cancels a
+	// throttled WaitN.
+	inbound, outbound := s.agent.bwLimiters.Resolve(tun.ID, tun.Options.BandwidthLimitMbps, tun.Options.BandwidthLimitScope)
+	opts := relay.SpliceOpts{Ctx: s.ctx, LimitAToB: outbound, LimitBToA: inbound}
+	if err := relay.Splice(tcp, src, entry.Counters, opts); err != nil {
 		s.agent.logger.Debug("splice ended with error", "client", oc.ClientAddr, "err", err)
 	}
 	s.agent.logger.Debug("client disconnected", "tunnel", tun.Name, "client", oc.ClientAddr)
+}
+
+// dialBackData opens a fresh KindData connection to the gateway for one player,
+// identified by connID, and serves it like any other data stream. The gateway
+// matches connID to the waiting player, then writes the OpenConn header this
+// reads via handleDataStream. No HelloOK is expected on a data conn — the agent
+// goes straight to reading OpenConn; a rejected dial-back simply fails that
+// read. Per-conn transport only; runs in its own goroutine off the control
+// reader.
+func (s *session) dialBackData(connID string) {
+	conn, err := s.agent.dialGateway(s.ctx)
+	if err != nil {
+		s.agent.logger.Debug("per-conn dial-back failed", "conn_id", connID, "err", err)
+		return
+	}
+	conn.SetDeadline(time.Now().Add(helloTimeout))
+	pub, sig, _ := s.agent.authFields()
+	err = control.WriteMsg(conn, control.TypeHello, control.Hello{
+		ProtocolVersion: control.ProtocolVersion,
+		Kind:            control.KindData,
+		AgentID:         s.agent.cfg.Agent.AgentID,
+		Token:           s.agent.cfg.Agent.Token,
+		ConnID:          connID,
+		AgentPubKey:     pub,
+		AgentSig:        sig,
+	})
+	if err != nil {
+		s.agent.logger.Debug("per-conn data hello failed", "conn_id", connID, "err", err)
+		conn.Close()
+		return
+	}
+	conn.SetDeadline(time.Time{})
+	// Count this data conn's bytes into the session + process link totals, just
+	// as the counting conn under the control mux does. The wrapper preserves
+	// CloseWrite (the inner *tls.Conn has it), so it is a valid relay.Conn.
+	wrapped := stats.NewCountingConn(conn, &s.agent.linkTotals, s.linkCounters)
+	rc, ok := wrapped.(relay.Conn)
+	if !ok {
+		conn.Close()
+		return
+	}
+	s.handleDataStream(rc)
 }
 
 // writeProxyHeader prepends a PROXY protocol v2 header carrying the real

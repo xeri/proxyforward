@@ -1,13 +1,13 @@
 import {ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react'
 import {
   BrowseMMDB, CreatorAvatar, CreatorInfo, FirewallRepair, FirewallStatus, GeoStatus, GetConfig,
-  InstallService, OpenConfigDir, OpenCreatorURL, OpenExternal, RegenerateToken, RestartEngine,
-  SaveSettings, ServiceStatus, UninstallService,
+  InstallService, OpenConfigDir, OpenCreatorURL, OpenExternal, PairingCode, RegenerateToken,
+  RestartEngine, SaveSettings, ServiceStatus, UninstallService,
 } from '../../wailsjs/go/app/App'
 import {config, geo} from '../../wailsjs/go/models'
 import {
-  Badge, Banner, Button, Card, ErrorBanner, Field, FormRow, PageHeader,
-  SegmentedControl, Select, Skeleton, TextInput, Toggle, WarnWash,
+  Badge, Banner, Button, Card, CopyButton, ErrorBanner, Field, FormRow, PageHeader,
+  SegmentedControl, Select, Skeleton, Switch, TextInput, Toggle, WarnWash,
 } from '../components/ui'
 import {ExportSetupRow, ImportSetupFlow} from '../components/SetupBackup'
 import {IconExternal, IconMonitor, IconMoon, IconRefresh, IconSun} from '../components/icons'
@@ -17,6 +17,31 @@ import {fxPref, setFxPref} from '../fx'
 import {MotionPref, useMotion} from '../motion'
 
 type Cfg = config.Config
+
+// Engine defaults, mirrored from internal/config DefaultConfig. Numeric and
+// address fields render an emptied value as a grayed placeholder of the
+// default (never a bare "0"), and save() folds empties back to these so a
+// cleared field can't fail backend validation.
+const DEF = {
+  controlPort: 8474,
+  bindAddr: '0.0.0.0',
+  maxConnsGlobal: 4096,
+  maxConnsPerIP: 32,
+  authAttemptsPerMin: 10,
+  retentionDays: 180,
+  prometheusAddr: '127.0.0.1:9464',
+} as const
+
+/** numStr renders a staged numeric field: 0 means "cleared" and shows as an
+ * empty input so the default placeholder reads through. */
+const numStr = (n: number) => (n > 0 ? String(n) : '')
+
+/** Human labels for the active data-plane transport reported on the tick. */
+const TRANSPORT_LABEL: Record<string, string> = {
+  quic: 'QUIC',
+  'per-conn': 'Per-connection',
+  mux: 'Multiplexed',
+}
 
 type SectionDef = {id: string; label: string}
 
@@ -33,7 +58,6 @@ export function Settings({status}: {status: UIStatus}) {
 
   const sections: SectionDef[] = [
     {id: 'appearance', label: 'Appearance'},
-    {id: 'behavior', label: 'Behavior'},
     {id: 'connection', label: 'Connection'},
     ...(!isAgent ? [{id: 'security', label: 'Security'}] : []),
     {id: 'analytics', label: 'Analytics'},
@@ -81,7 +105,20 @@ export function Settings({status}: {status: UIStatus}) {
   const save = async () => {
     setSaving(true); setErr(''); setNote('')
     try {
-      await SaveSettings(cfg)
+      // Cleared fields staged as 0/'' mean "use the default" — fold them back
+      // before validation so the promise the grayed placeholder makes holds.
+      const out = config.Config.createFrom(JSON.parse(JSON.stringify(cfg)))
+      out.Agent.GatewayPort = out.Agent.GatewayPort || DEF.controlPort
+      out.Gateway.ControlPort = out.Gateway.ControlPort || DEF.controlPort
+      out.Gateway.MaxConnsGlobal = out.Gateway.MaxConnsGlobal || DEF.maxConnsGlobal
+      out.Gateway.MaxConnsPerIP = out.Gateway.MaxConnsPerIP || DEF.maxConnsPerIP
+      out.Gateway.AuthAttemptsPerMin = out.Gateway.AuthAttemptsPerMin || DEF.authAttemptsPerMin
+      out.Analytics.RetentionDays = out.Analytics.RetentionDays || DEF.retentionDays
+      if (out.Metrics.PrometheusEnabled && !out.Metrics.PrometheusAddr.trim()) {
+        out.Metrics.PrometheusAddr = DEF.prometheusAddr
+      }
+      await SaveSettings(out)
+      setCfg(out)
       if (!attached) { try { await RestartEngine() } catch (e) { setErr(String(e)) } }
       refreshGeo()
       setDirty(false)
@@ -118,13 +155,6 @@ export function Settings({status}: {status: UIStatus}) {
             <FxRow />
           </Section>
 
-          <Section id="behavior" title="Behavior" subtitle="How the app lives on this machine.">
-            <Toggle checked={cfg.UI.MinimizeToTray} onChange={v => patch(c => { c.UI.MinimizeToTray = v })}
-              label="Minimize to tray" hint="Keep running in the background when the window closes." />
-            <Toggle checked={cfg.UI.Autostart} onChange={v => patch(c => { c.UI.Autostart = v })}
-              label="Start on login" hint="Launch proxyforward when you sign in to Windows." />
-          </Section>
-
           {isAgent ? (
             <Section id="connection" title="Gateway connection" subtitle="Editable without re-pairing — DNS re-resolves on every reconnect.">
               <div className="grid grid-cols-3 gap-3">
@@ -132,16 +162,23 @@ export function Settings({status}: {status: UIStatus}) {
                   <Field label="Gateway address"><TextInput mono value={cfg.Agent.GatewayHost}
                     onChange={v => patch(c => { c.Agent.GatewayHost = v })} placeholder="play.example.com" /></Field>
                 </div>
-                <Field label="Control port"><TextInput mono value={String(cfg.Agent.GatewayPort)}
+                <Field label="Control port"><TextInput mono value={numStr(cfg.Agent.GatewayPort)} placeholder={String(DEF.controlPort)}
                   onChange={v => patch(c => { c.Agent.GatewayPort = parseInt(v, 10) || 0 })} /></Field>
               </div>
               <div className="mt-3">
-                <Field label="Transport" hint="Per-connection avoids TCP head-of-line blocking on lossy links, at the cost of more outbound connections.">
+                <Field label="Transport" hint="Automatic prefers QUIC — one connection where each player's packet loss can't stall the others — and falls back to per-connection or multiplexed if UDP is blocked. QUIC gives that isolation over a single connection; per-connection gives each player a dedicated connection; multiplexed shares one connection across all players (simplest, but one player's loss stalls everyone).">
                   <Select value={cfg.Agent.Transport} onChange={v => patch(c => { c.Agent.Transport = v })} options={[
-                    {value: 'mux', label: 'Multiplexed (default) — one connection'},
-                    {value: 'per-conn', label: 'Per-connection — one outbound conn per player'},
+                    {value: 'auto', label: 'Automatic (recommended) — prefer QUIC, fall back'},
+                    {value: 'quic', label: 'QUIC — one connection, no head-of-line blocking'},
+                    {value: 'per-conn', label: 'Per-connection — one per player'},
+                    {value: 'mux', label: 'Multiplexed — one shared connection'},
                   ]} />
                 </Field>
+                {status.linkUp && status.transport && (
+                  <div className="mt-1.5 text-xs text-[var(--text-3)]">
+                    Currently connected via <span className="text-[var(--text-2)]">{TRANSPORT_LABEL[status.transport] ?? status.transport}</span>
+                  </div>
+                )}
               </div>
             </Section>
           ) : (
@@ -151,29 +188,36 @@ export function Settings({status}: {status: UIStatus}) {
                   <Field label="Public address" hint="Embedded in pairing codes. A stable DNS name (DDNS is fine) survives IP changes.">
                     <TextInput mono value={cfg.Gateway.PublicHost} onChange={v => patch(c => { c.Gateway.PublicHost = v })} placeholder="play.example.com" /></Field>
                 </div>
-                <Field label="Control port"><TextInput mono value={String(cfg.Gateway.ControlPort)}
+                <Field label="Control port"><TextInput mono value={numStr(cfg.Gateway.ControlPort)} placeholder={String(DEF.controlPort)}
                   onChange={v => patch(c => { c.Gateway.ControlPort = parseInt(v, 10) || 0 })} /></Field>
               </div>
               <div className="mt-3">
                 <Field label="Bind address" hint="0.0.0.0 listens on all interfaces.">
-                  <TextInput mono value={cfg.Gateway.BindAddr} onChange={v => patch(c => { c.Gateway.BindAddr = v })} /></Field>
+                  <TextInput mono value={cfg.Gateway.BindAddr} placeholder={DEF.bindAddr}
+                    onChange={v => patch(c => { c.Gateway.BindAddr = v })} /></Field>
               </div>
             </Section>
           )}
 
           {!isAgent && (
             <Section id="security" title="Security" subtitle="Pairing and abuse limits, enforced at the gateway.">
-              <FormRow label="Pairing token" hint="Rotating it disconnects agents until they re-pair with the new code.">
-                <TokenRotate attached={attached} onDone={reload} />
+              <FormRow
+                label="Pairing token"
+                hint="Anyone who has the pairing code can connect an agent to this gateway — never share it publicly. Rotating it disconnects agents until they re-pair with the new code."
+              >
+                <div className="flex items-center gap-2">
+                  <CopyPairingCode attached={attached} />
+                  <TokenRotate attached={attached} onDone={reload} />
+                </div>
               </FormRow>
               <Divider />
               <div className="pt-1 text-sm font-medium text-[var(--text)]">Abuse limits</div>
               <div className="mt-2 grid grid-cols-3 gap-3">
-                <Field label="Max connections"><TextInput mono value={String(cfg.Gateway.MaxConnsGlobal)}
+                <Field label="Max connections"><TextInput mono value={numStr(cfg.Gateway.MaxConnsGlobal)} placeholder={String(DEF.maxConnsGlobal)}
                   onChange={v => patch(c => { c.Gateway.MaxConnsGlobal = parseInt(v, 10) || 0 })} /></Field>
-                <Field label="Max per client IP"><TextInput mono value={String(cfg.Gateway.MaxConnsPerIP)}
+                <Field label="Max per client IP"><TextInput mono value={numStr(cfg.Gateway.MaxConnsPerIP)} placeholder={String(DEF.maxConnsPerIP)}
                   onChange={v => patch(c => { c.Gateway.MaxConnsPerIP = parseInt(v, 10) || 0 })} /></Field>
-                <Field label="Auth attempts / min"><TextInput mono value={String(cfg.Gateway.AuthAttemptsPerMin)}
+                <Field label="Auth attempts / min"><TextInput mono value={numStr(cfg.Gateway.AuthAttemptsPerMin)} placeholder={String(DEF.authAttemptsPerMin)}
                   onChange={v => patch(c => { c.Gateway.AuthAttemptsPerMin = parseInt(v, 10) || 0 })} /></Field>
               </div>
             </Section>
@@ -182,7 +226,7 @@ export function Settings({status}: {status: UIStatus}) {
           <Section id="analytics" title="Analytics" subtitle="History, player identity, and geo enrichment — everything is stored locally, nothing leaves this machine.">
             <Field label="History retention" hint="How long connection and player history is kept before it's pruned (1–3650 days).">
               <div className="w-40">
-                <TextInput mono value={String(cfg.Analytics.RetentionDays)}
+                <TextInput mono value={numStr(cfg.Analytics.RetentionDays)} placeholder={String(DEF.retentionDays)}
                   onChange={v => patch(c => { c.Analytics.RetentionDays = parseInt(v, 10) || 0 })} />
               </div>
             </Field>
@@ -211,6 +255,12 @@ export function Settings({status}: {status: UIStatus}) {
           </Section>
 
           <Section id="telemetry" title="Telemetry" subtitle="Logging detail and the optional metrics endpoint — everything is stored locally, nothing is sent anywhere.">
+            {/* Both cells are Fields, so the two labels share a baseline, and
+                the switch stands in a box exactly as tall as the Select
+                (--control-h) so it centers on the dropdown instead of floating
+                above it. Pairing a Field with a whole Toggle ROW here — label
+                beside control, nudged by an ad-hoc `items-end pb-1` — is why
+                nothing lined up. */}
             <div className="grid grid-cols-2 gap-3">
               <Field label="Log level">
                 <Select value={cfg.Logging.Level} onChange={v => patch(c => { c.Logging.Level = v })} options={[
@@ -218,16 +268,18 @@ export function Settings({status}: {status: UIStatus}) {
                   {value: 'warn', label: 'Warn'}, {value: 'error', label: 'Error'},
                 ]} />
               </Field>
-              <div className="flex items-end pb-1">
-                <Toggle checked={cfg.Logging.FileEnabled} onChange={v => patch(c => { c.Logging.FileEnabled = v })}
-                  label="Write to log file" />
-              </div>
+              <Field label="Write to log file">
+                <div className="flex h-[var(--control-h)] items-center">
+                  <Switch checked={cfg.Logging.FileEnabled} onChange={v => patch(c => { c.Logging.FileEnabled = v })}
+                    label="Write to log file" />
+                </div>
+              </Field>
             </div>
             <Divider />
             <Toggle checked={cfg.Metrics.PrometheusEnabled} onChange={v => patch(c => { c.Metrics.PrometheusEnabled = v })}
               label="Prometheus endpoint" hint="Expose /metrics for scraping. Off by default." />
             {cfg.Metrics.PrometheusEnabled && (
-              <div className="mt-2"><Field label="Listen address"><TextInput mono value={cfg.Metrics.PrometheusAddr}
+              <div className="mt-2"><Field label="Listen address"><TextInput mono value={cfg.Metrics.PrometheusAddr} placeholder={DEF.prometheusAddr}
                 onChange={v => patch(c => { c.Metrics.PrometheusAddr = v })} /></Field></div>
             )}
           </Section>
@@ -258,7 +310,9 @@ export function Settings({status}: {status: UIStatus}) {
               style={{
                 ['--bleed' as string]: 'var(--accent)',
                 ['--bleed-strength' as string]: '28%',
-                boxShadow: 'inset 0 1px 0 var(--bevel-top), inset 0 -1px 0 var(--bevel-bot), 0 0 0 1px color-mix(in srgb, var(--accent) 40%, var(--border-strong)), 0 12px 48px -12px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow-pop)',
+                // The bevel pair comes from .pf-menu's background bands now —
+                // restating it as inset shadows specks the corners (glass.css).
+                boxShadow: '0 0 0 1px color-mix(in srgb, var(--accent) 40%, var(--border-strong)), 0 12px 48px -12px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow-pop)',
               }}
             >
               <span className="text-sm font-medium text-[var(--text)]">Unsaved changes</span>
@@ -440,6 +494,22 @@ function FxRow() {
   )
 }
 
+/** CopyPairingCode: copies the full pairing code (the string an agent pairs
+ * with — it embeds the token) without having to reveal it on screen. Engine
+ * mode only: attached, the service owns the config and the code isn't
+ * readable from here. */
+function CopyPairingCode({attached}: {attached: boolean}) {
+  const [code, setCode] = useState('')
+  useEffect(() => {
+    if (attached) return
+    let cancelled = false
+    PairingCode().then(c => { if (!cancelled) setCode(c) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [attached])
+  if (attached || !code) return null
+  return <CopyButton text={code} size="sm" label="Copy code" />
+}
+
 function TokenRotate({attached, onDone}: {attached: boolean; onDone: () => void}) {
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState(false)
@@ -486,7 +556,7 @@ function SystemSection({status}: {status: UIStatus}) {
   const s = svcDisplay(svc)
 
   return (
-    <Section id="system" title="System" subtitle="Windows integration and this install's identity.">
+    <Section id="system" title="System" subtitle="Windows integration and where this install lives.">
       <WarnWash on={fw === false}>
         <FormRow label="Firewall rule" hint="Allows inbound player and agent connections.">
           <div className="flex items-center gap-2">
@@ -507,14 +577,19 @@ function SystemSection({status}: {status: UIStatus}) {
         </FormRow>
       </WarnWash>
       <Divider />
-      <FormRow label="Config file">
-        <div className="flex items-center gap-2">
-          <code className="max-w-xs select-text truncate rounded-[var(--r-xs)] bg-[var(--panel-2)] px-2 py-1 font-mono text-xs text-[var(--text-2)]">{status.configPath}</code>
+      {/* Stacked, not a FormRow: FormRow's control side is shrink-0 and this
+          <code> was capped at 24rem inside a 44rem column, so a real Windows
+          path (C:\Users\…\AppData\Roaming\proxyforward\config.toml) still wrapped
+          hard against a needlessly small box. The path gets the whole column;
+          a truncated "…" would read as a bug on a value people paste into a
+          terminal, so it wraps instead. */}
+      <div className="py-2">
+        <div className="text-sm font-medium text-[var(--text)]">Config file</div>
+        <div className="mt-2 flex items-start gap-2">
+          <code className="min-w-0 flex-1 select-text break-all rounded-[var(--r-xs)] bg-[var(--panel-2)] px-2 py-1.5 font-mono text-xs leading-relaxed text-[var(--text-2)]">{status.configPath}</code>
           <Button variant="ghost" size="sm" onClick={() => OpenConfigDir()}><IconExternal size={14} /> Open</Button>
         </div>
-      </FormRow>
-      <Divider />
-      <FormRow label="Version"><span className="text-sm tabular-nums text-[var(--text-2)]">{status.version} · pid {status.pid} · {status.mode}</span></FormRow>
+      </div>
       {err && <div className="mt-2"><ErrorBanner message={err} onDismiss={() => setErr('')} /></div>}
     </Section>
   )
@@ -562,9 +637,13 @@ function AboutSection({status}: {status: UIStatus}) {
             {info.name}
             <IconExternal size={14} className="text-[var(--text-3)] group-hover:text-[var(--accent)]" />
           </button>
-          <div className="mt-0.5 truncate text-xs text-[var(--text-3)]">{info.url} · {status.version}</div>
+          <div className="mt-0.5 truncate text-xs text-[var(--text-3)]">{info.url}</div>
         </div>
       </div>
+      <Divider />
+      <FormRow label="Version">
+        <span className="select-text text-sm tabular-nums text-[var(--text-2)]">{status.version} · pid {status.pid} · {status.mode}</span>
+      </FormRow>
     </Section>
   )
 }

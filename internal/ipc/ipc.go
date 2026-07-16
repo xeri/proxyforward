@@ -97,6 +97,10 @@ type Status struct {
 	// Agent-side fields.
 	LinkUp    bool  `json:"linkUp,omitempty"`
 	RTTMillis int64 `json:"rttMillis,omitempty"`
+	// Transport is the data plane the live agent session settled on ("quic" |
+	// "per-conn" | "mux"); empty while down or on the gateway role. Lets the GUI
+	// show what the auto ladder actually connected over.
+	Transport string `json:"transport,omitempty"`
 
 	// Link quality (agent-side; the gateway reports -1/unknown). Jitter and
 	// packet loss drive the tunnel health badge alongside RTT and uptime.
@@ -120,6 +124,13 @@ type Status struct {
 
 	// Gateway-side fields.
 	AgentConnected bool `json:"agentConnected,omitempty"`
+
+	// Agents is the per-agent link state on a gateway (empty on the agent
+	// role). Sorted by AgentID so the flat legacy Peer* fields (derived from
+	// Agents[0] when there is exactly one) are deterministic. Tunnels and
+	// Connections stay flat and carry agentId, so the GUI groups them per agent
+	// without duplicating them here — keeping Status well under MaxFrame.
+	Agents []AgentStatus `json:"agents,omitempty"`
 
 	Tunnels []TunnelStatus `json:"tunnels,omitempty"`
 
@@ -151,13 +162,44 @@ type Status struct {
 	ConfigPath string `json:"configPath,omitempty"`
 }
 
+// MaxStatusAgents bounds the per-agent link records in a Status frame. With
+// Connections already clamped to MaxStatusConns (~51 KB) and each AgentStatus
+// ~200 bytes, this keeps the whole frame under the 64 KiB MaxFrame even at the
+// cap. Far beyond the "several friends" topology; excess agents are dropped
+// from the status view (they keep serving — only the dashboard row is elided).
+const MaxStatusAgents = 24
+
+// AgentStatus is one connected agent's link state on a gateway: identity, link
+// quality, and tunnel/player counts. The tunnel and connection lists live flat
+// on Status (keyed by agentId) rather than nested here.
+type AgentStatus struct {
+	AgentID       string   `json:"agentId"`
+	Hostname      string   `json:"hostname,omitempty"`
+	LANIPs        []string `json:"lanIps,omitempty"`
+	RemoteIP      string   `json:"remoteIp,omitempty"`
+	LinkUpSinceMs int64    `json:"linkUpSinceMs,omitempty"`
+	RTTMillis     int64    `json:"rttMillis"`
+	JitterMillis  float64  `json:"jitterMillis"`
+	PacketLossPct float64  `json:"packetLossPct"`
+	HealthScore   string   `json:"healthScore"`
+	LinkBytesIn   int64    `json:"linkBytesIn"`
+	LinkBytesOut  int64    `json:"linkBytesOut"`
+	Tunnels       int      `json:"tunnels"` // count of registered tunnels
+	Players       int      `json:"players"` // count of identified players
+}
+
 // TunnelStatus is one tunnel's live state.
 type TunnelStatus struct {
+	AgentID    string `json:"agentId,omitempty"` // owning agent (gateway role)
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	PublicPort int    `json:"publicPort,omitempty"` // confirmed bound port
 	LocalUp    bool   `json:"localUp"`
 	LocalKnown bool   `json:"localKnown"`
+	// BandwidthLimitMbps/Scope surface a tunnel's configured cap read-only (0 =
+	// unlimited); omitempty keeps uncapped tunnels' frames unchanged.
+	BandwidthLimitMbps  int    `json:"bandwidthLimitMbps,omitempty"`
+	BandwidthLimitScope string `json:"bandwidthLimitScope,omitempty"`
 }
 
 // StatusSource produces the current Status snapshot for each request.

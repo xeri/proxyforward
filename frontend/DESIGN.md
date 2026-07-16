@@ -11,20 +11,35 @@ operating a live network. Every design decision is held to these rules:
    - Traffic — *Motion*: the bandwidth graph itself, bare. The graph is the artwork.
    - Analytics — *Time & place*: the world map, huge and bare.
    - Players — *People*: the wall of faces.
+   - Agents (gateway) — *Fleet*: the roster of machine health cards. Frost, never
+     Signal Glass — N equal cards can't each answer the pointer (rule 2). The
+     drill-in borrows Traffic's bare bandwidth hero, scoped to one agent.
    - Settings — *Precision*: no identity surface. IDE-quiet.
    - Activity — *Terminal*: the log well, near-zero decoration.
 
-2. **Glass is a reward, not a default.** The signature material — **Signal
-   Glass** (`.pf-signal`: soft optical distortion, directional reflection,
-   chromatic edge, internal glow, pointer-wake caustics) — appears only on
-   surfaces that represent live network activity. Standard cards
-   (`.pf-card`) are quiet, near-solid panels: one subtle border, one soft
-   shadow, nothing else.
+2. **Everything is glass. The reward is the glass that answers you.**
+   Standard cards (`.pf-card`) are **frost**: heavy blur, low transmission, a
+   milled rim. Controls (`.pf-control`) are thin films. They refract what passes
+   behind them — and that is all they do. The signature material, **Signal
+   Glass** (`.pf-signal`), is the only surface that *reacts*: it is clear where
+   cards are frosted, its rim and surface follow the pointer, caustics drift
+   across it while someone is there, a reflection streak crosses it, and it
+   ignites when the agent connects. One per screen, only on surfaces that
+   represent live network activity.
+   So the hierarchy is no longer *glass vs. not-glass* — it is **behavior**.
+   Never give a card the caustics, the streak, the arc, or the pointer-wake:
+   the moment a second surface answers the pointer, the page has two identity
+   surfaces and rule 1 is broken.
 
 3. **Motion communicates network state, never decoration.** Conduits flow
    when packets flow and stop when the link is down. The pipeline ignites
    when the agent connects. A country pulses when a player joins. Idle UI is
    still UI. Everything gates on `prefersReduced()`.
+   The sole exception is **tactility** — motion that answers the user's own
+   hand: the press, the hover lift, the rubber band at a scroller's end
+   (`frontend/src/rubberband.ts`). It exists to make the instrument feel
+   physical, so it must always be a *reply* to input and must never play on
+   its own.
 
 4. **Color represents signal, not branding.** The role aurora, the Emblem,
    and the role hues are the product's identity — keep them, concentrated.
@@ -38,9 +53,11 @@ operating a live network. Every design decision is held to these rules:
    typography on whitespace, not in boxes. Vary the primitives — hero,
    metric row, divider, chart, list, code block — never card-card-card.
 
-6. **Type contrast over type size.** 26px page titles, 36px for the one hero
-   figure per page, 26px standard metrics, 13.5px body, 11px uppercase
-   tracked labels. The jump between levels is what creates hierarchy.
+6. **Type contrast over type size.** The face is Inter (variable, self-hosted).
+   26px page titles, 36px for the one hero figure per page, 26px standard
+   metrics, 13.5px body, 11px uppercase tracked labels — design-width sizes;
+   `--ui-scale` (tokens.css) steps the whole scale with the viewport. The jump
+   between levels is what creates hierarchy.
 
 7. **Users should remember one composition from every page.** One deliberate
    grid break (the Overview pipeline runs full-bleed), one moment of light,

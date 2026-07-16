@@ -4,7 +4,7 @@ import {
   IconCopy, IconExternal, IconFolder, IconKey, IconMonitor, IconMoon, IconRefresh, IconSun,
 } from './components/icons'
 import {copyText} from './components/ui'
-import {NAV_MAIN, NAV_SETTINGS, NavId} from './nav'
+import {navFor, NavId} from './nav'
 import {UIStatus} from './state'
 import {setThemePref} from './theme'
 
@@ -25,15 +25,22 @@ export type Command = {
   run: (ctx: CommandCtx) => void | Promise<void>
 }
 
-export const COMMANDS: Command[] = [
-  ...[...NAV_MAIN, NAV_SETTINGS].map((n): Command => ({
+/** navCommands: the Navigate section, built from the role's live rail so the
+ * gateway's Agents entry (and its shortcut) appear only for the gateway. */
+export function navCommands(role: string): Command[] {
+  return navFor(role).map((n): Command => ({
     id: `nav-${n.id}`,
     title: `Go to ${n.label}`,
     icon: <n.icon size={15} />,
     kbd: `Ctrl ${n.shortcut}`,
     section: 'Navigate',
     run: ctx => ctx.go(n.id),
-  })),
+  }))
+}
+
+// The static actions/appearance commands; the Navigate section is prepended per
+// role by navCommands() at render time.
+export const COMMANDS: Command[] = [
   {
     id: 'theme-light', title: 'Theme: Light', icon: <IconSun size={15} />, section: 'Appearance',
     run: () => setThemePref('light'),

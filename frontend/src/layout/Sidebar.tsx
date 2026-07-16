@@ -1,7 +1,7 @@
 import {UIStatus} from '../state'
-import {NAV_MAIN, NAV_SETTINGS, NavId, NavItem} from '../nav'
-import {Badge, Kbd} from '../components/ui'
-import {Emblem} from '../components/Emblem'
+import {mainNav, settingsNav, NavId, NavItem} from '../nav'
+import {Kbd} from '../components/ui'
+import {RoleSwitcher} from '../components/RoleSwitcher'
 import {IconServer} from '../components/icons'
 
 // Nav geometry shared by the buttons and the sliding indicator. ITEM_H must
@@ -14,13 +14,18 @@ const GAP = 2
  * The left rail: brand, mode identity, main navigation with a sliding accent
  * pill, Settings pinned at the foot. Shares the title bar's glass sheet.
  */
-export function Sidebar({status, nav, onNav}: {
+export function Sidebar({status, nav, onNav, onPair}: {
   status: UIStatus
   nav: NavId
   onNav: (id: NavId) => void
+  onPair: () => void
 }) {
   const isAgent = status.role === 'agent'
-  const activeIdx = NAV_MAIN.findIndex(n => n.id === nav)
+  // The rail is role-dependent — the gateway carries an extra Agents entry, so
+  // both the buttons and the sliding indicator index into the same filtered list.
+  const nav_main = mainNav(status.role)
+  const nav_settings = settingsNav(status.role)
+  const activeIdx = nav_main.findIndex(n => n.id === nav)
 
   return (
     <div className="flex h-full flex-col">
@@ -33,15 +38,10 @@ export function Sidebar({status, nav, onNav}: {
         <span className="text-[13px] font-semibold tracking-tight">proxyforward</span>
       </div>
 
-      {/* Mode identity anchor: the role's emblem, riding the live accent so
-          a role swap washes through it with the rest of the chrome. */}
-      <div className="mx-3 mt-2 flex items-center gap-2.5 rounded-[var(--r-md)] border border-[color-mix(in_srgb,var(--accent)_22%,var(--border))] bg-[color-mix(in_srgb,var(--accent)_7%,transparent)] px-2.5 py-2 transition-colors duration-500">
-        <Emblem role={isAgent ? 'agent' : 'gateway'} size={26} glow />
-        <span className="text-xs font-semibold tracking-tight">{isAgent ? 'Agent' : 'Gateway'}</span>
-        <span className="ml-auto flex items-center gap-1">
-          {status.mode === 'attached' && <Badge tone="good">Service</Badge>}
-        </span>
-      </div>
+      {/* Mode identity anchor: the role's emblem, riding the live accent so a
+          role swap washes through it with the rest of the chrome — and the
+          control that performs that swap (RoleSwitcher). */}
+      <RoleSwitcher status={status} onPair={onPair} />
 
       <nav className="relative flex-1 px-2 pt-4">
         {/* Sliding active indicator: an internal accent glow, not a solid
@@ -56,14 +56,14 @@ export function Sidebar({status, nav, onNav}: {
           }}
         />
         <div className="relative flex flex-col" style={{gap: GAP}}>
-          {NAV_MAIN.map(item => (
+          {nav_main.map(item => (
             <NavButton key={item.id} item={item} on={nav === item.id} onNav={onNav} />
           ))}
         </div>
       </nav>
 
       <div className="px-2 pb-1">
-        <NavButton item={NAV_SETTINGS} on={nav === 'settings'} onNav={onNav} standalone />
+        <NavButton item={nav_settings} on={nav === 'settings'} onNav={onNav} standalone />
       </div>
 
       <div className="pf-sep mx-2" aria-hidden />
@@ -71,7 +71,11 @@ export function Sidebar({status, nav, onNav}: {
         {status.hostname && (
           <HostPair isAgent={isAgent} self={status.hostname} peer={status.peerHostname || ''} />
         )}
-        <div className="px-1 tabular-nums">v{status.version.replace(/ \(.*\)$/, '')} · pid {status.pid}</div>
+        {/* Belt and braces: the display version is short since the ldflags
+            stamp got trimmed, but never let a surprise string wrap the rail. */}
+        <div className="truncate px-1 tabular-nums" title={`v${status.version} · pid ${status.pid}`}>
+          v{status.version.replace(/ \(.*\)$/, '')} · pid {status.pid}
+        </div>
       </div>
     </div>
   )

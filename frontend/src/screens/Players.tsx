@@ -6,7 +6,7 @@ import {Column, DataTable} from '../components/DataTable'
 import {GeoRank} from '../components/GeoRank'
 import {IconChevronRight, IconClose, IconPlayers, IconSearch} from '../components/icons'
 import {
-  Badge, Button, Card, CopyIcon, EmptyState, LiveDot, MonoChip, Overline, PageHeader, Pill, PillGroup, SegmentedControl, Skeleton,
+  Badge, Button, Card, CopyIcon, EmptyState, LiveDot, MonoChip, Overline, PageHeader, Pill, PillGroup, SegmentedControl, Skeleton, TextInput,
 } from '../components/ui'
 import {useDebounced} from '../hooks'
 import {
@@ -143,14 +143,11 @@ function Wall({status, liveUUIDs, onOpen}: {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <div className="relative">
-            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-3)]"><IconSearch size={14} /></span>
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search names…"
-              aria-label="Search players by name"
-              className="h-8 w-44 rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--input-bg)] pl-8 pr-2.5 text-xs text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-3)] focus:border-[var(--accent)]"
+          <div className="w-44">
+            <TextInput
+              size="sm" icon={<IconSearch size={14} />}
+              value={search} onChange={setSearch}
+              placeholder="Search names…" ariaLabel="Search players by name"
             />
           </div>
           <SegmentedControl<SortKey>

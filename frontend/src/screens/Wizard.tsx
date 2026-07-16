@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from 'react'
-import {GetConfig, PairingCode, SetupAgent, SetupGateway} from '../../wailsjs/go/app/App'
-import {Button, Codebox, CopyButton, ErrorBanner, Field, Spinner, TextInput} from '../components/ui'
+import {GetConfig, IssuePairingCode, SetupAgent, SetupGateway} from '../../wailsjs/go/app/App'
+import {Button, Codebox, CopyButton, Disclosure, ErrorBanner, Field, Spinner, TextInput, Toggle} from '../components/ui'
 import {Emblem} from '../components/Emblem'
 import {ImportSetupFlow} from '../components/SetupBackup'
 import {IconCheck, IconGlobe, IconRefresh, IconServer, IconShield, IconSpark} from '../components/icons'
@@ -57,8 +57,8 @@ export function Wizard({status, onDone}: {status: UIStatus | null; onDone: () =>
   const parsed = useMemo(() => parsePairing(pairing), [pairing])
 
   return (
-    <div className="flex h-full items-center justify-center overflow-y-auto p-6">
-      <div className="pf-stagger w-full max-w-xl">
+    <div className="flex h-full items-center justify-center overflow-y-auto overscroll-y-contain p-6">
+      <div className="pf-stagger w-full max-w-xl" data-band-content>
         {/* Brand hero */}
         <div className="mb-7 text-center">
           <div className="pf-breathe mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-[var(--r-xl)] bg-[var(--accent)] text-[var(--accent-contrast)]">
@@ -143,8 +143,8 @@ export function Wizard({status, onDone}: {status: UIStatus | null; onDone: () =>
                 router and firewall changes happen on the gateway side only.
               </span>
             </div>
-            <Field label="Pairing code" hint="Shown by the gateway right after you set it up. Starts with pf1://">
-              <TextInput value={pairing} onChange={setPairing} placeholder="pf1://host:8474/…#sha256:…" mono autoFocus />
+            <Field label="Pairing code" hint="Shown by the gateway right after you set it up. Starts with pxf://">
+              <TextInput value={pairing} onChange={setPairing} placeholder="pxf://host:8474/v1/pair/…#sha256:…" mono autoFocus />
             </Field>
             {pairing.trim() && (
               parsed
@@ -179,22 +179,31 @@ export function Wizard({status, onDone}: {status: UIStatus | null; onDone: () =>
   )
 }
 
-/** GatewayLive: the gateway is up — hand over the pairing code and listen for
- * the real handshake on the live ticks. */
+/** GatewayLive: the gateway is up — issue a single-use enrollment code, hand it
+ * over, and listen for the real handshake on the live ticks. Each machine gets a
+ * fresh code; the reusable toggle (advanced) trades that for a multi-agent code. */
 function GatewayLive({status, controlPort, onDone}: {
   status: UIStatus | null; controlPort: number; onDone: () => void
 }) {
   const [code, setCode] = useState('')
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [reusable, setReusable] = useState(false)
+  const [gen, setGen] = useState(0)
+
+  // (Re)issue the enrollment ticket on mount, whenever the reusable toggle
+  // flips, and whenever "New code" bumps `gen`. Retries briefly in case the
+  // gateway's listener isn't ready yet, and cancels cleanly on the next issue.
   useEffect(() => {
     let cancelled = false
+    setBusy(true); setCode(''); setErr('')
     const poll = (n: number) => {
-      PairingCode().then(c => { if (!cancelled) setCode(c) })
-        .catch(e => { if (!cancelled) { if (n < 20) setTimeout(() => poll(n + 1), 250); else setErr(String(e)) } })
+      IssuePairingCode(reusable, 600, [], []).then(c => { if (!cancelled) { setCode(c); setBusy(false) } })
+        .catch(e => { if (!cancelled) { if (n < 20) setTimeout(() => poll(n + 1), 250); else { setErr(String(e)); setBusy(false) } } })
     }
     poll(0)
     return () => { cancelled = true }
-  }, [])
+  }, [reusable, gen])
 
   const paired = !!status?.agentConnected
   return (
@@ -203,13 +212,33 @@ function GatewayLive({status, controlPort, onDone}: {
         <IconCheck size={18} /> <span className="font-medium">Gateway is live</span>
       </div>
       <p className="mb-2 text-sm text-[var(--text-2)]">
-        Copy this pairing code and paste it into proxyforward on your Minecraft machine:
+        Copy this one-time pairing code and paste it into proxyforward on your Minecraft machine:
       </p>
       {code
         ? <Codebox text={code} action={<CopyButton text={code} />} />
         : err
-          ? <ErrorBanner message={err} />
+          ? <ErrorBanner message={err} onDismiss={() => setErr('')} />
           : <div className="pf-well px-3 py-2.5 text-sm text-[var(--text-3)]">Generating code…</div>}
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <span className="min-w-0 text-xs text-[var(--text-3)]">
+          {reusable
+            ? 'Reusable — enrolls multiple agents until you revoke it.'
+            : 'Single-use — enrolls one agent, then expires. Valid for 10 minutes.'}
+        </span>
+        <Button variant="ghost" size="sm" onClick={() => setGen(g => g + 1)} disabled={busy}>
+          <IconRefresh size={13} /> New code
+        </Button>
+      </div>
+
+      <div className="mt-3">
+        <Disclosure label="Advanced" hint="Reuse this code for more than one agent">
+          <Toggle
+            checked={reusable} onChange={setReusable}
+            label="Reusable code"
+            hint="Let this code enroll more than one machine. Otherwise it works exactly once, then expires." />
+        </Disclosure>
+      </div>
+
       <ol className="mt-4 space-y-1.5 text-sm text-[var(--text-2)]">
         <li>1. Open proxyforward on the Minecraft machine.</li>
         <li>2. Choose <b>"This hosts Minecraft"</b>.</li>
@@ -320,7 +349,11 @@ function RoleCard({role, title, sub, onClick, onHover}: {
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
       style={{['--hue' as string]: `var(--role-${role})`}}
-      className="group pf-signal p-5 text-left transition-all duration-300 [transition-timing-function:var(--ease-out)] hover:-translate-y-1 hover:shadow-[inset_0_1px_0_var(--bevel-top),inset_0_-1px_0_var(--bevel-bot),0_16px_40px_-16px_color-mix(in_srgb,var(--hue)_40%,transparent)] active:translate-y-0 active:scale-[0.99]"
+      // Hover adds the outer role glow only. It used to re-add the bevel pair as
+      // inset shadows on a .pf-signal surface whose rim ring already carries
+      // them — the exact anti-pattern glass.css warns about, and it specked the
+      // corners on hover at fractional DPI.
+      className="group pf-signal p-5 text-left transition-all duration-300 [transition-timing-function:var(--ease-out)] hover:-translate-y-1 hover:shadow-[0_16px_40px_-16px_color-mix(in_srgb,var(--hue)_40%,transparent)] active:translate-y-0 active:scale-[0.99]"
     >
       <div className="mb-3 inline-flex transition-transform duration-300 group-hover:scale-110">
         <Emblem role={role} fixed size={40} />
@@ -372,7 +405,7 @@ function Panel({children}: {children: React.ReactNode}) {
  * authoritative validation on submit. */
 function parsePairing(s: string): {host: string; port: number} | null {
   const t = s.trim()
-  const m = /^pf1:\/\/(\[[^\]]+\]|[^/:]+):(\d+)\/([^#]+)#sha256:[0-9a-fA-F]{64}$/.exec(t)
+  const m = /^pxf:\/\/(\[[^\]]+\]|[^/:]+):(\d+)\/v1\/pair\/([^/#]+)#sha256:[0-9a-fA-F]{64}$/.exec(t)
   if (!m) return null
   const port = parseInt(m[2], 10)
   if (port < 1 || port > 65535) return null

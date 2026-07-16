@@ -3,8 +3,9 @@ import {flushSync} from 'react-dom'
 import {Shell} from './layout/Shell'
 import {TitleBar} from './layout/TitleBar'
 import {Sidebar} from './layout/Sidebar'
-import {NAV_MAIN, NAV_SETTINGS, NavId} from './nav'
+import {mainNav, navFor, NavId} from './nav'
 import {Overview} from './screens/Overview'
+import {Agents} from './screens/Agents'
 import {Traffic} from './screens/Traffic'
 import {Players} from './screens/Players'
 import {Analytics} from './screens/Analytics'
@@ -16,6 +17,7 @@ import {CommandPalette} from './components/CommandPalette'
 import {Spinner} from './components/ui'
 import {UIStatus, useTick} from './state'
 import {prefersReduced} from './motion'
+import {resetBands} from './rubberband'
 
 const supportsVT = typeof (document as Document & {startViewTransition?: unknown}).startViewTransition === 'function'
 
@@ -73,6 +75,8 @@ export default function App() {
   // Navigate inside a view transition: content morphs, chrome stays pinned.
   const go = (id: NavId) => {
     if (id === nav) return
+    // A bounce still in flight would be captured into the pf-content snapshot.
+    resetBands()
     const doc = document as Document & {startViewTransition?: (cb: () => void) => {finished: Promise<void>}}
     if (!prefersReduced() && doc.startViewTransition) {
       document.documentElement.classList.add('pf-vt-nav')
@@ -83,10 +87,19 @@ export default function App() {
     }
   }
 
-  // Ctrl+K opens the palette; Ctrl+1..6 jump straight to a screen.
+  // A live role switch (RoleSwitcher) can hide the current screen — the agent
+  // has no Agents rail. Fall back to Overview so the console never renders a
+  // screen the role can't reach.
+  useEffect(() => {
+    const role = status?.role || ''
+    if (nav !== 'settings' && !mainNav(role).some(n => n.id === nav)) setNav('overview')
+  }, [status?.role, nav])
+
+  // Ctrl+K opens the palette; Ctrl+1..n jump straight to a screen (the rail is
+  // role-dependent, so the map is derived from the live role).
   const [palette, setPalette] = useState(false)
   useEffect(() => {
-    const items = [...NAV_MAIN, NAV_SETTINGS]
+    const items = navFor(status?.role || '')
     const h = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.altKey || e.metaKey) return
       if (e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette(o => !o); return }
@@ -137,7 +150,11 @@ export default function App() {
   const s = status
   return (
     <Shell
-      sidebar={<Sidebar status={s} nav={nav} onNav={go} />}
+      // onPair reopens setup from the console: the sidebar's role switcher can
+      // always become the gateway, but becoming the agent needs a pairing code
+      // this machine may never have had — that route lands in the wizard's own
+      // pairing flow rather than failing backend validation.
+      sidebar={<Sidebar status={s} nav={nav} onNav={go} onPair={() => setWizardHold(true)} />}
       titlebar={<TitleBar status={s} nav={nav} onPalette={() => setPalette(true)} />}
     >
       {/* The wide adaptive canvas: screens lay out against this container's
@@ -146,11 +163,13 @@ export default function App() {
           not-yet-redesigned screens at their designed width; each redesign
           deletes its own clamp. */}
       <div
+        data-band-content
         className="@container mx-auto w-full max-w-[var(--content-max)] px-[var(--page-pad)] py-6"
         style={{viewTransitionName: 'pf-content'} as CSSProperties}
       >
         <div key={nav} className={supportsVT ? '' : 'pf-page'}>
           {nav === 'overview' && <Overview status={s} onNavigate={go} />}
+          {nav === 'agents' && <Agents status={s} />}
           {nav === 'traffic' && <Traffic status={s} onNavigate={go} />}
           {nav === 'players' && <Players status={s} />}
           {nav === 'analytics' && <Analytics status={s} />}

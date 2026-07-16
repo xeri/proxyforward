@@ -208,26 +208,114 @@ func (r *ring) valid(i int64) bool {
 	return r.buf[r.pos(i)].T == i*r.resMs
 }
 
-// Store owns the tier rings, peer records, and lifetime counters. All methods
-// are safe for concurrent use; a single mutex suffices at these rates.
-type Store struct {
-	mu      sync.Mutex
-	persist Persister // nil = memory-only (persistence unavailable)
-	logger  *slog.Logger
-	tiers   []*ring
-	peers   map[string]*PeerStat
-	life    Lifetime
+// history is one bandwidth-history ring ladder: the tier rings plus the
+// per-tier dirty watermark and this series' sampler baseline. The Store owns
+// one global history (the gateway-wide series) and one per connected agent.
+// Every method assumes the Store mutex is held — the ladder carries no lock of
+// its own.
+type history struct {
+	tiers []*ring
 
 	// lastCurT tracks, per persisted tier, the current bucket's start time at
 	// the last successful save: only buckets at or after it can have changed
 	// since, so the next save skips everything older.
 	lastCurT map[int]int64
 
-	// Sampler baselines: totals are monotonic per engine run; the first
-	// sample only records them, a negative delta re-baselines.
-	baselined                                      bool
-	lastT                                          int64
-	lastAppIn, lastAppOut, lastLinkIn, lastLinkOut int64
+	// Sampler baseline for this series' app-byte totals: monotonic per engine
+	// run; the first sample only records it, a negative delta re-baselines.
+	baselined       bool
+	lastT           int64
+	lastIn, lastOut int64
+
+	// touched is the unix-millis of the last sample, for LRU eviction of the
+	// per-agent histories.
+	touched int64
+}
+
+func newHistory() *history {
+	h := &history{lastCurT: make(map[int]int64)}
+	for _, ts := range tierSpecs {
+		h.tiers = append(h.tiers, newRing(ts.resMs, ts.slots))
+	}
+	return h
+}
+
+// sample folds one reading of the monotonic app-byte totals into tier 0 (which
+// cascades up) and returns the byte deltas plus whether a real delta was
+// produced. advanced is false on the very first sample (baseline only) and on a
+// non-advancing clock, so the caller can gate lifetime accounting on it. Gauges
+// record unknown when unmeasured: players < 0, rttMs <= 0, lossPct < 0.
+func (h *history) sample(now time.Time, appIn, appOut int64, conns, players int, rttMs, lossPct float64) (dIn, dOut int64, advanced bool) {
+	t := now.UnixMilli()
+	h.touched = t
+	if !h.baselined {
+		h.baselined = true
+		h.lastT, h.lastIn, h.lastOut = t, appIn, appOut
+		return 0, 0, false
+	}
+	dt := t - h.lastT
+	if dt <= 0 {
+		return 0, 0, false
+	}
+	dIn = monotonicDelta(appIn, h.lastIn)
+	dOut = monotonicDelta(appOut, h.lastOut)
+	h.lastT, h.lastIn, h.lastOut = t, appIn, appOut
+
+	inRate := float64(dIn) * 1000 / float64(dt)
+	outRate := float64(dOut) * 1000 / float64(dt)
+	c := float64(conns)
+	rtt := -1.0
+	if rttMs > 0 {
+		rtt = rttMs
+	}
+	ply := -1.0
+	if players >= 0 {
+		ply = float64(players)
+	}
+	loss := -1.0
+	if lossPct >= 0 {
+		loss = lossPct
+	}
+	h.add(0, Bucket{
+		T: t, In: dIn, Out: dOut,
+		InO: inRate, InH: inRate, InL: inRate, InC: inRate,
+		OutO: outRate, OutH: outRate, OutL: outRate, OutC: outRate,
+		ConnO: c, ConnH: c, ConnL: c, ConnC: c,
+		RttO: rtt, RttH: rtt, RttL: rtt, RttC: rtt,
+		PlayersO: ply, PlayersH: ply, PlayersL: ply, PlayersC: ply,
+		LossO: loss, LossH: loss, LossL: loss, LossC: loss,
+	})
+	return dIn, dOut, true
+}
+
+// maxAgentHistories bounds the per-agent bandwidth histories a gateway keeps in
+// memory and on disk. The "several friends" topology needs a handful; the cap
+// is a safety valve against a gateway that has cycled through many agent ids.
+const maxAgentHistories = 32
+
+// Store owns the tier histories, peer records, and lifetime counters. All
+// methods are safe for concurrent use; a single mutex suffices at these rates.
+type Store struct {
+	mu      sync.Mutex
+	persist Persister // nil = memory-only (persistence unavailable)
+	logger  *slog.Logger
+
+	// global is the gateway-wide bandwidth history (agent_id "" on disk);
+	// agents holds one history per connected agent, LRU-capped.
+	global *history
+	agents map[string]*history
+
+	// evicted names agent histories dropped from `agents` since the last save
+	// so SaveStats can delete their persisted rrd rows.
+	evicted map[string]struct{}
+
+	peers map[string]*PeerStat
+	life  Lifetime
+
+	// Link-byte baseline for the lifetime counter (the tier histories keep
+	// their own app-byte baselines). Totals are monotonic per engine run.
+	linkBaselined           bool
+	lastLinkIn, lastLinkOut int64
 
 	// upMark is when uptime was last folded into life.UptimeMs.
 	upMark time.Time
@@ -244,13 +332,12 @@ func Open(p Persister, logger *slog.Logger) *Store {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	s := &Store{
-		persist:  p,
-		logger:   logger,
-		peers:    make(map[string]*PeerStat),
-		lastCurT: make(map[int]int64),
-	}
-	for _, ts := range tierSpecs {
-		s.tiers = append(s.tiers, newRing(ts.resMs, ts.slots))
+		persist: p,
+		logger:  logger,
+		global:  newHistory(),
+		agents:  make(map[string]*history),
+		evicted: make(map[string]struct{}),
+		peers:   make(map[string]*PeerStat),
 	}
 	s.load()
 	if s.life.FirstRunMs == 0 {
@@ -282,10 +369,53 @@ func (s *Store) load() {
 		s.peers[p.IP] = &pc
 	}
 	for _, ts := range snap.Tiers {
-		if ts.Tier < 0 || ts.Tier >= len(s.tiers) {
+		h := s.historyForLoad(ts.AgentID)
+		if h == nil || ts.Tier < 0 || ts.Tier >= len(h.tiers) {
 			continue
 		}
-		restoreTier(s.tiers[ts.Tier], ts.Buckets)
+		restoreTier(h.tiers[ts.Tier], ts.Buckets)
+	}
+}
+
+// historyFor returns the history for an agent id ("" = global), or nil if an
+// agent is not tracked. Callers hold s.mu.
+func (s *Store) historyFor(agentID string) *history {
+	if agentID == "" {
+		return s.global
+	}
+	return s.agents[agentID]
+}
+
+// historyForLoad returns the history to restore into, creating the per-agent
+// one on demand (persisted agents are already bounded by the save-time cap).
+func (s *Store) historyForLoad(agentID string) *history {
+	if agentID == "" {
+		return s.global
+	}
+	h := s.agents[agentID]
+	if h == nil {
+		h = newHistory()
+		s.agents[agentID] = h
+	}
+	return h
+}
+
+// evictAgentIfFullLocked drops the least-recently-sampled agent history when the
+// map is at capacity, marking it for rrd deletion on the next save.
+func (s *Store) evictAgentIfFullLocked() {
+	if len(s.agents) < maxAgentHistories {
+		return
+	}
+	var victim string
+	oldest := int64(1<<63 - 1)
+	for id, h := range s.agents {
+		if h.touched < oldest {
+			oldest, victim = h.touched, id
+		}
+	}
+	if victim != "" {
+		delete(s.agents, victim)
+		s.evicted[victim] = struct{}{}
 	}
 }
 
@@ -331,15 +461,27 @@ func (s *Store) snapshotLocked() *SnapshotData {
 	for _, p := range s.peers {
 		snap.Peers = append(snap.Peers, *p)
 	}
+	s.appendTiersLocked(snap, "", s.global)
+	for id, h := range s.agents {
+		s.appendTiersLocked(snap, id, h)
+	}
+	for id := range s.evicted {
+		snap.DeleteAgents = append(snap.DeleteAgents, id)
+	}
+	return snap
+}
+
+// appendTiersLocked adds one history's persisted tiers to snap under agentID.
+func (s *Store) appendTiersLocked(snap *SnapshotData, agentID string, h *history) {
 	for ti, spec := range tierSpecs {
 		if !spec.persist {
 			continue
 		}
-		r := s.tiers[ti]
+		r := h.tiers[ti]
 		if r.cur < 0 {
 			continue
 		}
-		ts := TierSnapshot{Tier: ti, ResMs: r.resMs, DirtyFromT: s.lastCurT[ti]}
+		ts := TierSnapshot{AgentID: agentID, Tier: ti, ResMs: r.resMs, DirtyFromT: h.lastCurT[ti]}
 		floorIdx := r.cur - int64(len(r.buf)) + 1
 		ts.FloorT = max(floorIdx*r.resMs, 0)
 		for i := floorIdx; i <= r.cur; i++ {
@@ -349,7 +491,6 @@ func (s *Store) snapshotLocked() *SnapshotData {
 		}
 		snap.Tiers = append(snap.Tiers, ts)
 	}
-	return snap
 }
 
 // Flush saves the store through the persister and folds accrued uptime into
@@ -379,8 +520,15 @@ func (s *Store) Flush() error {
 	s.mu.Lock()
 	for _, ts := range snap.Tiers {
 		if n := len(ts.Buckets); n > 0 {
-			s.lastCurT[ts.Tier] = ts.Buckets[n-1].T
+			if h := s.historyFor(ts.AgentID); h != nil {
+				h.lastCurT[ts.Tier] = ts.Buckets[n-1].T
+			}
 		}
+	}
+	// The evicted agents' rrd rows are gone now; stop re-requesting their
+	// deletion (a returning agent re-creates a fresh history).
+	for _, id := range snap.DeleteAgents {
+		delete(s.evicted, id)
 	}
 	s.mu.Unlock()
 	return nil
@@ -395,55 +543,41 @@ func (s *Store) Flush() error {
 func (s *Store) Sample(now time.Time, appIn, appOut, linkIn, linkOut int64, conns, players int, rttMs, lossPct float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t := now.UnixMilli()
-	if !s.baselined {
-		s.baselined = true
-		s.lastT, s.lastAppIn, s.lastAppOut, s.lastLinkIn, s.lastLinkOut = t, appIn, appOut, linkIn, linkOut
+	// The global history owns the app-byte baseline and the tier cascade; the
+	// link bytes feed only the lifetime counter and keep their own baseline.
+	dIn, dOut, advanced := s.global.sample(now, appIn, appOut, conns, players, rttMs, lossPct)
+	if !s.linkBaselined {
+		s.linkBaselined = true
+		s.lastLinkIn, s.lastLinkOut = linkIn, linkOut
+	}
+	if !advanced {
 		return
 	}
-	dt := t - s.lastT
-	if dt <= 0 {
-		return
-	}
-	dIn := monotonicDelta(appIn, s.lastAppIn)
-	dOut := monotonicDelta(appOut, s.lastAppOut)
-	dLinkIn := monotonicDelta(linkIn, s.lastLinkIn)
-	dLinkOut := monotonicDelta(linkOut, s.lastLinkOut)
-	s.lastT, s.lastAppIn, s.lastAppOut, s.lastLinkIn, s.lastLinkOut = t, appIn, appOut, linkIn, linkOut
-
 	s.life.BytesIn += dIn
 	s.life.BytesOut += dOut
-	s.life.LinkBytesIn += dLinkIn
-	s.life.LinkBytesOut += dLinkOut
+	s.life.LinkBytesIn += monotonicDelta(linkIn, s.lastLinkIn)
+	s.life.LinkBytesOut += monotonicDelta(linkOut, s.lastLinkOut)
+	s.lastLinkIn, s.lastLinkOut = linkIn, linkOut
+}
 
-	inRate := float64(dIn) * 1000 / float64(dt)
-	outRate := float64(dOut) * 1000 / float64(dt)
-	c := float64(conns)
-	// RTT is a gauge; a non-positive reading (no link, or a role that does not
-	// measure it) records as unknown so it never plots a bogus zero.
-	rtt := -1.0
-	if rttMs > 0 {
-		rtt = rttMs
+// SampleAgent folds one reading of an agent's proxied byte totals and gauges
+// into that agent's bandwidth history (created on demand, LRU-capped). agentID
+// "" is a no-op — the gateway-wide series is Sample's job. Lifetime/link
+// counters are global and are not touched here.
+func (s *Store) SampleAgent(agentID string, now time.Time, appIn, appOut int64, conns, players int, rttMs, lossPct float64) {
+	if agentID == "" {
+		return
 	}
-	// Players and loss are gauges where zero is a real reading; only negative
-	// means unmeasured.
-	ply := -1.0
-	if players >= 0 {
-		ply = float64(players)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h := s.agents[agentID]
+	if h == nil {
+		s.evictAgentIfFullLocked()
+		h = newHistory()
+		s.agents[agentID] = h
+		delete(s.evicted, agentID) // re-created before its rows were deleted
 	}
-	loss := -1.0
-	if lossPct >= 0 {
-		loss = lossPct
-	}
-	s.add(0, Bucket{
-		T: t, In: dIn, Out: dOut,
-		InO: inRate, InH: inRate, InL: inRate, InC: inRate,
-		OutO: outRate, OutH: outRate, OutL: outRate, OutC: outRate,
-		ConnO: c, ConnH: c, ConnL: c, ConnC: c,
-		RttO: rtt, RttH: rtt, RttL: rtt, RttC: rtt,
-		PlayersO: ply, PlayersH: ply, PlayersL: ply, PlayersC: ply,
-		LossO: loss, LossH: loss, LossL: loss, LossC: loss,
-	})
+	h.sample(now, appIn, appOut, conns, players, rttMs, lossPct)
 }
 
 // monotonicDelta treats a shrinking total (engine restart, counter reset) as
@@ -457,8 +591,8 @@ func monotonicDelta(cur, prev int64) int64 {
 
 // add folds a point into tier level; when the tier's current bucket
 // completes, the completed bucket cascades one level up. mu must be held.
-func (s *Store) add(level int, b Bucket) {
-	r := s.tiers[level]
+func (h *history) add(level int, b Bucket) {
+	r := h.tiers[level]
 	idx := b.T / r.resMs
 	switch {
 	case r.cur < 0:
@@ -466,8 +600,8 @@ func (s *Store) add(level int, b Bucket) {
 	case idx > r.cur:
 		completed := r.buf[r.pos(r.cur)]
 		r.start(idx)
-		if level+1 < len(s.tiers) {
-			s.add(level+1, completed)
+		if level+1 < len(h.tiers) {
+			h.add(level+1, completed)
 		}
 	case idx < r.cur:
 		return // clock went backward; drop rather than corrupt the ring
@@ -477,14 +611,32 @@ func (s *Store) add(level int, b Bucket) {
 
 // History returns up to maxBuckets buckets covering the trailing windowMs
 // (0 = everything the store has, from the daily tier). The newest bucket may
-// still be in progress.
+// still be in progress. This is the gateway-wide series.
 func (s *Store) History(windowMs int64, maxBuckets int) HistoryResult {
 	return s.historyAt(time.Now().UnixMilli(), windowMs, maxBuckets)
 }
 
+// historyAt is History on the global series with an injected clock (tests).
 func (s *Store) historyAt(nowMs, windowMs int64, maxBuckets int) HistoryResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.global.historyAt(nowMs, windowMs, maxBuckets)
+}
+
+// AgentHistory is History scoped to one agent's series; an unknown agent (never
+// sampled, or evicted from the LRU) yields an empty result.
+func (s *Store) AgentHistory(agentID string, windowMs int64, maxBuckets int) HistoryResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h := s.agents[agentID]
+	if h == nil {
+		return HistoryResult{Buckets: []Bucket{}}
+	}
+	return h.historyAt(time.Now().UnixMilli(), windowMs, maxBuckets)
+}
+
+// historyAt walks one history's rings; the caller holds s.mu.
+func (h *history) historyAt(nowMs, windowMs int64, maxBuckets int) HistoryResult {
 	if maxBuckets <= 0 || maxBuckets > maxHistoryBuckets {
 		maxBuckets = maxHistoryBuckets
 	}
@@ -495,7 +647,7 @@ func (s *Store) historyAt(nowMs, windowMs int64, maxBuckets int) HistoryResult {
 	)
 	if windowMs <= 0 {
 		// All time: serve the daily tier from its oldest data.
-		r = s.tiers[len(s.tiers)-1]
+		r = h.tiers[len(h.tiers)-1]
 		if r.cur < 0 {
 			return HistoryResult{Buckets: []Bucket{}}
 		}
@@ -509,14 +661,14 @@ func (s *Store) historyAt(nowMs, windowMs int64, maxBuckets int) HistoryResult {
 		startIdx, endIdx = oldest, r.cur
 		windowMs = max(nowMs-oldest*r.resMs, r.resMs)
 	} else {
-		for _, t := range s.tiers {
+		for _, t := range h.tiers {
 			if t.resMs*int64(len(t.buf)) >= windowMs {
 				r = t
 				break
 			}
 		}
 		if r == nil {
-			r = s.tiers[len(s.tiers)-1]
+			r = h.tiers[len(h.tiers)-1]
 		}
 		n := (windowMs + r.resMs - 1) / r.resMs
 		endIdx = nowMs / r.resMs

@@ -2,10 +2,12 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -42,7 +44,7 @@ func TestSpliceFinalBytesSurviveHalfClose(t *testing.T) {
 	clientSide, a := tcpPair(t) // a is one leg of the splice
 	b, serverSide := tcpPair(t) // b is the other leg
 	done := make(chan error, 1)
-	go func() { done <- Splice(a, b, nil) }()
+	go func() { done <- Splice(a, b, nil, SpliceOpts{}) }()
 
 	payload := []byte("Disconnected: server is restarting")
 	if _, err := clientSide.Write(payload); err != nil {
@@ -89,7 +91,7 @@ func TestSpliceBulkIntegrity(t *testing.T) {
 	b, serverSide := tcpPair(t)
 	var counters Counters
 	done := make(chan error, 1)
-	go func() { done <- Splice(a, b, &counters) }()
+	go func() { done <- Splice(a, b, &counters, SpliceOpts{}) }()
 
 	const size = 8 << 20
 	up := make([]byte, size)
@@ -130,7 +132,7 @@ func TestSpliceAbruptClientDeath(t *testing.T) {
 	clientSide, a := tcpPair(t)
 	b, serverSide := tcpPair(t)
 	done := make(chan error, 1)
-	go func() { done <- Splice(a, b, nil) }()
+	go func() { done <- Splice(a, b, nil, SpliceOpts{}) }()
 
 	// Server writes steadily; client dies mid-stream with unread data (RST).
 	go func() {
@@ -152,5 +154,95 @@ func TestSpliceAbruptClientDeath(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("splice leaked after abrupt client death")
 	}
+	serverSide.Close()
+}
+
+// countingLimiter records the total bytes passed to WaitN and never blocks.
+type countingLimiter struct{ total atomic.Int64 }
+
+func (c *countingLimiter) WaitN(_ context.Context, n int) error {
+	c.total.Add(int64(n))
+	return nil
+}
+
+// blockingLimiter parks in WaitN until ctx is cancelled.
+type blockingLimiter struct{}
+
+func (blockingLimiter) WaitN(ctx context.Context, _ int) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestSpliceInvokesLimiterPerDirection: a non-nil limiter must see exactly the
+// bytes flowing in its own direction (distinct sizes catch a swapped mapping).
+func TestSpliceInvokesLimiterPerDirection(t *testing.T) {
+	clientSide, a := tcpPair(t)
+	b, serverSide := tcpPair(t)
+	var counters Counters
+	ab := &countingLimiter{} // a->b == client->server
+	ba := &countingLimiter{} // b->a == server->client
+	done := make(chan error, 1)
+	go func() {
+		done <- Splice(a, b, &counters, SpliceOpts{Ctx: context.Background(), LimitAToB: ab, LimitBToA: ba})
+	}()
+
+	const up = 3 << 20   // client -> server
+	const down = 2 << 20 // server -> client
+	upBuf := make([]byte, up)
+	downBuf := make([]byte, down)
+	rand.Read(upBuf)
+	rand.Read(downBuf)
+
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() { defer wg.Done(); clientSide.Write(upBuf); clientSide.CloseWrite() }()
+	go func() { defer wg.Done(); serverSide.Write(downBuf); serverSide.CloseWrite() }()
+	go func() { defer wg.Done(); io.Copy(io.Discard, serverSide) }()
+	go func() { defer wg.Done(); io.Copy(io.Discard, clientSide) }()
+	wg.Wait()
+
+	if err := <-done; err != nil {
+		t.Fatalf("splice error: %v", err)
+	}
+	if got := ab.total.Load(); got != up {
+		t.Errorf("a->b limiter saw %d bytes, want %d", got, up)
+	}
+	if got := ba.total.Load(); got != down {
+		t.Errorf("b->a limiter saw %d bytes, want %d", got, down)
+	}
+	// The limiter total must match the byte counter for the same direction.
+	if ab.total.Load() != counters.AToB.Load() || ba.total.Load() != counters.BToA.Load() {
+		t.Errorf("limiter/counter mismatch: ab=%d/%d ba=%d/%d",
+			ab.total.Load(), counters.AToB.Load(), ba.total.Load(), counters.BToA.Load())
+	}
+}
+
+// TestSpliceCancelUnblocksThrottledCopy: a copy parked in WaitN must unblock
+// promptly when the parent ctx is cancelled (agent eviction), and the splice
+// returns cleanly (context.Canceled is filtered, not surfaced).
+func TestSpliceCancelUnblocksThrottledCopy(t *testing.T) {
+	clientSide, a := tcpPair(t)
+	b, serverSide := tcpPair(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Splice(a, b, nil, SpliceOpts{Ctx: ctx, LimitAToB: blockingLimiter{}, LimitBToA: blockingLimiter{}})
+	}()
+
+	// Feed each direction a byte so both copies read it and park in WaitN.
+	clientSide.Write([]byte("x"))
+	serverSide.Write([]byte("y"))
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("cancelled splice should return cleanly, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("splice did not unblock after ctx cancel")
+	}
+	clientSide.Close()
 	serverSide.Close()
 }

@@ -53,6 +53,20 @@
   initial-value: rgba(251, 191, 36, 0);
 }
 
+/* The switch's travel is REGISTERED so it resolves to px in getComputedStyle —
+   an unregistered custom property hands JS back its unsubstituted
+   `calc(40px * var(--ui-scale) - ...)` text, not a number. It is the only
+   length ui.tsx's Switch reads: the knob's rest positions are CSS calc()s off
+   the same token, so a drag converts px of pointer travel into a 0→1 fraction
+   and nothing else in the drag math is a literal. That is what stops the seats
+   from desyncing from the track at a --ui-scale step, which is exactly how the
+   old hard-px seats came to overhang a rem-sized track. */
+@property --switch-travel {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 18px;
+}
+
 :root {
   color-scheme: dark;
 
@@ -101,7 +115,7 @@
      through opacity, not shadows — background 0, chrome ~0.52, cards ~0.45,
      inputs/buttons are thin white films over whatever glass they sit on. */
   --glass: rgba(13, 16, 24, 0.52);
-  --glass-card: rgba(16, 19, 27, 0.45);
+  --glass-card: rgba(16, 19, 27, 0.38);
   --input-bg: rgba(255, 255, 255, 0.05);
   --input-bg-hover: rgba(255, 255, 255, 0.08);
   --btn-bg: rgba(255, 255, 255, 0.08);
@@ -114,16 +128,23 @@
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.55);
   --shadow-pop: 0 24px 64px -16px rgba(0, 0, 0, 0.65);
 
-  /* Tier-2 "quiet panel": the standard card material. Near-solid, one subtle
-     border, one soft shadow — no blur, no reflections, no rim. Signal Glass
-     (.pf-signal) is the reward; this is the default that recedes around it. */
-  --card-2-bg: color-mix(in srgb, var(--panel) 88%, transparent);
-  --card-2-border: rgba(255, 255, 255, 0.07);
+  /* Tier-2 "quiet panel": frosted glass. Transmission is deliberately low —
+     the fill carries most of the surface and the heavy blur (--blur-frost)
+     only diffuses what passes behind, so body text stays crisp and the panel
+     still recedes. Signal Glass is the thin, clear, reactive material; this is
+     the frost that refracts and stays put. Its edge is the rim ring
+     (glass.css .pf-card::before), so there is no border token. */
+  --card-2-bg: color-mix(in srgb, var(--panel) 72%, transparent);
   --shadow-card-2: 0 1px 2px rgba(0, 0, 0, 0.25), 0 6px 20px -12px rgba(0, 0, 0, 0.4);
 
-  /* Blur ladder: physical hierarchy through backdrop depth — cards are the
-     thinnest glass, chrome is heavier, floats are the thickest. */
-  --blur-card: 14px;
+  /* Blur ladder: physical hierarchy through backdrop depth. Controls are the
+     thinnest film; Signal Glass is thin and clear (it transmits — you are
+     meant to see the network living behind it); quiet cards are FROSTED, so
+     they blur hardest of the content tiers and let the least through; chrome
+     is heavier still and floats are the thickest. */
+  --blur-control: 10px;
+  --blur-card: 20px;  /* Signal Glass — thin and transmissive */
+  --blur-frost: 30px; /* .pf-card — heavy frost, low transmission */
   --blur-chrome: 36px;
   --blur-island: 40px;
   --blur-float: 48px;
@@ -170,46 +191,100 @@
 
   /* Precision-milled glass: tightly constrained corners — just enough round
      to kill the jaggies, never bubble-soft. rounded-full still survives only
-     on status dots; even toggle knobs are milled (r-sm track, 3px knob). */
+     on status dots; even the toggle knob is milled (--switch-knob-r below). */
   --r-xs: 4px;
   --r-sm: 6px;
   --r-md: 10px; /* inputs, buttons, nav items */
   --r-lg: 14px; /* cards, the titlebar island */
   --r-xl: 18px; /* modals, command palette */
 
-  /* Type scale. Root stays 13.5px (base.css); these are the only sizes new
-     UI should use. Contrast BETWEEN levels is the point — metrics dominate,
-     labels recede. The label recipe: --fs-caption + uppercase +
-     --tracking-label + weight 600 + --text-3. */
-  --fs-hero: 26px;        /* page titles */
-  --fs-title: 18px;       /* section titles, card headlines that ARE sections */
-  --fs-metric-hero: 36px; /* the one hero figure per page */
-  --fs-metric: 26px;      /* standard headline metrics */
-  --fs-body: 13.5px;      /* default */
-  --fs-sub: 12.5px;       /* secondary rows, hints */
-  --fs-caption: 11px;     /* labels, metadata, table headers */
-  --fs-micro: 10px;       /* kbd chips, overlines */
+  /* Resolution scale. One knob: the root em is calc(13.5px * --ui-scale)
+     (base.css), and every type/rhythm token below multiplies by the same
+     factor, so rem utilities and px-defined tokens resize in lockstep.
+     Stepped (not continuous) so text never jiggles during a window resize.
+     Steps target effective CSS width — WebView2 already applies OS DPI
+     scaling on top. JS-coupled geometry (--sidebar-w, --nav-item-h) and the
+     radius/blur/border ladders deliberately do NOT scale. */
+  --ui-scale: 1;
+
+  /* Type scale. Values are the 13.5px-root design sizes; --ui-scale carries
+     them across resolutions. These are the only sizes new UI should use.
+     Contrast BETWEEN levels is the point — metrics dominate, labels recede.
+     The label recipe: --fs-caption + uppercase + --tracking-label +
+     weight 600 + --text-3. */
+  --fs-hero: calc(26px * var(--ui-scale));        /* page titles */
+  --fs-title: calc(18px * var(--ui-scale));       /* section titles, card headlines that ARE sections */
+  --fs-metric-hero: calc(36px * var(--ui-scale)); /* the one hero figure per page */
+  --fs-metric: calc(26px * var(--ui-scale));      /* standard headline metrics */
+  --fs-body: calc(13.5px * var(--ui-scale));      /* default */
+  --fs-sub: calc(12.5px * var(--ui-scale));       /* secondary rows, hints */
+  --fs-caption: calc(11px * var(--ui-scale));     /* labels, metadata, table headers */
+  --fs-micro: calc(10px * var(--ui-scale));       /* kbd chips, overlines */
   --tracking-label: 0.08em;
   --lh-tight: 1.15;
   --lh-body: 1.45;
 
-  /* 4px spatial rhythm + shared layout geometry. Page rhythm: --sp-12
-     between major page groups, --sp-6 within a group, --grid-gap inside
-     grids, --sp-2 label-to-value. Whitespace is an active design element. */
-  --sp-1: 4px;
-  --sp-2: 8px;
-  --sp-3: 12px;
-  --sp-4: 16px;
-  --sp-5: 20px;
-  --sp-6: 24px;
-  --sp-8: 32px;
-  --sp-10: 40px;
-  --sp-12: 48px;
-  --content-max: 1400px;
-  --page-pad: 28px;
-  --grid-gap: 16px;
+  /* 4px spatial rhythm + shared layout geometry, on the same --ui-scale so
+     whitespace keeps its proportion to type. Page rhythm: --sp-12 between
+     major page groups, --sp-6 within a group, --grid-gap inside grids,
+     --sp-2 label-to-value. Whitespace is an active design element. */
+  --sp-1: calc(4px * var(--ui-scale));
+  --sp-2: calc(8px * var(--ui-scale));
+  --sp-3: calc(12px * var(--ui-scale));
+  --sp-4: calc(16px * var(--ui-scale));
+  --sp-5: calc(20px * var(--ui-scale));
+  --sp-6: calc(24px * var(--ui-scale));
+  --sp-8: calc(32px * var(--ui-scale));
+  --sp-10: calc(40px * var(--ui-scale));
+  --sp-12: calc(48px * var(--ui-scale));
+  --content-max: calc(1400px * var(--ui-scale));
+  --page-pad: calc(28px * var(--ui-scale));
+  --grid-gap: calc(16px * var(--ui-scale));
   --sidebar-w: 224px;  /* Shell grid column — Sidebar px math must agree */
   --nav-item-h: 36px;  /* Sidebar ITEM_H — the sliding indicator's px math */
+
+  /* One control height for every boxed input: 1px rim + 0.5rem padding + a
+     1.25rem line box, each side. Expressed in rem so it rides --ui-scale with
+     the type it wraps — a Field that pairs a Select with a Switch stands them
+     both in a box this tall, and they line up at every step. */
+  --control-h: calc(2.25rem + 2px);
+
+  /* The switch, defined entirely in scaled px so the geometry is exact at every
+     --ui-scale step. The old track was rem-sized (h-5 w-9 → 30.4 × 16.9px at
+     this root, not 36 × 20) while the knob's seats were hard px (2 / 18), so
+     the knob overhung the track's padding box by ~1.4px at scale 1 and ~2.8px
+     at 0.9259 — that overhang riding the corner arc was the "pixelated corner".
+     Everything below derives from --switch-w/--switch-h, so nothing can desync.
+
+     The rim ring is 1px of the track's own edge (glass.css .pf-control), so the
+     knob's offset from the outer edge is rim + seat, and the same gap has to
+     come off the knob's height twice. Knob radius stays concentric with the
+     track: 10px − 1px rim − 2px seat = 7px. Travel then falls out as w − h. */
+  --switch-w: calc(40px * var(--ui-scale));
+  --switch-h: calc(22px * var(--ui-scale));
+  --switch-pad: calc(2px * var(--ui-scale));               /* seat gap inside the rim */
+  --switch-seat: calc(1px + var(--switch-pad));            /* outer edge → knob */
+  --switch-r: var(--r-md);
+  --switch-knob: calc(var(--switch-h) - 2 * var(--switch-seat));
+  --switch-knob-r: calc(var(--switch-r) - var(--switch-seat));
+  --switch-travel: calc(var(--switch-w) - var(--switch-h)); /* seat to seat */
+
+  /* Halo clearance: .pf-halo breathes a 5px box-shadow ring out of a status
+     dot, so a label sitting a hair closer than that wears the ring. Every
+     haloed dot keeps this much air between itself and its text. */
+  --halo-gap: var(--sp-3);
+
+  /* The Overview pipeline is the app's one deliberate grid break (DESIGN.md
+     rule 7): the hero runs out past the content column's edges. That bleed is
+     CONTINUOUS — it grows with the container instead of snapping on at a
+     breakpoint, which is what made the card appear to "resize, then clip" as
+     the window crossed the old @7xl switch. Floor: no bleed at all on a narrow
+     window, where 8px gutters against 28px everywhere else read as a mistake
+     rather than a statement. Ceiling: --page-pad − 8px, so however wide the
+     window gets, the hero never comes closer than 8px to the window edge.
+     Uses cqw, so it tracks the CONTENT column (App.tsx's @container), not the
+     viewport — the sidebar's width is already accounted for. */
+  --hero-bleed: clamp(0px, (100cqw - 640px) * 0.0455, var(--page-pad) - 8px);
 
   /* Motion. Fast/base stay tight — press and hover feedback must feel
      immediate; the slow tier is where the luxurious glide lives. */
@@ -222,6 +297,14 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 }
+
+/* --ui-scale steps. Roots land on clean sizes: 12.5 / 13.5 / 15 / 16.5 / 18px.
+   ~1200-1719px is the design width (scale 1); below is a narrowed window,
+   above is 1080p fullscreen, then 1440p / 4K@150%, then 4K@100%. */
+@media (max-width: 1149px) { :root { --ui-scale: 0.9259; } }
+@media (min-width: 1720px) { :root { --ui-scale: 1.1111; } }
+@media (min-width: 2300px) { :root { --ui-scale: 1.2222; } }
+@media (min-width: 3200px) { :root { --ui-scale: 1.3333; } }
 
 /* Agent mode: cyan ramp. Cyan is bright — primary buttons flip to dark text.
    The atmosphere counterweight flips warm (violet) against the cyan wash. */
@@ -283,7 +366,7 @@
   --rtt: #0d9488;
 
   --glass: rgba(247, 248, 252, 0.6);
-  --glass-card: rgba(247, 248, 252, 0.55);
+  --glass-card: rgba(247, 248, 252, 0.48);
   --input-bg: rgba(255, 255, 255, 0.5);
   --input-bg-hover: rgba(255, 255, 255, 0.7);
   --btn-bg: rgba(25, 28, 38, 0.06);
@@ -292,9 +375,9 @@
   --btn-accent-fill: color-mix(in srgb, var(--accent) 92%, transparent);
   --btn-accent-fill-hover: color-mix(in srgb, var(--accent-hover) 96%, transparent);
   --sep: rgba(25, 28, 38, 0.12);
-  /* Tier-2 quiet panel, ice edition. */
-  --card-2-bg: rgba(247, 248, 252, 0.85);
-  --card-2-border: #dde1ec;
+  /* Tier-2 frosted panel, ice edition. Ice needs a touch more fill than the
+     dark theme: a bright backdrop reads straight through a thin white frost. */
+  --card-2-bg: rgba(247, 248, 252, 0.76);
   --shadow-card-2: 0 1px 2px rgba(30, 34, 58, 0.05), 0 6px 20px -12px rgba(30, 34, 58, 0.12);
   /* Ice catches hotter whites: the arc/streak/caustics need far more strength
      to read over a bright backdrop. */

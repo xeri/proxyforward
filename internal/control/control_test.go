@@ -95,7 +95,7 @@ func TestLegacyHelloCompat(t *testing.T) {
 	if bytes.Contains(out, []byte("capabilities")) {
 		t.Fatalf("nil capabilities leaked into JSON: %s", out)
 	}
-	okOut, err := json.Marshal(HelloOK{ProtocolVersion: 1, Generation: 1})
+	okOut, err := json.Marshal(HelloOK{ProtocolVersion: 1, SessionGeneration: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,15 +143,73 @@ func TestCapSet(t *testing.T) {
 
 func TestSupportedCapabilities(t *testing.T) {
 	s := NewCapSet(SupportedCapabilities)
-	if !s.Has(CapTunnelSync) || !s.Has(CapTunnelUDP) || !s.Has(CapConnStats) {
+	if !s.Has(CapTunnelSync) || !s.Has(CapConnStats) || !s.Has(CapPerConn) || !s.Has(CapGatewayConfig) {
 		t.Fatalf("supported set missing a built-in capability: %v", SupportedCapabilities)
 	}
-	// A sync-only peer (older build) must negotiate away tunnel-udp and
-	// conn-stats — an old agent that never offers conn-stats gets no RTT
-	// frames.
+	// tunnel-udp is deliberately NOT advertised: it isn't implemented
+	// end-to-end (the gateway rejects udp specs), so offering it would be a
+	// protocol lie.
+	if s.Has("tunnel-udp") {
+		t.Fatal("tunnel-udp must not be advertised until it is implemented")
+	}
+	// A sync-only peer (older build) must negotiate away conn-stats — an old
+	// agent that never offers conn-stats gets no RTT frames.
 	got := IntersectCaps(SupportedCapabilities, []string{CapTunnelSync})
 	if !reflect.DeepEqual(got, []string{CapTunnelSync}) {
 		t.Fatalf("against a sync-only peer: got %v want [tunnel-sync]", got)
+	}
+}
+
+func TestHashTunnels(t *testing.T) {
+	a := []TunnelSpec{
+		{ID: "t1", Name: "mc", Type: "tcp", PublicPort: 25565},
+		{ID: "t2", Name: "eph", Type: "tcp", OfflineMOTD: "brb"},
+	}
+	// Order-independent: the same set in a different order hashes identically.
+	reversed := []TunnelSpec{a[1], a[0]}
+	if HashTunnels(a) != HashTunnels(reversed) {
+		t.Fatalf("hash depends on order: %s != %s", HashTunnels(a), HashTunnels(reversed))
+	}
+	// A non-empty set has a non-empty hash.
+	if HashTunnels(a) == "" {
+		t.Fatal("hash of a non-empty set must not be empty")
+	}
+	// Any wire-field change flips the hash.
+	changed := append([]TunnelSpec(nil), a...)
+	changed[0].PublicPort = 25566
+	if HashTunnels(a) == HashTunnels(changed) {
+		t.Fatal("hash ignored a PublicPort change")
+	}
+	// The empty set is stable across nil and empty, and never collides with a
+	// populated set.
+	if HashTunnels(nil) != HashTunnels([]TunnelSpec{}) {
+		t.Fatalf("empty-set hash unstable: %s != %s", HashTunnels(nil), HashTunnels([]TunnelSpec{}))
+	}
+	if HashTunnels(nil) == HashTunnels(a) {
+		t.Fatal("empty and populated sets collide")
+	}
+	// Deterministic across calls (no map iteration order leaking in).
+	if HashTunnels(a) != HashTunnels(a) {
+		t.Fatal("hash is not deterministic")
+	}
+}
+
+func TestOpenDataRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	in := OpenData{ConnID: "12345"}
+	if err := WriteMsg(&buf, TypeOpenData, in); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	env, err := ReadMsg(&buf, MaxFrame)
+	if err != nil || env.Type != TypeOpenData {
+		t.Fatalf("read: %v type=%q", err, env.Type)
+	}
+	got, err := Decode[OpenData](env)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if *got != in {
+		t.Fatalf("round trip: got %+v want %+v", *got, in)
 	}
 }
 

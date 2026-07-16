@@ -38,7 +38,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 					return
 				default:
 				}
-				e, closeEntry := reg.Open("t1", "mc", "203.0.113.9:1", "k", true)
+				e, closeEntry := reg.Open("", "t1", "mc", "203.0.113.9:1", "k", true)
 				e.SetPlayer(conntrack.PlayerInfo{Name: "Steve", UUID: steveUUID})
 				e.SetRTT(float64(i + 1))
 				e.Counters.AToB.Add(64)

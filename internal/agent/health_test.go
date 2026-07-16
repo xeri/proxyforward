@@ -44,7 +44,7 @@ func TestHealthCheckerTransitions(t *testing.T) {
 		ID: "t1", Name: "test", Type: config.TunnelTCP,
 		LocalAddr: ln.Addr().String(), PublicPort: 25565, Enabled: true,
 	}}
-	a := New(cfg, slog.New(slog.DiscardHandler))
+	a := New(cfg, t.TempDir(), slog.New(slog.DiscardHandler))
 	a.healthInterval = 30 * time.Millisecond
 	a.healthDialTimeout = 500 * time.Millisecond
 

@@ -1,5 +1,6 @@
 import {ReactNode, useEffect, useRef} from 'react'
 import {useMotion} from '../motion'
+import {useRubberBand} from '../rubberband'
 
 // Content slides this many px beneath the sidebar's edge before clipping.
 // Inline px math — must stay a plain number; documented for token readers
@@ -23,6 +24,9 @@ export function Shell({sidebar, titlebar, children}: {
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const {reduced} = useMotion()
+
+  // Scrollers give at their ends instead of stopping dead (rubberband.ts).
+  useRubberBand()
 
   // The pointer is a lamp, and Signal Glass answers it: one delegated,
   // rAF-throttled listener writes local coordinates onto each .pf-signal
@@ -119,8 +123,13 @@ export function Shell({sidebar, titlebar, children}: {
           {titlebar}
         </div>
       </header>
+      {/* overscroll-none: the page scroller must never let WebView2 composite its own
+          elastic overscroll under ours — two rubber bands, one gesture. rubberband.ts
+          preventDefaults every delta it takes, so this is belt and braces, but it is
+          the standard way these ship visibly broken. It changes no ownership: ownerFor
+          breaks at the page before it reads overscroll-behavior. */}
       <main
-        className="relative min-h-0 min-w-0 overflow-y-auto"
+        className="relative min-h-0 min-w-0 overflow-y-auto overscroll-y-none"
         style={{
           gridRow: '1 / span 2',
           gridColumn: sidebar ? 2 : 1,
@@ -131,6 +140,16 @@ export function Shell({sidebar, titlebar, children}: {
       >
         {children}
       </main>
+      {/* Rubber-band edge light. Its own grid cell, so it overlays the content
+          column exactly and — unlike a pseudo-element on <main> — never scrolls.
+          Under the island (z-20), so the glass frosts the bloom passing beneath
+          it. Inert until rubberband.ts stamps data-band on it. */}
+      <div
+        className="pf-band-glow relative z-[15]"
+        data-band-glow
+        aria-hidden
+        style={{gridRow: '1 / span 2', gridColumn: sidebar ? 2 : 1}}
+      />
     </div>
   )
 }
