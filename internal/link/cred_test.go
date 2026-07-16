@@ -97,6 +97,27 @@ func TestAgentIDIsWideEnoughToBeUnforgeable(t *testing.T) {
 	}
 }
 
+// TestIsDerivedAgentID: the agt_ namespace is reserved for key-derived ids, which is
+// what lets the gateway refuse a shared-token peer that self-asserts one
+// (gateway/auth.go sharedTokenValidator). Legacy ids from config.NewID are bare hex
+// and must not be mistaken for derived ones, or the migration path breaks. (identity)
+func TestIsDerivedAgentID(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id := AgentID(pub); !IsDerivedAgentID(id) {
+		t.Fatalf("a minted agentID must be recognized as derived: %q", id)
+	}
+	// A legacy config.NewID() id: 32 hex chars, no prefix.
+	if IsDerivedAgentID("9f86d081884c7d659a2feaa0c55ad015") {
+		t.Fatal("a legacy 32-hex agentID must not read as key-derived")
+	}
+	if IsDerivedAgentID("") {
+		t.Fatal("an empty agentID must not read as key-derived")
+	}
+}
+
 // TestGatewayIDDerivation: the gateway's display ID derives deterministically from
 // its cert DER with the gw_ prefix. (identity)
 func TestGatewayIDDerivation(t *testing.T) {
