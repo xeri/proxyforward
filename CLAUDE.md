@@ -92,11 +92,16 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
 
 ### Liveness & lifecycle
 - **One liveness owner**: app-level ping in **both** directions (`pingInterval`) with
-  an idle read deadline (`controlIdleTimeout`); yamux keepalive OFF and its write
-  timeout deliberately long so the heartbeat, not yamux, declares death
-  (`transport/yamux.go muxConfig`).
-- Nothing outside `internal/transport` imports yamux. Agent and gateway program
-  against `transport.Session` / `Stream` so the mux can be swapped.
+  an idle read deadline (`controlIdleTimeout`); the transport's own keepalive is OFF
+  and its write/idle timeout deliberately long so the heartbeat, not the transport,
+  declares death (yamux keepalive off + long write timeout in `transport/yamux.go
+  muxConfig`; QUIC `KeepAlivePeriod=0` + a `MaxIdleTimeout` above the liveness budget
+  in `transport/quicconfig.go quicConfig`).
+- Nothing outside `internal/transport` imports yamux or quic-go. Agent and gateway
+  program against `transport.Session` / `Stream` so the transport can be swapped
+  (yamux-over-TCP, per-conn multi-TCP, or QUIC); the gateway chooses the data
+  plane once per session behind `dataPlane.openFlow` (QUIC rides the shared-session
+  mux plane), keeping `handleClient` transport-agnostic (`dataplane.go pickDataPlane`).
 - Reconnect: full-jitter exponential backoff, sequence resets after a stable period;
   network-change/resume ticks short-circuit it; DNS re-resolves every attempt
   (`link/backoff.go`, `netnotify/`, `agent.go runSession`).
