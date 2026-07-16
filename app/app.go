@@ -59,6 +59,10 @@ type App struct {
 	// engineFatal holds the engine's terminal error until the next start,
 	// so every status tick (not just the one that drained done) reports it.
 	engineFatal string
+	// pendingDeepLink holds a pxf:// pairing link delivered by the OS before the
+	// frontend was ready to receive the event (a cold start via the protocol
+	// handler); the frontend drains it once on mount via TakePendingDeepLink.
+	pendingDeepLink string
 	// historyUnsupported latches after an attached daemon fails a history
 	// request (older version): stop asking instead of eating a timeout per
 	// poll.
@@ -122,6 +126,53 @@ func (a *App) Startup(ctx context.Context) {
 	a.mu.Unlock()
 
 	go a.tickLoop(ctx)
+}
+
+// HandleDeepLink routes an OS-delivered pxf:// pairing link into the UI. Once the
+// window is up it emits a "pxf:deeplink" event and surfaces the window so the click
+// feels like it opened the app; before startup (a cold protocol launch) it stashes
+// the link for the frontend to pull via TakePendingDeepLink when it mounts.
+func (a *App) HandleDeepLink(rawURL string) {
+	if a.ctx == nil {
+		a.mu.Lock()
+		a.pendingDeepLink = rawURL
+		a.mu.Unlock()
+		return
+	}
+	runtime.EventsEmit(a.ctx, "pxf:deeplink", rawURL)
+	a.surfaceWindow()
+}
+
+// OnSecondInstance handles a second launch of the GUI: the OS forwards that
+// process's args here and exits it. A pxf:// deep link routes into pairing; either
+// way the existing window is brought to the front.
+func (a *App) OnSecondInstance(deepLink string) {
+	if deepLink != "" {
+		a.HandleDeepLink(deepLink)
+		return
+	}
+	a.surfaceWindow()
+}
+
+// TakePendingDeepLink returns and clears any pxf:// link captured before the
+// frontend was listening (a cold start via the OS protocol handler). Bound to Wails;
+// the frontend calls it once on mount.
+func (a *App) TakePendingDeepLink() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	url := a.pendingDeepLink
+	a.pendingDeepLink = ""
+	return url
+}
+
+// surfaceWindow brings the running GUI window to the foreground (un-minimising if
+// needed). A no-op before startup.
+func (a *App) surfaceWindow() {
+	if a.ctx == nil {
+		return
+	}
+	runtime.WindowUnminimise(a.ctx)
+	runtime.WindowShow(a.ctx)
 }
 
 // Shutdown is wired to Wails OnShutdown.

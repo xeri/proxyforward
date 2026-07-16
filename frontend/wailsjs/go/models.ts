@@ -854,6 +854,7 @@ export namespace config {
 	    CertFingerprint: string;
 	    Transport: string;
 	    Tunnels: Tunnel[];
+	    EnrollTicket: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentConfig(source);
@@ -868,6 +869,7 @@ export namespace config {
 	        this.CertFingerprint = source["CertFingerprint"];
 	        this.Transport = source["Transport"];
 	        this.Tunnels = this.convertValues(source["Tunnels"], Tunnel);
+	        this.EnrollTicket = source["EnrollTicket"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -960,6 +962,7 @@ export namespace config {
 	    MaxConnsPerIP: number;
 	    AuthAttemptsPerMin: number;
 	    QUICEnabled: boolean;
+	    AcceptSharedToken: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GatewayConfig(source);
@@ -976,6 +979,7 @@ export namespace config {
 	        this.MaxConnsPerIP = source["MaxConnsPerIP"];
 	        this.AuthAttemptsPerMin = source["AuthAttemptsPerMin"];
 	        this.QUICEnabled = source["QUICEnabled"];
+	        this.AcceptSharedToken = source["AcceptSharedToken"];
 	    }
 	}
 	export class Config {

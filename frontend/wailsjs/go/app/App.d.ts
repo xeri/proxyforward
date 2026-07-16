@@ -36,6 +36,8 @@ export function GeoStatus():Promise<geo.Status>;
 
 export function GetConfig():Promise<config.Config>;
 
+export function HandleDeepLink(arg1:string):Promise<void>;
+
 export function ImportSetup(arg1:string,arg2:string):Promise<void>;
 
 export function InstallService():Promise<void>;
@@ -43,6 +45,8 @@ export function InstallService():Promise<void>;
 export function LogsSince(arg1:number):Promise<Array<logging.Entry>>;
 
 export function MeasureLatency():Promise<app.LatencyResult>;
+
+export function OnSecondInstance(arg1:string):Promise<void>;
 
 export function OpenConfigDir():Promise<void>;
 
@@ -87,6 +91,8 @@ export function SetupGateway(arg1:string):Promise<void>;
 export function Status():Promise<app.UIStatus>;
 
 export function Summary(arg1:number):Promise<analytics.Summary>;
+
+export function TakePendingDeepLink():Promise<string>;
 
 export function TestReachability(arg1:string):Promise<string>;
 
