@@ -45,12 +45,27 @@ func TestHelloWireBackCompat(t *testing.T) {
 }
 
 func TestHelloOKAndPongOmitEmpty(t *testing.T) {
-	ok := control.HelloOK{ProtocolVersion: 1, Generation: 3}
+	ok := control.HelloOK{ProtocolVersion: 1, SessionGeneration: 3}
 	b, _ := json.Marshal(ok)
-	for _, f := range []string{"hostname", "localIps", "observedIp"} {
+	for _, f := range []string{"hostname", "localIps", "observedIp", "assignedAgentId", "gatewayId", "configSeedNeeded"} {
 		if strings.Contains(string(b), f) {
 			t.Errorf("empty HelloOK.%s leaked onto the wire: %s", f, b)
 		}
+	}
+	// SessionGeneration keeps the legacy json tag so frames stay byte-identical to
+	// a peer that predates the rename.
+	if !strings.Contains(string(b), `"generation":3`) || strings.Contains(string(b), "sessionGeneration") {
+		t.Errorf("SessionGeneration must marshal as \"generation\": %s", b)
+	}
+	// The enrollment identity fields round-trip when set.
+	ok2 := control.HelloOK{AssignedAgentID: "agt_k7q2f9m3", GatewayID: "gw_3h8xd0p5"}
+	b2, _ := json.Marshal(ok2)
+	var g2 control.HelloOK
+	if err := json.Unmarshal(b2, &g2); err != nil {
+		t.Fatal(err)
+	}
+	if g2.AssignedAgentID != "agt_k7q2f9m3" || g2.GatewayID != "gw_3h8xd0p5" {
+		t.Errorf("HelloOK identity round-trip failed: %+v", g2)
 	}
 
 	// A legacy pong (no gateway receive time) must omit recvUnixNano so the
@@ -64,6 +79,45 @@ func TestHelloOKAndPongOmitEmpty(t *testing.T) {
 	bp2, _ := json.Marshal(p2)
 	if !strings.Contains(string(bp2), "recvUnixNano") {
 		t.Errorf("set Pong.RecvUnixNano missing from the wire: %s", bp2)
+	}
+}
+
+// The enrollment + gateway-config hello fields are additive: a legacy hello
+// (shared-token only) must encode without any of them, decode them as zero, and a
+// populated hello must round-trip. Byte-identical legacy frames are the invariant.
+func TestHelloEnrollmentFieldsBackCompat(t *testing.T) {
+	legacy := control.Hello{ProtocolVersion: 1, Kind: control.KindControl, AgentID: "a", Token: "t", AppVersion: "v"}
+	b, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"agentPubKey", "agentSig", "enrollTicket", "configHash", "configGeneration"} {
+		if strings.Contains(string(b), f) {
+			t.Errorf("empty Hello.%s leaked onto the wire: %s", f, b)
+		}
+	}
+
+	// A legacy frame decodes with every new field zero.
+	var got control.Hello
+	if err := json.Unmarshal([]byte(`{"protocolVersion":1,"kind":"control","agentId":"a","token":"t"}`), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentPubKey != nil || got.AgentSig != nil || got.EnrollTicket != "" || got.ConfigHash != "" || got.ConfigGeneration != 0 {
+		t.Errorf("legacy frame produced non-zero enrollment fields: %+v", got)
+	}
+
+	// A populated enrollment hello round-trips.
+	full := control.Hello{
+		AgentPubKey: []byte{1, 2, 3}, AgentSig: []byte{4, 5, 6}, EnrollTicket: "tkt",
+		ConfigHash: "h", ConfigGeneration: 9,
+	}
+	fb, _ := json.Marshal(full)
+	var fg control.Hello
+	if err := json.Unmarshal(fb, &fg); err != nil {
+		t.Fatal(err)
+	}
+	if len(fg.AgentPubKey) != 3 || len(fg.AgentSig) != 3 || fg.EnrollTicket != "tkt" || fg.ConfigHash != "h" || fg.ConfigGeneration != 9 {
+		t.Errorf("enrollment field round-trip failed: %+v", fg)
 	}
 }
 

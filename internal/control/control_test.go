@@ -95,7 +95,7 @@ func TestLegacyHelloCompat(t *testing.T) {
 	if bytes.Contains(out, []byte("capabilities")) {
 		t.Fatalf("nil capabilities leaked into JSON: %s", out)
 	}
-	okOut, err := json.Marshal(HelloOK{ProtocolVersion: 1, Generation: 1})
+	okOut, err := json.Marshal(HelloOK{ProtocolVersion: 1, SessionGeneration: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestCapSet(t *testing.T) {
 
 func TestSupportedCapabilities(t *testing.T) {
 	s := NewCapSet(SupportedCapabilities)
-	if !s.Has(CapTunnelSync) || !s.Has(CapConnStats) || !s.Has(CapPerConn) {
+	if !s.Has(CapTunnelSync) || !s.Has(CapConnStats) || !s.Has(CapPerConn) || !s.Has(CapGatewayConfig) {
 		t.Fatalf("supported set missing a built-in capability: %v", SupportedCapabilities)
 	}
 	// tunnel-udp is deliberately NOT advertised: it isn't implemented
@@ -157,6 +157,40 @@ func TestSupportedCapabilities(t *testing.T) {
 	got := IntersectCaps(SupportedCapabilities, []string{CapTunnelSync})
 	if !reflect.DeepEqual(got, []string{CapTunnelSync}) {
 		t.Fatalf("against a sync-only peer: got %v want [tunnel-sync]", got)
+	}
+}
+
+func TestHashTunnels(t *testing.T) {
+	a := []TunnelSpec{
+		{ID: "t1", Name: "mc", Type: "tcp", PublicPort: 25565},
+		{ID: "t2", Name: "eph", Type: "tcp", OfflineMOTD: "brb"},
+	}
+	// Order-independent: the same set in a different order hashes identically.
+	reversed := []TunnelSpec{a[1], a[0]}
+	if HashTunnels(a) != HashTunnels(reversed) {
+		t.Fatalf("hash depends on order: %s != %s", HashTunnels(a), HashTunnels(reversed))
+	}
+	// A non-empty set has a non-empty hash.
+	if HashTunnels(a) == "" {
+		t.Fatal("hash of a non-empty set must not be empty")
+	}
+	// Any wire-field change flips the hash.
+	changed := append([]TunnelSpec(nil), a...)
+	changed[0].PublicPort = 25566
+	if HashTunnels(a) == HashTunnels(changed) {
+		t.Fatal("hash ignored a PublicPort change")
+	}
+	// The empty set is stable across nil and empty, and never collides with a
+	// populated set.
+	if HashTunnels(nil) != HashTunnels([]TunnelSpec{}) {
+		t.Fatalf("empty-set hash unstable: %s != %s", HashTunnels(nil), HashTunnels([]TunnelSpec{}))
+	}
+	if HashTunnels(nil) == HashTunnels(a) {
+		t.Fatal("empty and populated sets collide")
+	}
+	// Deterministic across calls (no map iteration order leaking in).
+	if HashTunnels(a) != HashTunnels(a) {
+		t.Fatal("hash is not deterministic")
 	}
 }
 
