@@ -369,7 +369,7 @@ sequenceDiagram
         Pl->>MC: bytes spliced both ways · 128 KiB pooled buffers
         GW-->>Ag: ping/pong · conn_stats (per-player kernel RTT)
     end
-    Note over Pl,MC: EOF → CloseWrite (FIN); opposite leg drains
+    Note over Pl,MC: EOF → CloseWrite (FIN) — opposite leg drains
 ```
 
 Counters are per-connection atomics, sampled at 10 Hz into RRD tiers and shipped to the GUI
