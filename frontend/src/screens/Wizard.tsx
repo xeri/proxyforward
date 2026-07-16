@@ -16,7 +16,7 @@ type Kind = 'gateway' | 'agent'
  * before handing over to the console. Designed so a non-technical user can
  * finish in under a minute; the pairing code is the only thing that moves
  * between machines. */
-export function Wizard({status, onDone}: {status: UIStatus | null; onDone: () => void}) {
+export function Wizard({status, onDone, deepLink}: {status: UIStatus | null; onDone: () => void; deepLink?: string}) {
   const [act, setAct] = useState<Act>('role')
   const [kind, setKind] = useState<Kind>('gateway')
   const [err, setErr] = useState('')
@@ -35,6 +35,15 @@ export function Wizard({status, onDone}: {status: UIStatus | null; onDone: () =>
       .then(c => { if (c.Gateway?.ControlPort) setControlPort(c.Gateway.ControlPort) })
       .catch(() => {})
   }, [])
+
+  // A pxf:// deep link (a clicked pairing invite) drops the user straight onto the
+  // agent paste step with the code prefilled — parsed inline below, still
+  // confirm-to-connect. A pairing code always means "make this machine the agent".
+  useEffect(() => {
+    if (deepLink && deepLink.startsWith('pxf://')) {
+      setErr(''); setKind('agent'); setPairing(deepLink); setAct('agent')
+    }
+  }, [deepLink])
 
   // Preview a role's ambient hue on hover — the whole backdrop leans in.
   const preview = (role: '' | Kind) => {
@@ -198,7 +207,8 @@ function GatewayLive({status, controlPort, onDone}: {
     let cancelled = false
     setBusy(true); setCode(''); setErr('')
     const poll = (n: number) => {
-      IssuePairingCode(reusable, 600, [], []).then(c => { if (!cancelled) { setCode(c); setBusy(false) } })
+      // Single-use expires in 10 min; a reusable code lives until it is revoked (ttl 0).
+      IssuePairingCode(reusable, reusable ? 0 : 600, [], []).then(c => { if (!cancelled) { setCode(c); setBusy(false) } })
         .catch(e => { if (!cancelled) { if (n < 20) setTimeout(() => poll(n + 1), 250); else { setErr(String(e)); setBusy(false) } } })
     }
     poll(0)

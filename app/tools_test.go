@@ -18,6 +18,7 @@ func sampleConfig() *config.Config {
 	cfg.Agent.Token = "AGENTTOKENSECRET"
 	cfg.Agent.GatewayHost = "gw.secret.example.com"
 	cfg.Agent.CertFingerprint = "sha256:deadbeefsecret"
+	cfg.Agent.EnrollTicket = "tkt_ENROLLTICKETSECRET"
 	cfg.Agent.Tunnels = []config.Tunnel{{ID: "t1", Name: "mc", LocalAddr: "10.9.8.7:25565"}}
 	cfg.Gateway.Token = "GWTOKENSECRET"
 	cfg.Gateway.PublicHost = "public.secret.example.com"
@@ -35,8 +36,10 @@ func TestRedactConfigMasksEverySecret(t *testing.T) {
 		"AGENTIDSECRET", "AGENTTOKENSECRET", "gw.secret.example.com",
 		"deadbeefsecret", "10.9.8.7", "GWTOKENSECRET",
 		"public.secret.example.com", "192.168.50.1", "127.0.0.99",
+		"ENROLLTICKETSECRET",
 	}
 	blob := r.Agent.AgentID + r.Agent.Token + r.Agent.GatewayHost + r.Agent.CertFingerprint +
+		r.Agent.EnrollTicket +
 		r.Gateway.Token + r.Gateway.PublicHost + r.Gateway.BindAddr + r.Metrics.PrometheusAddr
 	for _, t2 := range r.Agent.Tunnels {
 		blob += t2.LocalAddr

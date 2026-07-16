@@ -42,6 +42,7 @@ var ignoredFiles = map[string]bool{
 	"stats.json":          true,
 	"stats.redacted.json": true,
 	"config.toml":         true,
+	"gateway_agents.json": true, // the gateway's per-agent allowlist, written at runtime
 }
 
 // Placeholder test names used in prose ("go test -run TestX ...").

@@ -19,6 +19,11 @@ linters:
       # comments are the spec and its explicitness is deliberate; those checks
       # would fight it for no correctness gain.
       checks: ["all", "-QF*", "-ST*"]
+    misspell:
+      # "alltime" is a Prometheus metric-name token (proxyforward_alltime_bytes_total).
+      # Metric names cannot contain hyphens, so "all-time" is not a valid alternative.
+      ignore-rules:
+        - alltime
 
   exclusions:
     presets:
