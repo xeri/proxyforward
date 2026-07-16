@@ -87,7 +87,7 @@ func New(cfg *config.Config, configDir, configPath string, logger *slog.Logger) 
 	e := &Engine{cfg: cfg, configDir: configDir, configPath: configPath, logger: logger}
 	switch cfg.Role {
 	case config.RoleAgent:
-		e.Agent = agent.New(cfg, logger)
+		e.Agent = agent.New(cfg, configDir, logger)
 	case config.RoleGateway:
 		e.Gateway = gateway.New(cfg, configDir, logger)
 	default:
@@ -399,6 +399,7 @@ func (e *Engine) Status() ipc.Status {
 	case e.Agent != nil:
 		st.LinkUp = e.Agent.LinkUp()
 		st.RTTMillis = e.Agent.RTTMillis()
+		st.Transport = e.Agent.ActiveTransport()
 		st.JitterMillis = e.Agent.JitterMillis()
 		st.PacketLossPct = e.Agent.PacketLossPct()
 		st.LinkUpSinceMs = e.Agent.LinkUpSinceMs()

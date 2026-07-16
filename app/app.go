@@ -206,6 +206,11 @@ type UIStatus struct {
 	RTTMillis      int64 `json:"rttMillis"`
 	AgentConnected bool  `json:"agentConnected"`
 
+	// Transport is the data plane the live agent session settled on ("quic" |
+	// "per-conn" | "mux"); "" while down or on the gateway role. Shows what the
+	// auto ladder connected over.
+	Transport string `json:"transport"`
+
 	// Link quality + health rollup. Both roles run their own heartbeat and
 	// report the same stats; values are -1/"unknown" until the link is up.
 	JitterMillis  float64 `json:"jitterMillis"`
@@ -324,6 +329,7 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 	}
 	st.LinkUp = s.LinkUp
 	st.RTTMillis = s.RTTMillis
+	st.Transport = s.Transport
 	st.JitterMillis = s.JitterMillis
 	st.PacketLossPct = s.PacketLossPct
 	st.HealthScore = s.HealthScore

@@ -97,6 +97,10 @@ type Status struct {
 	// Agent-side fields.
 	LinkUp    bool  `json:"linkUp,omitempty"`
 	RTTMillis int64 `json:"rttMillis,omitempty"`
+	// Transport is the data plane the live agent session settled on ("quic" |
+	// "per-conn" | "mux"); empty while down or on the gateway role. Lets the GUI
+	// show what the auto ladder actually connected over.
+	Transport string `json:"transport,omitempty"`
 
 	// Link quality (agent-side; the gateway reports -1/unknown). Jitter and
 	// packet loss drive the tunnel health badge alongside RTT and uptime.
