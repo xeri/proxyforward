@@ -35,22 +35,99 @@ func TestPairingParseWhitespaceTolerant(t *testing.T) {
 	}
 }
 
-func TestPairingParseRejects(t *testing.T) {
+// TestPairingEmitsPxfV1 pins the current wire shape: the code an agent pastes is a
+// pxf:// URL carrying the format version and a "pair" role marker, so the frontend
+// and the OS deep-link handler can tell a pairing invite from any other pxf:// link.
+func TestPairingEmitsPxfV1(t *testing.T) {
+	s := PairingCode{Host: "gw.example.com", Port: 8474, Token: "tok123", Fingerprint: "sha256:" + strings.Repeat("ab", 32)}.String()
+	if !strings.HasPrefix(s, "pxf://") {
+		t.Errorf("pairing code must use the pxf:// scheme, got %q", s)
+	}
+	if !strings.Contains(s, "/v1/pair/") {
+		t.Errorf("pairing code must carry the /v1/pair/ version+role marker, got %q", s)
+	}
+}
+
+// TestPairingParsesPxfV1 is the RED driver: a valid v1 code parses to its parts.
+func TestPairingParsesPxfV1(t *testing.T) {
+	fp := "sha256:" + strings.Repeat("ab", 32)
+	got, err := ParsePairingCode("pxf://gw.example.com:8474/v1/pair/tok123#" + fp)
+	if err != nil {
+		t.Fatalf("valid v1 code rejected: %v", err)
+	}
+	want := PairingCode{Host: "gw.example.com", Port: 8474, Token: "tok123", Fingerprint: fp}
+	if got != want {
+		t.Fatalf("got %+v want %+v", got, want)
+	}
+}
+
+// TestPairingRejectsPxfShape rejects pxf:// codes whose version or role marker the
+// parser does not understand, so a future kind can never be mistaken for a pairing
+// invite and a stale-format code fails loudly instead of half-parsing.
+func TestPairingRejectsPxfShape(t *testing.T) {
 	fp := "sha256:" + strings.Repeat("ab", 32)
 	bad := map[string]string{
-		"wrong scheme":    "https://gw:8474/tok#" + fp,
-		"no host":         "pf1://:8474/tok#" + fp,
-		"no port":         "pf1://gw/tok#" + fp,
-		"bad port":        "pf1://gw:99999/tok#" + fp,
-		"no token":        "pf1://gw:8474/#" + fp,
-		"no fingerprint":  "pf1://gw:8474/tok",
-		"short fp":        "pf1://gw:8474/tok#sha256:abcd",
-		"non-hex fp":      "pf1://gw:8474/tok#sha256:" + strings.Repeat("zz", 32),
-		"md5 fingerprint": "pf1://gw:8474/tok#md5:" + strings.Repeat("ab", 32),
+		"unknown version": "pxf://gw:8474/v2/pair/tok#" + fp,
+		"unknown kind":    "pxf://gw:8474/v1/join/tok#" + fp,
+		"missing kind":    "pxf://gw:8474/v1/tok#" + fp,
+		"missing token":   "pxf://gw:8474/v1/pair/#" + fp,
+		"no path":         "pxf://gw:8474#" + fp,
+		"extra segment":   "pxf://gw:8474/v1/pair/tok/extra#" + fp,
 	}
 	for name, s := range bad {
 		if _, err := ParsePairingCode(s); err == nil {
 			t.Errorf("%s: expected error for %q", name, s)
+		}
+	}
+}
+
+// TestPairingRejectsOverlong caps the input before any real parsing — a pxf:// deep
+// link is attacker-reachable (a web page can fire one), so a pathological string
+// must be refused cheaply, not parsed.
+func TestPairingRejectsOverlong(t *testing.T) {
+	fp := "sha256:" + strings.Repeat("ab", 32)
+	huge := "pxf://gw:8474/v1/pair/" + strings.Repeat("a", 4096) + "#" + fp
+	if _, err := ParsePairingCode(huge); err == nil {
+		t.Errorf("expected an over-length pairing code to be rejected")
+	}
+}
+
+func TestPairingParseRejects(t *testing.T) {
+	fp := "sha256:" + strings.Repeat("ab", 32)
+	bad := map[string]string{
+		"wrong scheme":    "https://gw:8474/v1/pair/tok#" + fp,
+		"no host":         "pxf://:8474/v1/pair/tok#" + fp,
+		"no port":         "pxf://gw/v1/pair/tok#" + fp,
+		"bad port":        "pxf://gw:99999/v1/pair/tok#" + fp,
+		"no fingerprint":  "pxf://gw:8474/v1/pair/tok",
+		"short fp":        "pxf://gw:8474/v1/pair/tok#sha256:abcd",
+		"non-hex fp":      "pxf://gw:8474/v1/pair/tok#sha256:" + strings.Repeat("zz", 32),
+		"md5 fingerprint": "pxf://gw:8474/v1/pair/tok#md5:" + strings.Repeat("ab", 32),
+	}
+	for name, s := range bad {
+		if _, err := ParsePairingCode(s); err == nil {
+			t.Errorf("%s: expected error for %q", name, s)
+		}
+	}
+}
+
+// TestIsPairingURL covers the cheap scheme sniff the OS deep-link router uses: it
+// matches the pxf:// scheme (tolerating copy-paste whitespace) without fully
+// validating, so a malformed link still routes to the pairing UI to show its error.
+func TestIsPairingURL(t *testing.T) {
+	fp := "sha256:" + strings.Repeat("ab", 32)
+	cases := map[string]bool{
+		"pxf://gw:8474/v1/pair/tok#" + fp:         true,
+		"  pxf://gw:8474/v1/pair/tok#" + fp + " ": true,
+		"pxf://malformed":                         true, // scheme match, not full validation
+		"https://gw:8474/v1/pair/tok#" + fp:       false,
+		"pf1://gw:8474/tok#" + fp:                 false, // legacy scheme is no longer ours
+		"pxfnope":                                 false,
+		"":                                        false,
+	}
+	for in, want := range cases {
+		if got := IsPairingURL(in); got != want {
+			t.Errorf("IsPairingURL(%q) = %v, want %v", in, got, want)
 		}
 	}
 }

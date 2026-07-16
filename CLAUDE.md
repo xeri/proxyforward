@@ -67,8 +67,9 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
 ### Security (`internal/link/`, `internal/gateway/`)
 - TLS 1.3 only, both sides (`cert.go GatewayTLSConfig` / `AgentTLSConfig`). Trust =
   the gateway's self-signed ECDSA P-256 cert pinned by SHA-256 fingerprint carried
-  out-of-band in the pairing code `pf1://host:port/<token>#sha256:<hex>`
-  (`link/pairing.go`). No CA, ever. Token and fingerprint compare in constant time
+  out-of-band in the pairing code `pxf://host:port/v1/pair/<token>#sha256:<hex>`
+  (`link/pairing.go`; `pxf` doubles as the OS deep-link scheme, `/v1/pair/` is a
+  format-version + role marker so a wrong-kind link fails loudly). No CA, ever. Token and fingerprint compare in constant time
   (`crypto/subtle` — `gateway.go handleControlConn`, `cert.go`).
 - The pre-auth prologue (accept → TLS → hello) finishes within `preAuthTimeout` or
   dies; failed auth rate-limits per IP, fail2ban-style — successes never count

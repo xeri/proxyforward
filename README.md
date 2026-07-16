@@ -68,7 +68,7 @@ gh attestation verify proxyforward-<version>-windows-amd64.exe -R xeri/proxyforw
 1. **Launch** `proxyforward.exe` and choose **"This faces the internet."**
 2. **Enter** your public hostname (a stable DNS/DDNS name is strongly recommended — see
    [DNS and dynamic IPs](#dns-and-dynamic-ips)) and click **Start gateway**.
-3. **Copy** the pairing code it shows: `pf1://host:8474/…#sha256:…`
+3. **Copy** the pairing code it shows: `pxf://host:8474/v1/pair/…#sha256:…`
 4. **Forward** port **25565** (or your chosen public port) on the router to this machine,
    and allow the inbound firewall rule when prompted
    (Settings → Windows integration → *Add rule*).

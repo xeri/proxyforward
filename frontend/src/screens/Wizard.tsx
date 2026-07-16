@@ -143,8 +143,8 @@ export function Wizard({status, onDone}: {status: UIStatus | null; onDone: () =>
                 router and firewall changes happen on the gateway side only.
               </span>
             </div>
-            <Field label="Pairing code" hint="Shown by the gateway right after you set it up. Starts with pf1://">
-              <TextInput value={pairing} onChange={setPairing} placeholder="pf1://host:8474/…#sha256:…" mono autoFocus />
+            <Field label="Pairing code" hint="Shown by the gateway right after you set it up. Starts with pxf://">
+              <TextInput value={pairing} onChange={setPairing} placeholder="pxf://host:8474/v1/pair/…#sha256:…" mono autoFocus />
             </Field>
             {pairing.trim() && (
               parsed
@@ -376,7 +376,7 @@ function Panel({children}: {children: React.ReactNode}) {
  * authoritative validation on submit. */
 function parsePairing(s: string): {host: string; port: number} | null {
   const t = s.trim()
-  const m = /^pf1:\/\/(\[[^\]]+\]|[^/:]+):(\d+)\/([^#]+)#sha256:[0-9a-fA-F]{64}$/.exec(t)
+  const m = /^pxf:\/\/(\[[^\]]+\]|[^/:]+):(\d+)\/v1\/pair\/([^/#]+)#sha256:[0-9a-fA-F]{64}$/.exec(t)
   if (!m) return null
   const port = parseInt(m[2], 10)
   if (port < 1 || port > 65535) return null
