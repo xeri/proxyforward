@@ -32,11 +32,28 @@ var (
 	ErrBadToken       = errors.New("bad token")
 	ErrMissingAgentID = errors.New("missing agentId")
 	ErrRevoked        = errors.New("agent identity revoked")
+	// ErrReservedAgentID rejects a shared-token peer that names itself in the
+	// key-derived agt_ namespace. Only a verified key mints those, so the claim is
+	// always a lie — and an accepted one would hand over the named agent's session,
+	// ports, and scope.
+	ErrReservedAgentID = errors.New("agentId is reserved for enrolled identities — this agent must enroll with a pairing code")
 )
 
 // sharedTokenValidator is the legacy authenticator: one token admits every agent,
 // told apart only by the self-asserted agentID. Retained as a migration fallback,
 // gated by Gateway.AcceptSharedToken.
+//
+// Because the agentID here is *asserted* rather than proved, it must stay out of the
+// key-derived namespace: the gateway keys supersede, per-conn delivery, scope, and
+// gateway-authoritative config on that label, so a token holder allowed to name
+// itself agt_<victim> would evict the real agent, inherit its ports, and — a
+// shared-token identity carrying no Scope, and an empty Scope meaning unrestricted —
+// escape the victim's grant entirely. Revoking the victim would not even help: the
+// impersonator never presents the revoked key, so identityValidator's Revoked check
+// is never reached. Rejecting the prefix is what keeps the documented promise that
+// enrolled agents are protected by their key and by revocation; the residual risk of
+// this path stays confined to peers that are legacy on both sides.
+// Regression: TestSharedTokenCannotClaimDerivedAgentID.
 type sharedTokenValidator struct {
 	token string
 }
@@ -47,6 +64,9 @@ func (v sharedTokenValidator) Validate(hello *control.Hello, _ string) (Identity
 	}
 	if hello.AgentID == "" {
 		return Identity{}, ErrMissingAgentID
+	}
+	if link.IsDerivedAgentID(hello.AgentID) {
+		return Identity{}, ErrReservedAgentID
 	}
 	return Identity{AgentID: hello.AgentID}, nil
 }

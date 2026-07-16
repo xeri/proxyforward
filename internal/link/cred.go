@@ -54,18 +54,49 @@ const crockfordLower = "0123456789abcdefghjkmnpqrstvwxyz"
 var idEncoding = base32.NewEncoding(crockfordLower).WithPadding(base32.NoPadding)
 
 // fingerprint renders the first 40 bits of sha256(seed) as an 8-char base32 tag.
-// 40 bits is ample to tell a home fleet's agents apart; the astronomically rare
-// clash is resolved with a -2 suffix by whoever mints against a namespace.
+// 40 bits is a *display* budget, sized to tell a home fleet's surfaces apart at a
+// glance — it is deliberately not used where a label carries authority. GatewayID
+// is its only caller: the gateway's trust rests on the full sha256 pin carried in
+// the pairing code (cert.go Fingerprint), so gw_ is a name, never a credential.
+// Contrast AgentID, which the gateway keys authorization on and which therefore
+// takes agentFingerprintBytes.
 func fingerprint(seed []byte) string {
 	sum := sha256.Sum256(seed)
 	return idEncoding.EncodeToString(sum[:5])
 }
 
-// AgentID derives an agent's stable, unforgeable public identity from its Ed25519
-// public key: agt_<base32 fingerprint>. Derived rather than stored, so the same
-// machine always re-derives the same ID and no two keys render alike.
+// AgentIDPrefix marks an agentID as *derived from an Ed25519 public key*. The
+// prefix is a reserved namespace, not decoration: a legacy shared-token agent
+// self-asserts its agentID (config.NewID gives it bare 32-hex), so anything wearing
+// this prefix must have been minted by AgentID from a key the gateway verified. The
+// shared-token path therefore refuses to assert it (gateway/auth.go
+// sharedTokenValidator) — otherwise a mere token holder could name itself an
+// enrolled agent and inherit its session, ports, and scope.
+const AgentIDPrefix = "agt_"
+
+// agentFingerprintBytes is how much of sha256(pubkey) an agentID carries. It is a
+// security parameter, not a display choice: the gateway keys supersede, revocation,
+// scope, and gateway-authoritative config on this label, so anyone who can find a
+// second key hashing to the same one inherits the victim's authority. At the
+// original 5 bytes (40 bits) that search cost ~2^40 keygens — hours on one rented
+// machine, i.e. forgeable. 10 bytes puts it at 2^80, which no amount of money buys,
+// and still renders as a 16-char tag. AgentStore.Enroll enforces uniqueness besides,
+// so even a found collision fails closed instead of silently sharing an identity.
+const agentFingerprintBytes = 10
+
+// AgentID derives an agent's stable public identity from its Ed25519 public key:
+// agt_<base32 fingerprint>. Derived rather than stored, so the same machine always
+// re-derives the same ID and no two keys render alike.
 func AgentID(pub ed25519.PublicKey) string {
-	return "agt_" + fingerprint(pub)
+	sum := sha256.Sum256(pub)
+	return AgentIDPrefix + idEncoding.EncodeToString(sum[:agentFingerprintBytes])
+}
+
+// IsDerivedAgentID reports whether s claims the key-derived agent namespace. Only
+// AgentID mints these; a self-asserted one is a peer claiming an identity it did not
+// prove, which is why the shared-token validator rejects it outright.
+func IsDerivedAgentID(s string) bool {
+	return strings.HasPrefix(s, AgentIDPrefix)
 }
 
 // GatewayID derives the gateway's display identity from its (pinned) certificate

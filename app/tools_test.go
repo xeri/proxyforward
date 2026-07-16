@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"proxyforward/internal/config"
+	"proxyforward/internal/logging"
 )
 
 func sampleConfig() *config.Config {
@@ -71,15 +72,51 @@ func TestRedactStatsJSONHashesPeerIPs(t *testing.T) {
 	}
 }
 
+// TestWriteDiagnosticsNoLeaks drives every channel writeDiagnostics ships, because a
+// bundle is only as shareable as its leakiest file. It previously passed ring=nil
+// into an empty dir, so the two *unredacted* channels — the GUI ring and the on-disk
+// log files — were never populated and the secret sweep below ran over an empty set.
+// That blind spot is how a logged pairing code (which embeds Gateway.Token verbatim)
+// shipped in cleartext while config.redacted.toml sat right beside it masking the
+// same token. The logger here is the real production fan-out, so the ring and the
+// rotating file are filled the way they are in a live process.
 func TestWriteDiagnosticsNoLeaks(t *testing.T) {
 	dir := t.TempDir()
 	// Seed a stats.json with a client IP that must not leak.
 	os.WriteFile(filepath.Join(dir, "stats.json"),
 		[]byte(`{"v":3,"peers":[{"ip":"203.0.113.77","totalConns":2}]}`), 0o600)
 
-	out := filepath.Join(dir, "diag.zip")
 	cfg := sampleConfig()
-	if err := writeDiagnostics(out, cfg, dir, "health: good\n", nil); err != nil {
+
+	// Fill the ring and the on-disk log through the real logger, with lines that
+	// carry the secrets the way a careless call site would.
+	ring := logging.NewRing(64)
+	logger, closeLog, err := logging.New(logging.Options{
+		FilePath: logging.DefaultFilePath(dir),
+		Ring:     ring,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.Info("pairing code", "code",
+		"pxf://"+cfg.Gateway.PublicHost+":8474/v1/pair/"+cfg.Gateway.Token+"#"+cfg.Agent.CertFingerprint)
+	logger.Info("agent connected", "agentId", cfg.Agent.AgentID, "gateway", cfg.Agent.GatewayHost)
+	logger.Warn("dial failed", "local", cfg.Agent.Tunnels[0].LocalAddr, "bind", cfg.Gateway.BindAddr)
+	if err := closeLog(); err != nil {
+		t.Fatal(err)
+	}
+	// Guard against a vacuous pass: the on-disk log must really hold the secret, or
+	// this test proves nothing about the path that ships it.
+	onDisk, err := os.ReadFile(logging.DefaultFilePath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(onDisk), cfg.Gateway.Token) {
+		t.Fatal("setup bug: the seeded log does not contain the token, so this test would pass vacuously")
+	}
+
+	out := filepath.Join(dir, "diag.zip")
+	if err := writeDiagnostics(out, cfg, dir, "health: good\n", ring); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,13 +137,27 @@ func TestWriteDiagnosticsNoLeaks(t *testing.T) {
 		names[f.Name] = string(b)
 	}
 
-	for _, want := range []string{"version.txt", "health.txt", "config.redacted.toml", "stats.redacted.json"} {
+	// The log channels must actually be in the bundle — if they silently stopped
+	// shipping, the sweep below would pass for the wrong reason.
+	for _, want := range []string{"version.txt", "health.txt", "config.redacted.toml", "stats.redacted.json", "logs-recent.txt", "proxyforward.log"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("bundle missing %s (have %v)", want, keys(names))
 		}
 	}
+	// Both log files must still be diagnostically useful after scrubbing — masking by
+	// shipping nothing would pass the sweep and defeat the point of the bundle.
+	for _, name := range []string{"logs-recent.txt", "proxyforward.log"} {
+		if !strings.Contains(names[name], "pairing code") || !strings.Contains(names[name], "dial failed") {
+			t.Errorf("%s lost its log lines to scrubbing:\n%s", name, names[name])
+		}
+	}
+
 	all := strings.Join(values(names), "\n")
-	for _, secret := range []string{"AGENTTOKENSECRET", "GWTOKENSECRET", "gw.secret.example.com", "203.0.113.77", "deadbeefsecret"} {
+	for _, secret := range []string{
+		"AGENTTOKENSECRET", "GWTOKENSECRET", "AGENTIDSECRET", "deadbeefsecret",
+		"gw.secret.example.com", "public.secret.example.com", "192.168.50.1",
+		"10.9.8.7", "127.0.0.99", "203.0.113.77",
+	} {
 		if strings.Contains(all, secret) {
 			t.Errorf("diagnostics bundle leaked %q", secret)
 		}

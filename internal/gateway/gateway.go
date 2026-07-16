@@ -142,8 +142,16 @@ func RunStarted(ctx context.Context, g *Gateway, cfg *config.Config, logger *slo
 		Token:       cfg.Gateway.Token,
 		Fingerprint: g.Fingerprint(),
 	}
-	logger.Info("gateway ready — pair agents with the code below (replace YOUR-PUBLIC-ADDRESS with this machine's public hostname or IP)")
-	logger.Info("pairing code", "code", code.String())
+	// The pairing code embeds the shared gateway token, so it goes to the console and
+	// nowhere else. slog would fan it out to three places that outlive the moment: the
+	// rotating log file, the GUI ring, and — because app/tools.go ships both verbatim
+	// — every diagnostics bundle. Bundles are built to be handed to someone else, and
+	// redactConfig masking Gateway.Token there is worth nothing while the same token
+	// rides along in cleartext inside a logged pairing code. stdout is transient and
+	// unshipped; the GUI never needed this line (it mints codes over IPC — app.go
+	// PairingCode), and the CLI operator reads it off the console they're standing at.
+	logger.Info("gateway ready — pairing code printed on the console")
+	fmt.Printf("\npair agents with this code (replace YOUR-PUBLIC-ADDRESS with this machine's public hostname or IP):\n\n    %s\n\n", code.String())
 	<-ctx.Done()
 	g.Shutdown()
 	return nil
@@ -294,14 +302,40 @@ func (g *Gateway) RevokeAgent(agentID string) bool {
 	return ok
 }
 
-// RenameAgent sets an agent's display nickname; SetAgentScope replaces its bind
-// scope. Both report whether the agent was found.
+// RenameAgent sets an agent's display nickname. A nickname is display sugar with no
+// bearing on what the agent may bind, so a live session needs no disturbing. Reports
+// whether the agent was found.
 func (g *Gateway) RenameAgent(agentID, nickname string) bool {
 	return g.agents != nil && g.agents.Rename(agentID, nickname)
 }
 
+// SetAgentScope replaces an agent's bind scope and evicts any live session, so the
+// new grant takes effect now rather than whenever the agent next reconnects.
+//
+// A session captures identity.Scope at admission (buildAndAdmit) and validateSpec
+// reads that copy for the session's whole life, so writing the store alone would
+// leave an agent an operator just narrowed running on its old grant indefinitely —
+// keeping the ports it already holds — while the GUI showed the new scope. Narrowing
+// is the urgent case precisely because it is how you contain a misbehaving agent.
+// Evicting is how RevokeAgent already makes this guarantee: the agent reconnects,
+// re-reads its record, and every bind is re-checked against the narrowed scope. It
+// also sidesteps mutating sess.scope under readers on other goroutines. Reports
+// whether the agent was found.
+// Regression: e2e TestSetAgentScopeEvictsLiveSession.
 func (g *Gateway) SetAgentScope(agentID string, scope Scope) bool {
-	return g.agents != nil && g.agents.SetScope(agentID, scope)
+	if g.agents == nil {
+		return false
+	}
+	ok := g.agents.SetScope(agentID, scope)
+	if a := g.act(); a != nil && ok {
+		// One actor hop: eviction is lifecycle, and lifecycle is actor-owned.
+		a.do(func() {
+			if s := a.agents[agentID]; s != nil {
+				a.evict(s, "agent scope changed")
+			}
+		})
+	}
+	return ok
 }
 
 // AgentView is one agent's management row for the GUI roster: its persisted

@@ -59,22 +59,62 @@ func TestAgentIDDerivation(t *testing.T) {
 	}
 }
 
-// TestAgentIDAlphabet: the fingerprint is 8 chars of lowercase Crockford base32,
-// so it never contains the confusable i/l/o/u. (identity)
+// TestAgentIDAlphabet: the fingerprint is lowercase Crockford base32, so it never
+// contains the confusable i/l/o/u. (identity)
 func TestAgentIDAlphabet(t *testing.T) {
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fp := strings.TrimPrefix(AgentID(pub), "agt_")
-	if len(fp) != 8 {
-		t.Fatalf("fingerprint should be 8 chars, got %d (%q)", len(fp), fp)
-	}
 	const allowed = "0123456789abcdefghjkmnpqrstvwxyz"
 	for _, r := range fp {
 		if !strings.ContainsRune(allowed, r) {
 			t.Fatalf("fingerprint char %q is not lowercase Crockford base32", r)
 		}
+	}
+}
+
+// TestAgentIDIsWideEnoughToBeUnforgeable pins the agentID's width as the security
+// parameter it is. The gateway keys supersede, revocation, scope, and config on this
+// label, so its width *is* the cost of forging a second key that answers to a
+// victim's name. At the original 40 bits that search was ~2^40 keygens — hours of
+// rented CPU, which is not a threat model, it's a budget line. Anything below 80
+// bits here puts that attack back on the table. Asserts the floor, not the exact
+// encoding. (identity)
+func TestAgentIDIsWideEnoughToBeUnforgeable(t *testing.T) {
+	if bits := agentFingerprintBytes * 8; bits < 80 {
+		t.Fatalf("agentID carries %d bits; below 80 a chosen-id collision is purchasable", bits)
+	}
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The rendered tag must actually carry those bits (base32 packs 5 bits/char).
+	fp := strings.TrimPrefix(AgentID(pub), "agt_")
+	if got := len(fp) * 5; got < agentFingerprintBytes*8 {
+		t.Fatalf("rendered agentID carries only %d bits, want >= %d", got, agentFingerprintBytes*8)
+	}
+}
+
+// TestIsDerivedAgentID: the agt_ namespace is reserved for key-derived ids, which is
+// what lets the gateway refuse a shared-token peer that self-asserts one
+// (gateway/auth.go sharedTokenValidator). Legacy ids from config.NewID are bare hex
+// and must not be mistaken for derived ones, or the migration path breaks. (identity)
+func TestIsDerivedAgentID(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id := AgentID(pub); !IsDerivedAgentID(id) {
+		t.Fatalf("a minted agentID must be recognized as derived: %q", id)
+	}
+	// A legacy config.NewID() id: 32 hex chars, no prefix.
+	if IsDerivedAgentID("9f86d081884c7d659a2feaa0c55ad015") {
+		t.Fatal("a legacy 32-hex agentID must not read as key-derived")
+	}
+	if IsDerivedAgentID("") {
+		t.Fatal("an empty agentID must not read as key-derived")
 	}
 }
 

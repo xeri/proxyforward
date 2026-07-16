@@ -77,23 +77,40 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   connGate`; defaults in `config.go`).
 - **Per-agent identity is the trust model.** Each agent proves possession of a long-term
   Ed25519 key the gateway allowlists; its derived `agentID` (`agt_…`) is unforgeable,
-  individually **scoped** (ports/tunnels) and **revocable** — revocation evicts the live
-  session and makes the next connect fatal `ErrCodeRevoked`. Agents join via a single-use
-  enrollment ticket in the pairing code (`gateway/auth.go identityValidator`, `agentstore.go`,
-  `link/cred.go`; mechanics in `docs/agent/architecture.md`). A matching agentID
-  **supersedes** (reconnect), a distinct one is admitted **alongside**; supersede is
-  anti-flap dampened so an ID collision degrades to a slow contest, not a loop
-  (`actor.go admit`, `noteSupersede`).
+  individually **scoped** (ports/tunnels) and **revocable** — revocation *and* a scope
+  change both evict the live session, and the next connect is fatal `ErrCodeRevoked`. A
+  session captures its scope at admission, so without that eviction narrowing contains
+  nothing (`gateway.go SetAgentScope`). Agents join via a single-use enrollment ticket in
+  the pairing code (`gateway/auth.go identityValidator`, `agentstore.go`, `link/cred.go`;
+  mechanics in `docs/agent/architecture.md`). A matching agentID **supersedes**
+  (reconnect), a distinct one is admitted **alongside**; supersede is anti-flap dampened
+  so an ID collision degrades to a slow contest, not a loop (`actor.go admit`,
+  `noteSupersede`).
+- "Unforgeable" above is a claim about **width**, and therefore a security parameter, not
+  a display choice: `agentID` is the label the gateway keys supersede, scope, revocation,
+  and config on, so it must stay wide enough that no second key answering to a victim's
+  name can be searched for (`cred.go agentFingerprintBytes`, floored by
+  `TestAgentIDIsWideEnoughToBeUnforgeable`); `AgentStore.Enroll` refuses a colliding join
+  besides, so a found collision fails closed.
 - The legacy **shared token** survives only as a migration fallback, accepted while
   `Gateway.AcceptSharedToken` is on (default for now). A shared-token agent self-asserts its
   `agentID`, so the old residual risk — supersede or port-squat, recoverable only by rotating
   the token — persists **for that path only**; enrolled agents are protected by their key and
-  by revocation, and disabling `AcceptSharedToken` once every agent is enrolled closes it.
+  by revocation *because* the key-derived `agt_` namespace is **reserved**, so a self-asserted
+  ID can never name an enrolled one (`link/cred.go IsDerivedAgentID`, `gateway/auth.go
+  sharedTokenValidator`). Disabling `AcceptSharedToken` once every agent is enrolled closes it.
 - The IPC pipe ACL admits Administrators, SYSTEM, and the interactive user only
   (`ipc/server_windows.go pipeSecurity`).
 - Diagnostics bundles redact every secret, host, IP, and identity; peer IPs become
   stable sha256 pseudonyms (`app/tools.go`, leak-tested in `app/tools_test.go`).
-  Anything new that exports data must pass the same no-leak test style.
+  Anything new that exports data must pass the same no-leak test style — seeding
+  *every* channel it ships, since a leak test that leaves one empty passes vacuously.
+  Bundles **ship logs**, so redacting only the config is theatre: log text is scrubbed
+  of the config's own secrets (`tools.go logScrubber`).
+- Never log a secret; the scrubber is a net, not a licence (it only knows what config
+  holds). The pairing code embeds the gateway token, so it goes to the console, never
+  through `slog` — slog fans out to the rotating file, the GUI ring, and every bundle
+  (`gateway.go RunStarted`).
 - Fatal auth errors (`bad_token`, `agent_conflict`, `version`, `revoked`) stop the agent
   instead of retry-hammering the gateway (fatal classification in `agent.go isFatal`), and
   surface in the UI via `EngineFatal` on the tick.
