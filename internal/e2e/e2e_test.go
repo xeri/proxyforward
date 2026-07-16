@@ -81,6 +81,7 @@ type harness struct {
 	gw        *gateway.Gateway
 	gwCancel  context.CancelFunc
 	agentCfg  *config.Config
+	agentDir  string
 	tunnelID  string
 	agent     *agent.Agent
 	agentCtx  context.Context
@@ -102,13 +103,19 @@ type harnessOpts struct {
 	// bandwidthMbps/bandwidthScope cap the default tunnel (0 = uncapped).
 	bandwidthMbps  int
 	bandwidthScope string
-	// transport selects the agent's data-plane transport (config.TransportMux
-	// or config.TransportPerConn); empty leaves the config default (mux).
+	// transport selects the agent's data-plane transport (config.TransportMux,
+	// config.TransportPerConn, or config.TransportQUIC); empty leaves the config
+	// default (mux). The gateway binds its QUIC listener by default, so a QUIC
+	// agent needs no extra gateway tweak.
 	transport string
 	// interpose, if set, is called with the real gateway "host:port" and
 	// returns the address the agent should dial instead — e.g. a transparent
 	// TCP proxy that observes the agent→gateway connections.
 	interpose func(gwAddr string) string
+	// enroll drives per-agent identity: the harness issues a single-use pairing
+	// ticket from the gateway, sets it on the agent, and clears the shared token so
+	// the agent authenticates purely by its Ed25519 identity.
+	enroll bool
 }
 
 func newHarness(t *testing.T, localAddr string) *harness {
@@ -156,6 +163,18 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 	agentCfg.Agent.GatewayPort = dialPort
 	agentCfg.Agent.Token = gwCfg.Gateway.Token
 	agentCfg.Agent.CertFingerprint = gw.Fingerprint()
+	if opts.enroll {
+		ticket, err := gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		agentCfg.Agent.EnrollTicket = ticket
+		agentCfg.Agent.Token = "" // authenticate purely by Ed25519 identity
+	}
+	// Pin mux as the harness default so existing tests keep exercising the mux
+	// path even though the shipped default is "auto"; per-transport coverage is
+	// opt-in via opts.transport.
+	agentCfg.Agent.Transport = config.TransportMux
 	if opts.transport != "" {
 		agentCfg.Agent.Transport = opts.transport
 	}
@@ -174,7 +193,7 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 		},
 	}}
 
-	h := &harness{t: t, gw: gw, gwCancel: gwCancel, agentCfg: agentCfg, tunnelID: tunnelID, offerCaps: opts.offerCaps}
+	h := &harness{t: t, gw: gw, gwCancel: gwCancel, agentCfg: agentCfg, agentDir: t.TempDir(), tunnelID: tunnelID, offerCaps: opts.offerCaps}
 	h.startAgent()
 	t.Cleanup(h.stopAgent)
 	return h
@@ -184,7 +203,7 @@ func (h *harness) startAgent() {
 	h.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	h.agentCtx, h.agentStop = ctx, cancel
-	h.agent = agent.New(h.agentCfg, testLogger(h.t).With("side", "agent"))
+	h.agent = agent.New(h.agentCfg, h.agentDir, testLogger(h.t).With("side", "agent"))
 	if h.offerCaps != nil {
 		h.agent.SetCapabilityOffer(h.offerCaps)
 	}
@@ -270,6 +289,113 @@ func TestPerConnRoundTrip(t *testing.T) {
 	in, out := h.agent.LinkTotalBytes()
 	t.Fatalf("per-conn data bytes not counted: in delta %d, out delta %d, want ≥ %d each",
 		in-beforeIn, out-beforeOut, len(payload))
+}
+
+// TestQUICRoundTrip: the QUIC transport moves bytes end to end over a single
+// agent-dialed QUIC connection (one stream per player), and that stream's
+// payload is counted into the agent's link totals so the GUI's link card stays
+// honest — the QUIC twin of TestPerConnRoundTrip.
+func TestQUICRoundTrip(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportQUIC})
+	addr := h.waitPublicPort()
+
+	beforeIn, beforeOut := h.agent.LinkTotalBytes()
+	payload := bytes.Repeat([]byte("quic transport works "), 4096) // ~90 KiB
+	roundTrip(t, addr, payload)
+
+	// The data stream's payload must land in the link totals; a control-only
+	// count would be far below the payload size.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		in, out := h.agent.LinkTotalBytes()
+		if in-beforeIn >= int64(len(payload)) && out-beforeOut >= int64(len(payload)) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	in, out := h.agent.LinkTotalBytes()
+	t.Fatalf("quic stream bytes not counted: in delta %d, out delta %d, want ≥ %d each",
+		in-beforeIn, out-beforeOut, len(payload))
+}
+
+// TestQUICMultiplexesPlayers: several players are served concurrently over one
+// QUIC connection (one stream each), with no per-player dial-back. Two live
+// connections that both echo while open prove the single connection multiplexes
+// players — QUIC's whole point, delivered without the extra connections per-conn
+// needs. (Cross-stream loss isolation under load is covered by the burst twin.)
+func TestQUICMultiplexesPlayers(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportQUIC})
+	addr := h.waitPublicPort()
+
+	const players = 3
+	conns := make([]net.Conn, players)
+	for i := range conns {
+		c, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			t.Fatalf("player %d dial: %v", i, err)
+		}
+		defer c.Close()
+		conns[i] = c
+	}
+	// Interleave so all three streams are live at once, not served serially.
+	buf := make([]byte, 4)
+	for round := 0; round < 3; round++ {
+		for i, c := range conns {
+			c.SetDeadline(time.Now().Add(10 * time.Second))
+			if _, err := c.Write([]byte("pkt!")); err != nil {
+				t.Fatalf("player %d write (round %d): %v", i, round, err)
+			}
+		}
+		for i, c := range conns {
+			if _, err := io.ReadFull(c, buf); err != nil {
+				t.Fatalf("player %d read (round %d): %v", i, round, err)
+			}
+			if !bytes.Equal(buf, []byte("pkt!")) {
+				t.Fatalf("player %d echo mismatch: %q", i, buf)
+			}
+		}
+	}
+}
+
+// TestAutoFallsBackWhenQUICBlocked: with the gateway's QUIC listener disabled
+// (simulating an ISP/firewall that blocks UDP), an auto-transport agent's QUIC
+// handshake fails and it falls through to per-conn over TCP — serving players and
+// reporting the transport it settled on. This is the ladder's core promise: QUIC
+// by default, graceful degradation when UDP won't pass.
+func TestAutoFallsBackWhenQUICBlocked(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{
+		transport: config.TransportAuto,
+		tweakGateway: func(cfg *config.Config) {
+			cfg.Gateway.QUICEnabled = false // no UDP listener → QUIC dial fails
+		},
+	})
+	addr := h.waitPublicPort()
+	roundTrip(t, addr, []byte("auto falls back to per-conn when UDP is blocked"))
+
+	if got := h.agent.ActiveTransport(); got != config.TransportPerConn {
+		t.Fatalf("active transport = %q, want %q (should fall back from blocked QUIC)", got, config.TransportPerConn)
+	}
+}
+
+// TestAutoUsesQUICWhenAvailable: the ladder's happy path — when the gateway
+// serves QUIC, an auto agent connects over it (top of the preference list) rather
+// than falling back.
+func TestAutoUsesQUICWhenAvailable(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportAuto})
+	addr := h.waitPublicPort()
+	roundTrip(t, addr, []byte("auto prefers quic"))
+
+	if got := h.agent.ActiveTransport(); got != config.TransportQUIC {
+		t.Fatalf("active transport = %q, want %q (QUIC available, should be preferred)", got, config.TransportQUIC)
+	}
 }
 
 // TestHealthPropagates: the agent's local-target probe result reaches the
@@ -680,7 +806,7 @@ func (h *harness) addAgent(t *testing.T, agentID string, tunnels []config.Tunnel
 	*cfg = *h.agentCfg
 	cfg.Agent.AgentID = agentID
 	cfg.Agent.Tunnels = tunnels
-	ag := agent.New(cfg, testLogger(t).With("side", "agent-"+agentID[:4]))
+	ag := agent.New(cfg, t.TempDir(), testLogger(t).With("side", "agent-"+agentID[:4]))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- ag.Run(ctx) }()
@@ -916,6 +1042,38 @@ func TestPerConnEvictionDrains(t *testing.T) {
 	}
 }
 
+// TestQUICEvictionDrains: evicting a QUIC agent tears down its live player
+// stream. Under QUIC the session (a *quic.Conn) is the whole drain boundary —
+// closing it kills every stream — so closeAll needs no dataConns (they ride the
+// session, not dedicated conns). The QUIC twin of the drain half of T5.
+func TestQUICEvictionDrains(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportQUIC})
+	addr := h.waitPublicPort()
+
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := conn.Write([]byte("live")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("echo before eviction: %v", err)
+	}
+
+	// Evict the agent; the live stream must terminate as the QUIC session closes.
+	h.stopAgent()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Read(buf); err == nil {
+		t.Fatal("quic player stream did not terminate on eviction")
+	}
+}
+
 // --- Bandwidth cap ---
 //
 // These assert the average download throughput over ~1s (far steadier than the
@@ -1109,13 +1267,52 @@ func TestBadTokenRejected(t *testing.T) {
 	thiefCfg.Agent.Token = config.NewToken() // wrong
 	thiefCfg.Agent.Tunnels = nil
 
-	thief := agent.New(thiefCfg, testLogger(t).With("side", "thief"))
+	thief := agent.New(thiefCfg, t.TempDir(), testLogger(t).With("side", "thief"))
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	err := thief.Run(ctx)
 	if !errors.Is(err, agent.ErrBadToken) {
 		t.Fatalf("want ErrBadToken, got %v", err)
 	}
+}
+
+// TestEnrollAndRevoke drives per-agent identity end to end: an agent enrolls with a
+// single-use pairing ticket, joins the gateway allowlist, moves traffic over the
+// identity-authenticated link, and after revocation gives up fatally on reconnect
+// instead of retry-hammering.
+func TestEnrollAndRevoke(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{enroll: true})
+	addr := h.waitPublicPort()
+
+	// Enrolled exactly once, with a derived agt_ id and a stored public key.
+	agents := h.gw.ListAgents()
+	if len(agents) != 1 {
+		t.Fatalf("want 1 enrolled agent, got %d: %+v", len(agents), agents)
+	}
+	rec := agents[0]
+	if len(rec.AgentID) < 5 || rec.AgentID[:4] != "agt_" || len(rec.PubKey) == 0 {
+		t.Fatalf("enrolled record looks wrong: %+v", rec)
+	}
+	// Traffic flows over the identity-authenticated link (no shared token).
+	roundTrip(t, addr, []byte("identity works"))
+
+	// Revoke: the live session is evicted and the agent, on reconnect, is refused
+	// fatally rather than looping.
+	if !h.gw.RevokeAgent(rec.AgentID) {
+		t.Fatal("revoke reported the agent was not found")
+	}
+	select {
+	case err := <-h.agentDone:
+		if !errors.Is(err, agent.ErrRevoked) {
+			t.Fatalf("revoked agent: want ErrRevoked, got %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("revoked agent did not give up after eviction")
+	}
+	h.agentStop()     // release the ctx now that Run has returned
+	h.agentStop = nil // we already drained agentDone; keep cleanup from blocking
 }
 
 // TestBurstThroughputAndCrossStreamLatency pushes 64 MiB through one
@@ -1142,6 +1339,21 @@ func TestBurstThroughputPerConn(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
 	runBurst(t, newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportPerConn}))
+}
+
+// TestBurstThroughputQUIC is the QUIC twin of the burst floor gate. Userspace
+// QUIC is CPU-heavier than kernel TCP (and GSO/GRO support varies on Windows),
+// so this is the load-bearing check that QUIC clears the SAME floor: ≥20 MiB/s
+// round-trip and worst cross-stream RTT ≤500 ms — the latter also proving one
+// player's saturating stream doesn't head-of-line-block another's over the one
+// shared QUIC connection. Do not lower the floor to make this pass.
+func TestBurstThroughputQUIC(t *testing.T) {
+	if testing.Short() {
+		t.Skip("burst benchmark skipped in -short")
+	}
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	runBurst(t, newHarnessWith(t, echoAddr, harnessOpts{transport: config.TransportQUIC}))
 }
 
 // runBurst drives the burst-and-probe floor check against a live harness:
