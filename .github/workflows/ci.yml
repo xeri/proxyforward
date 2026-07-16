@@ -209,6 +209,48 @@ jobs:
           bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           ./actionlint -color
 
+  # docs/agent/naming.md: names describe the change, never the plan that produced
+  # it, and commit messages carry no assistant attribution. PR-only because the
+  # checked surfaces (head branch, title, commit range) only exist on PRs.
+  naming:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # head_ref and the PR title are attacker-controlled on fork PRs — they enter
+      # the script through env, never through template interpolation (zizmor).
+      - name: no plan jargon or attribution trailers
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          jargon='\b(phase|pillar|sprint|milestone|week)[ _-]?[0-9ivx]+\b|\bbatch[ _-][a-d0-9]\b'
+          trailers='^(co-authored-by:.*claude|claude-session:)'
+          fail=0
+          if printf '%s\n%s\n' "$HEAD_REF" "$PR_TITLE" | grep -qiE "$jargon"; then
+            echo "::error::branch name or PR title carries plan jargon - name the change, not the plan (docs/agent/naming.md)"
+            fail=1
+          fi
+          if git log --format='%B' "$BASE_SHA..HEAD" | grep -qiE "$jargon"; then
+            echo "::error::a commit message in this PR carries plan jargon - name the change, not the plan (docs/agent/naming.md)"
+            git log --format='%h %s' "$BASE_SHA..HEAD" | grep -iE "$jargon" || true
+            fail=1
+          fi
+          if git log --format='%B' "$BASE_SHA..HEAD" | grep -qiE "$trailers"; then
+            echo "::error::assistant attribution trailer in a commit message - no Claude-Session/Co-Authored-By: Claude (docs/agent/naming.md)"
+            fail=1
+          fi
+          if git diff --name-only "$BASE_SHA...HEAD" | grep -iE '(phase|pillar|sprint|milestone|week|batch)[_-]?([0-9ivx]+|[a-d])([._-]|$)'; then
+            echo "::error::a changed file path carries plan jargon - name the file for its topic (docs/agent/naming.md)"
+            fail=1
+          fi
+          exit "$fail"
+
   build-windows:
     needs: frontend
     runs-on: windows-latest

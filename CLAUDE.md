@@ -29,6 +29,8 @@ polish. Protect what works; be honest about what doesn't exist yet (Reality chec
   triggers** — `docs/agent/reasoning.md`. Read it before chasing any bug.
 - **Known UX debt** — `docs/agent/polish-backlog.md`; pull from it before inventing
   new polish work.
+- **Naming & git hygiene** (branches, PRs, commits, spec files) —
+  `docs/agent/naming.md`; CI's naming job is the gate.
 - **Full command list + devmock UI state matrix** — `docs/agent/commands.md`.
 - **Design charter** — `frontend/DESIGN.md`; read it before any UI work.
 
@@ -216,13 +218,20 @@ Nothing enforces this; it is judgment, and ignoring it has already cost a sessio
   and check with `git merge-base --is-ancestor` rather than assuming one exists.
 - **Label knowingly-incomplete work `wip:` and say what is missing.** An unlabelled
   stub reads as a finished decision to the next session.
+- **Name branches, PRs, and commits for the change, never the plan that produced
+  them** — plan labels ("phase 9", "pillar 8") mean nothing outside their session.
+  Rules + examples: `docs/agent/naming.md`; CI's naming job is the gate.
+- **No attribution in commits.** DO NOT append Claude session URLs; DO NOT include
+  `Co-Authored-By: Claude` trailers. The message says what changed and why, nothing
+  else (same gate; `.claude/settings.json` sets attribution empty at the source).
 
 ## Enforcement — what is a gate, not advice
 
 Blocks a merge → CI. `.github/workflows/ci.yml`: gofmt, vet, `go test -short` (unit +
 e2e + goleak + doccheck), `-race` (CI is the **only** place it runs — it needs cgo),
 the burst floor (own job, best-of-3 — never lower the floor to go green),
-`golangci-lint` (`.golangci.yml`), a TODO/FIXME ban, `actionlint`, and a
+`golangci-lint` (`.golangci.yml`), a TODO/FIXME ban, `actionlint`, the naming gate
+(plan jargon + attribution trailers anywhere in a PR — `docs/agent/naming.md`), and a
 stale-`frontend/wailsjs` check. `.github/workflows/security.yml`: CodeQL, govulncheck,
 gitleaks, dependency-review, npm audit (gosec/zizmor/Scorecard are advisory → Security
 tab). `.github/workflows/fuzz.yml` fuzzes the parsers nightly;
