@@ -7,6 +7,33 @@ import (
 	"testing"
 )
 
+// TestEnrollTicket: a minted enrollment ticket is self-describing (tkt_ prefix)
+// so a pasted pairing code routes to per-identity enrollment, while a bare-hex
+// legacy shared token does not; two mints never collide. (identity, enroll)
+func TestEnrollTicket(t *testing.T) {
+	a, err := NewEnrollTicket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(a, EnrollTicketPrefix) {
+		t.Fatalf("ticket %q missing %q prefix", a, EnrollTicketPrefix)
+	}
+	if !IsEnrollTicket(a) {
+		t.Fatalf("IsEnrollTicket(%q) = false, want true", a)
+	}
+	// A legacy shared token is bare hex — never mistaken for an enrollment ticket.
+	if IsEnrollTicket("3f8a1c9e2b7d4056a1b2c3d4e5f60718") {
+		t.Fatalf("a bare-hex shared token must not read as an enrollment ticket")
+	}
+	b, err := NewEnrollTicket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Fatalf("two minted tickets collided: %q", a)
+	}
+}
+
 // TestAgentIDDerivation: the agentID is deterministic for a given public key,
 // carries the agt_ prefix, and two distinct keys never render the same ID.
 // (identity)

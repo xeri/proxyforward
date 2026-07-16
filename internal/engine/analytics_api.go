@@ -53,6 +53,11 @@ func (e *Engine) analyticsOp(op string, body json.RawMessage) (json.RawMessage, 
 		}
 		return encodeResult(e.Stats.AgentHistory(q.AgentID, q.WindowMs, q.MaxBuckets), nil)
 	}
+	// Gateway agent-administration ops act on the live gateway (allowlist, sessions,
+	// event ring), not the analytics store, so they answer even when the DB is down.
+	if isAgentAdminOp(op) {
+		return e.agentAdminOp(op, body)
+	}
 	if e.DB == nil {
 		return nil, fmt.Errorf("analytics store unavailable")
 	}

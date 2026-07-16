@@ -304,6 +304,71 @@ func (g *Gateway) SetAgentScope(agentID string, scope Scope) bool {
 	return g.agents != nil && g.agents.SetScope(agentID, scope)
 }
 
+// AgentView is one agent's management row for the GUI roster: its persisted
+// identity and policy joined with live-session status. An enrolled agent that is
+// offline still appears (Connected=false); a live shared-token agent that never
+// enrolled appears too (Enrolled=false). Scope is flattened to slices so the Wails
+// binding generator can model it without a nested cross-package type.
+type AgentView struct {
+	AgentID       string   `json:"agentId"`
+	Nickname      string   `json:"nickname"`
+	Enrolled      bool     `json:"enrolled"`
+	Revoked       bool     `json:"revoked"`
+	ScopePorts    []int    `json:"scopePorts"`
+	ScopeTunnels  []string `json:"scopeTunnels"`
+	IssuedAtMs    int64    `json:"issuedAtMs"`
+	Connected     bool     `json:"connected"`
+	Hostname      string   `json:"hostname"`
+	RemoteIP      string   `json:"remoteIp"`
+	LinkUpSinceMs int64    `json:"linkUpSinceMs"`
+	Tunnels       int      `json:"tunnels"`
+}
+
+// ListAgentViews joins the enrollment allowlist with live sessions and tunnel
+// counts into the roster the GUI polls: every enrolled agent (online or not) plus
+// any connected shared-token agent that isn't enrolled, sorted by agentID.
+func (g *Gateway) ListAgentViews() []AgentView {
+	live := map[string]AgentLink{}
+	for _, l := range g.Agents() {
+		live[l.AgentID] = l
+	}
+	tunCount := map[string]int{}
+	for _, t := range g.Tunnels() {
+		tunCount[t.AgentID]++
+	}
+	seen := map[string]bool{}
+	var out []AgentView
+	for _, r := range g.ListAgents() {
+		seen[r.AgentID] = true
+		v := AgentView{
+			AgentID:      r.AgentID,
+			Nickname:     r.Nickname,
+			Enrolled:     true,
+			Revoked:      r.Revoked,
+			ScopePorts:   r.Scope.Ports,
+			ScopeTunnels: r.Scope.TunnelIDs,
+			IssuedAtMs:   r.IssuedAt.UnixMilli(),
+			Tunnels:      tunCount[r.AgentID],
+		}
+		if l, ok := live[r.AgentID]; ok {
+			v.Connected, v.Hostname, v.RemoteIP, v.LinkUpSinceMs = true, l.Hostname, l.RemoteIP, l.LinkUpSinceMs
+		}
+		out = append(out, v)
+	}
+	for id, l := range live {
+		if seen[id] {
+			continue
+		}
+		out = append(out, AgentView{
+			AgentID: id, Enrolled: false, Connected: true,
+			Hostname: l.Hostname, RemoteIP: l.RemoteIP, LinkUpSinceMs: l.LinkUpSinceMs,
+			Tunnels: tunCount[id],
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].AgentID < out[j].AgentID })
+	return out
+}
+
 // TunnelPort reports the actual bound public port of a tunnel (0, false if
 // not currently bound). Used by status surfaces and tests.
 func (g *Gateway) TunnelPort(tunnelID string) (int, bool) {
