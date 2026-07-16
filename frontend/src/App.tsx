@@ -18,6 +18,8 @@ import {Spinner} from './components/ui'
 import {UIStatus, useTick} from './state'
 import {prefersReduced} from './motion'
 import {resetBands} from './rubberband'
+import {TakePendingDeepLink} from '../wailsjs/go/app/App'
+import {EventsOn} from '../wailsjs/runtime/runtime'
 
 const supportsVT = typeof (document as Document & {startViewTransition?: unknown}).startViewTransition === 'function'
 
@@ -117,7 +119,21 @@ export default function App() {
   useEffect(() => {
     if (backendWizard) setWizardHold(true)
   }, [backendWizard])
+
+  // A clicked pxf:// pairing invite arrives from the OS via the backend: stashed for
+  // a cold launch (drained once) or emitted on a warm one. Either way, open the wizard
+  // straight onto the agent paste step with the code prefilled. The user still reviews
+  // and confirms — a clicked link never auto-connects.
+  const [deepLink, setDeepLink] = useState('')
+  useEffect(() => {
+    let done = false
+    TakePendingDeepLink().then(url => { if (!done && url) { setDeepLink(url); setWizardHold(true) } }).catch(() => {})
+    const off = EventsOn('pxf:deeplink', (url: string) => { setDeepLink(url); setWizardHold(true) })
+    return () => { done = true; off() }
+  }, [])
+
   const finishWizard = () => {
+    setDeepLink('') // a later manual reopen starts at role selection, not a stale link
     const doc = document as Document & {startViewTransition?: (cb: () => void) => void}
     if (!prefersReduced() && doc.startViewTransition) {
       // Glaze the handover: the ambient glow flares and a glare sweep crosses
@@ -142,7 +158,7 @@ export default function App() {
   if (backendWizard || wizardHold) {
     return (
       <Shell titlebar={<TitleBar brand />}>
-        <Wizard status={status} onDone={finishWizard} />
+        <Wizard status={status} onDone={finishWizard} deepLink={deepLink} />
       </Shell>
     )
   }

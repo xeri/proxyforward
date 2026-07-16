@@ -58,6 +58,7 @@ export function installDevMock() {
   const axisGeo = params.get('geo') || '' // off | empty | error | pending
   const axisFleet = params.get('fleet') || '' // '' (single agent) | multi | old
   const axisConflict = params.get('conflict') || '' // '' | port | clone | both
+  const axisDeepLink = params.get('deeplink') === '1' // simulate a clicked pxf:// invite
   const fx = params.get('fx')
   if (fx) document.documentElement.dataset.fx = fx // &fx=high | &fx=low
 
@@ -949,9 +950,11 @@ export function installDevMock() {
           return undefined
         })()
         : Promise.reject(new Error(`agent ${agentId} not found (it may have already disconnected or been removed)`))),
-    // No OS deep link in browser dev; the real app pulls this once on mount to open
-    // straight into pairing when launched via a clicked pxf:// link.
-    TakePendingDeepLink: () => ok(''),
+    // The real app pulls this once on mount to open straight into pairing when
+    // launched via a clicked pxf:// link. In browser dev &deeplink=1 simulates one.
+    TakePendingDeepLink: () => ok(axisDeepLink
+      ? 'pxf://play.example.com:8474/v1/pair/tkt_0123456789abcdef0123456789abcdef#sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      : ''),
     Version: () => ok('0.1.0-dev'),
     LogsSince: (seq: number) => ok(axisAttached ? [] : logs.filter(l => l.seq > seq)),
     TestReachability: () => new Promise(r => setTimeout(() => r('Reachable: play.example.com:25565 answered in 38ms — players can connect.'), 700)),
