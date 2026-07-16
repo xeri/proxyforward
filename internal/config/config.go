@@ -24,13 +24,21 @@ const (
 	RoleGateway Role = "gateway"
 )
 
-// TransportMux multiplexes all data streams over the single control
-// connection; TransportPerConn opens a fresh outbound data connection per
-// proxied client (avoids TCP head-of-line blocking at the cost of more
-// connections).
+// Transport selects the agent's data plane. TransportMux multiplexes all
+// streams over one TCP control connection (one player's loss stalls all).
+// TransportPerConn opens a fresh outbound TCP connection per proxied client
+// (kills cross-player head-of-line blocking at the cost of more connections and
+// NAT entries). TransportQUIC keeps one connection like mux but flow-controls
+// each player's stream independently, so it kills HOL without the extra
+// connections — and survives the agent's IP changing (passive QUIC migration).
+// TransportAuto prefers QUIC and falls back to per-conn then mux when the QUIC
+// (UDP) handshake fails — e.g. an ISP blocks UDP — re-probing on reconnect and
+// on network changes; the explicit values force one transport.
 const (
 	TransportMux     = "mux"
 	TransportPerConn = "per-conn"
+	TransportQUIC    = "quic"
+	TransportAuto    = "auto"
 )
 
 const (
@@ -73,8 +81,13 @@ type AgentConfig struct {
 	GatewayPort     int      `toml:"gateway_port"`
 	Token           string   `toml:"token"`
 	CertFingerprint string   `toml:"cert_fingerprint"` // "sha256:<hex>" of the gateway's pinned cert
-	Transport       string   `toml:"transport"`        // "mux" | "per-conn"
+	Transport       string   `toml:"transport"`        // "auto" | "quic" | "per-conn" | "mux"
 	Tunnels         []Tunnel `toml:"tunnels"`
+	// EnrollTicket is a one-time pairing ticket carried on the first connect to a
+	// gateway running per-agent identity; the agent clears it once the gateway
+	// confirms enrollment. Empty in steady state (the Ed25519 identity authenticates
+	// thereafter).
+	EnrollTicket string `toml:"enroll_ticket"`
 }
 
 type Tunnel struct {
@@ -120,6 +133,16 @@ type GatewayConfig struct {
 	MaxConnsGlobal     int `toml:"max_conns_global"`
 	MaxConnsPerIP      int `toml:"max_conns_per_ip"`
 	AuthAttemptsPerMin int `toml:"auth_attempts_per_min"`
+	// QUICEnabled binds a UDP QUIC control listener alongside the TCP one, on the
+	// same port, so agents configured transport="quic" (or "auto") can dial it.
+	// Default on; a missing key inherits that (Load overlays onto Default). Set
+	// false to serve TCP transports only.
+	QUICEnabled bool `toml:"quic_enabled"`
+	// AcceptSharedToken keeps the legacy one-token-for-all authenticator enabled
+	// alongside per-agent identity, so an existing fleet can migrate gradually.
+	// Default on (Load overlays onto Default); set false once every agent has
+	// enrolled to fully close the shared-token supersede/port-squat risk.
+	AcceptSharedToken bool `toml:"accept_shared_token"`
 }
 
 type MetricsConfig struct {
@@ -164,7 +187,7 @@ func Default() *Config {
 	return &Config{
 		Agent: AgentConfig{
 			GatewayPort: DefaultControlPort,
-			Transport:   TransportMux,
+			Transport:   TransportAuto,
 		},
 		Gateway: GatewayConfig{
 			BindAddr:           "0.0.0.0",
@@ -172,6 +195,8 @@ func Default() *Config {
 			MaxConnsGlobal:     4096,
 			MaxConnsPerIP:      32,
 			AuthAttemptsPerMin: 10,
+			QUICEnabled:        true,
+			AcceptSharedToken:  true,
 		},
 		Metrics: MetricsConfig{
 			PrometheusAddr: "127.0.0.1:9464",
@@ -331,8 +356,10 @@ func (c *Config) validateAgent() []error {
 	if a.CertFingerprint != "" && !strings.HasPrefix(a.CertFingerprint, "sha256:") {
 		errs = append(errs, fmt.Errorf("agent.cert_fingerprint: must start with \"sha256:\", got %q", a.CertFingerprint))
 	}
-	if a.Transport != TransportMux && a.Transport != TransportPerConn {
-		errs = append(errs, fmt.Errorf("agent.transport: must be %q or %q, got %q", TransportMux, TransportPerConn, a.Transport))
+	switch a.Transport {
+	case TransportMux, TransportPerConn, TransportQUIC, TransportAuto:
+	default:
+		errs = append(errs, fmt.Errorf("agent.transport: must be one of %q, %q, %q, %q, got %q", TransportAuto, TransportQUIC, TransportPerConn, TransportMux, a.Transport))
 	}
 	seenID := map[string]bool{}
 	// Ports are per protocol: a TCP and a UDP tunnel may share a number.
