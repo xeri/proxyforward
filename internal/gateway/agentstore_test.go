@@ -11,6 +11,49 @@ import (
 
 func pub(b byte) []byte { return bytes.Repeat([]byte{b}, 32) }
 
+// TestEnrollRejectsAgentIDCollision: two different keys may never share one agentID.
+// The store is keyed by pubkey, but every management op below it — Revoke, SetScope,
+// Rename, DesiredConfig, AdoptConfig — resolves an agent by scanning for the *label*
+// and taking the first match, and the actor's live-session map is keyed by it too. So
+// two records answering to one name make revocation and scope land on whichever
+// record Go's map iteration happens to yield: an operator revokes an agent and the
+// wrong one dies, nondeterministically. agentID derives from the key, so a clash is
+// either an astronomical accident or someone who went looking for one; either way the
+// join fails closed and the label stays a true primary key. (identity)
+func TestEnrollRejectsAgentIDCollision(t *testing.T) {
+	s, err := LoadAgentStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	mkTicket := func() string {
+		tk, err := s.IssueEnrollment(false, time.Time{}, Scope{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tk
+	}
+
+	if _, err := s.Enroll(pub(1), "agt_collide", mkTicket(), now); err != nil {
+		t.Fatalf("first enroll: %v", err)
+	}
+	// A different key deriving the same label must be refused.
+	if _, err := s.Enroll(pub(2), "agt_collide", mkTicket(), now); !errors.Is(err, ErrAgentIDCollision) {
+		t.Fatalf("colliding key: err = %v, want ErrAgentIDCollision", err)
+	}
+	// The incumbent is untouched: a collision attempt must not evict or rewrite it.
+	if rec, ok := s.Lookup(pub(1)); !ok || rec.AgentID != "agt_collide" {
+		t.Fatalf("incumbent record damaged by the collision attempt: %+v ok=%v", rec, ok)
+	}
+	if _, ok := s.Lookup(pub(2)); ok {
+		t.Fatal("the colliding key must not have been enrolled")
+	}
+	// Re-enrolling the same key under its own label is a reconnect, not a clash.
+	if _, err := s.Enroll(pub(1), "agt_collide", mkTicket(), now); err != nil {
+		t.Fatalf("re-enrolling the same key must succeed: %v", err)
+	}
+}
+
 // TestAgentStoreEnrollLookupRevoke: a single-use ticket enrolls one agent, is then
 // spent, and revoke flips the record. (identity)
 func TestAgentStoreEnrollLookupRevoke(t *testing.T) {

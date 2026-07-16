@@ -32,6 +32,11 @@ var (
 	ErrTicketUnknown  = errors.New("pairing code not recognized (it may have been rotated)")
 	ErrTicketConsumed = errors.New("this pairing code was already used — ask for a fresh one")
 	ErrTicketExpired  = errors.New("this pairing code has expired — ask for a fresh one")
+	// ErrAgentIDCollision fires when a joining key derives an agentID another key
+	// already holds. Every management op below resolves an agent by that label, so
+	// two keys sharing one would make revocation, scope, and config land on an
+	// arbitrary record. Refusing the join keeps the label a true primary key.
+	ErrAgentIDCollision = errors.New("this agent's derived id collides with an enrolled agent — regenerate its identity key and re-pair")
 )
 
 // Scope restricts which public ports and tunnel IDs an agent may bind. An empty
@@ -181,6 +186,17 @@ func (s *AgentStore) Enroll(pubKey []byte, agentID, ticket string, now time.Time
 	}
 
 	key := hex.EncodeToString(pubKey)
+	// agentID derives from pubKey, so a clash here means a *different* key hashed to
+	// the same label — the astronomical accident, or someone who went looking for one.
+	// Fail the join rather than let two keys answer to one name: every management op
+	// below (and the actor's live-session map) resolves an agent by that label and
+	// would otherwise land on whichever record map iteration happened to yield.
+	// Re-enrolling the *same* key is a reconnect, not a clash.
+	for k, r := range s.agents {
+		if r.AgentID == agentID && k != key {
+			return AgentRecord{}, ErrAgentIDCollision
+		}
+	}
 	rec := AgentRecord{
 		AgentID:  agentID,
 		PubKey:   append([]byte(nil), pubKey...),
