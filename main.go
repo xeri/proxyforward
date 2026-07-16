@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,7 +39,16 @@ func main() {
 	// GUI when run with no arguments, so double-clicking must work.
 	cobra.MousetrapHelpText = ""
 	crashLog := installCrashLog()
-	if err := newRootCmd().Execute(); err != nil {
+
+	// A pxf:// protocol launch (a clicked pairing link) arrives as the process's
+	// sole argument. Pull it out before cobra parses argv — otherwise the URL looks
+	// like an unknown subcommand — and run the GUI straight into pairing with it.
+	deepLink := deepLinkArg(os.Args[1:])
+	if deepLink != "" {
+		os.Args = os.Args[:1]
+	}
+
+	if err := newRootCmd(deepLink).Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		if crashLog != nil {
 			fmt.Fprintf(crashLog, "%s error: %v\n", time.Now().Format(time.RFC3339), err)
@@ -68,7 +78,19 @@ func installCrashLog() *os.File {
 	return f
 }
 
-func newRootCmd() *cobra.Command {
+// deepLinkArg returns the pxf:// pairing link if args represent an OS protocol
+// launch — the app was handed a single pxf:// URL and nothing else. A subcommand
+// (including `pair <code>`, which also carries a pxf:// string as its own argument)
+// has more than one element or a non-URL first token, so it is never mistaken for a
+// deep link.
+func deepLinkArg(args []string) string {
+	if len(args) != 1 || !link.IsPairingURL(args[0]) {
+		return ""
+	}
+	return strings.TrimSpace(args[0])
+}
+
+func newRootCmd(deepLink string) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "proxyforward",
 		Short:         "ngrok-style reverse tunnel for Minecraft servers behind NAT",
@@ -76,7 +98,7 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runGUI()
+			return runGUI(deepLink)
 		},
 	}
 	root.AddCommand(
@@ -396,7 +418,7 @@ func newFirewallCmd() *cobra.Command {
 	return cmd
 }
 
-func runGUI() error {
+func runGUI(deepLink string) error {
 	configPath := config.DefaultPath(false)
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -423,6 +445,11 @@ func runGUI() error {
 	}
 
 	a := app.New(configPath, cfg, ring, logger)
+	// A cold start via the OS protocol handler: the frontend isn't listening yet,
+	// so stash the link now for it to pull once it mounts (App.TakePendingDeepLink).
+	if deepLink != "" {
+		a.HandleDeepLink(deepLink)
+	}
 	// Wails reports webview/runtime failures through its own logger and can
 	// os.Exit without returning an error; in a windowsgui process that output
 	// is invisible, so route it to a file next to the crash log.
@@ -433,6 +460,15 @@ func runGUI() error {
 		Height:    820,
 		MinWidth:  1280,
 		MinHeight: 760,
+		// One GUI window owns the pairing flow: a second launch (e.g. clicking
+		// another pxf:// link) is forwarded here and exits, so the link always
+		// lands in the running window instead of opening a duplicate.
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId: "proxyforward-gui-single-instance",
+			OnSecondInstanceLaunch: func(data options.SecondInstanceData) {
+				a.OnSecondInstance(deepLinkArg(data.Args))
+			},
+		},
 		// The window is frameless: the frontend draws its own title bar and
 		// window controls. DWM decorations stay on (default) so the frameless
 		// window keeps its drop shadow, rounded corners and Snap Layouts.

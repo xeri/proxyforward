@@ -58,6 +58,10 @@ export function GetConfig() {
   return window['go']['app']['App']['GetConfig']();
 }
 
+export function HandleDeepLink(arg1) {
+  return window['go']['app']['App']['HandleDeepLink'](arg1);
+}
+
 export function ImportSetup(arg1, arg2) {
   return window['go']['app']['App']['ImportSetup'](arg1, arg2);
 }
@@ -72,6 +76,10 @@ export function LogsSince(arg1) {
 
 export function MeasureLatency() {
   return window['go']['app']['App']['MeasureLatency']();
+}
+
+export function OnSecondInstance(arg1) {
+  return window['go']['app']['App']['OnSecondInstance'](arg1);
 }
 
 export function OpenConfigDir() {
@@ -160,6 +168,10 @@ export function Status() {
 
 export function Summary(arg1) {
   return window['go']['app']['App']['Summary'](arg1);
+}
+
+export function TakePendingDeepLink() {
+  return window['go']['app']['App']['TakePendingDeepLink']();
 }
 
 export function TestReachability(arg1) {

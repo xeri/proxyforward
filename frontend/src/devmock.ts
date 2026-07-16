@@ -787,7 +787,10 @@ export function installDevMock() {
     // field + status badge can be exercised.
     BrowseMMDB: (title: string) => ok(/asn/i.test(title) ? 'C:\\maxmind\\GeoLite2-ASN.mmdb' : 'C:\\maxmind\\GeoLite2-City.mmdb'),
     GetConfig: () => ok(config),
-    PairingCode: () => gated(() => 'pf1://play.example.com:8474/3f8a1c9e2b7d4056a1b2c3d4e5f60718#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'),
+    PairingCode: () => gated(() => 'pxf://play.example.com:8474/v1/pair/3f8a1c9e2b7d4056a1b2c3d4e5f60718#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'),
+    // No OS deep link in browser dev; the real app pulls this once on mount to open
+    // straight into pairing when launched via a clicked pxf:// link.
+    TakePendingDeepLink: () => ok(''),
     Version: () => ok('0.1.0-dev'),
     LogsSince: (seq: number) => ok(axisAttached ? [] : logs.filter(l => l.seq > seq)),
     TestReachability: () => new Promise(r => setTimeout(() => r('Reachable: play.example.com:25565 answered in 38ms — players can connect.'), 700)),
