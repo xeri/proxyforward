@@ -20,7 +20,7 @@ internal/
   gateway/              TLS listener, pre-auth, admission; actor.go = ONE goroutine
                         owning sessions+listeners; limits.go; per-conn RTT sampler
   relay/                Splice (the hot path) + TapConn (read-only sniff hook)
-  transport/            Session/Stream interfaces + tuned yamux impl (only yamux user)
+  transport/            Session/Stream interfaces + tuned yamux & QUIC impls (only yamux/quic-go user)
   control/              Wire protocol: envelope framing, messages, capabilities
   link/                 Pairing codes, self-signed cert + pin, backoff
   ipc/                  Named-pipe JSON-RPC (same framing); status/history/analytics
@@ -85,6 +85,9 @@ persisted to config.
 | Per-conn dial-back wait | 12 s (> data-conn pre-auth, so its failure surfaces first) | `perconn.go dataDialTimeout` |
 | Heartbeat / idle deadline / ctrl write | 5 s / 15 s / 10 s | `agent.go:38-43`, `gateway.go:45-53` |
 | yamux window / conn-write timeout | 1 MiB / 30 s | `transport/yamux.go` |
+| QUIC keepalive / idle / handshake | off / 30 s / 5 s (dial aborts at 2×) | `transport/quicconfig.go quicConfig` |
+| QUIC recv windows / max bidi streams / ALPN | 1→6 MiB stream, 2→12 MiB conn / 65536 / `pf-quic/1` | `transport/quicconfig.go quicConfig` |
+| Auto-transport re-probe cooldown | 5 min (cleared on network change) | `agent.go transportReprobeAfter` |
 | Splice buffer / write-stall deadline | 128 KiB pooled / 2 min | `relay.go` (`BufSize` / `WriteStallTimeout`) |
 | Bandwidth cap unit / burst | `Mbps × 125_000` B/s / `relay.BufSize` | `bwcap.go` |
 | Backoff | 1 s → 60 s full jitter, reset after 60 s stable | `link/backoff.go` |
@@ -105,7 +108,7 @@ persisted to config.
 | Pipe | 5 s request / 2 min idle timeouts; ACL BA+SY+IU | `ipc/server_windows.go` |
 | Cert | ECDSA P-256, 20-year validity (trust = pin, not expiry) | `link/cert.go:86` |
 | Key exchange | X25519MLKEM768 (PQ hybrid, Go default; `CurvePreferences` unset) | `link/cert.go`, `link/pq_test.go` |
-| Perf floor | ≥20 MiB/s, worst cross-stream RTT ≤500 ms (64 MiB loopback burst) | `e2e_test.go:716,719` |
+| Perf floor | ≥20 MiB/s, worst cross-stream RTT ≤500 ms (64 MiB loopback burst); per-transport twins `TestBurstThroughputPerConn` / `TestBurstThroughputQUIC` | `e2e_test.go:716,719` |
 | Blur ladder | control 10, Signal Glass 20, card frost 30, chrome 36, island 40, float 48, pop 56 px | `tokens.css` |
 | Switch geometry | 40×22 track, 1px rim + 2px seat → 16px knob (7px radius), 18px travel; ×`--ui-scale` | `tokens.css`, `ui.tsx Switch` |
 | Control height | 2.25rem + 2px = 1px rim + 0.5rem padding + 1.25rem line, per side | `tokens.css` |
@@ -120,6 +123,19 @@ the control stream → tunnel registration:
 - Capability `tunnel-sync`: one `sync_tunnels{seq, tunnels[]}` desired-state frame;
   gateway's actor reconciles (identical specs keep listeners + live conns:
   `actor.reconcile`), answers `sync_result` (stale seq dropped agent-side).
+- Capability `gateway-config` (enrolled agents only — it is keyed to the Ed25519
+  identity, so the gateway negotiates it away for a shared-token agent, which then
+  falls back to `tunnel-sync`): the gateway is authoritative. It stores each identity's
+  desired set in the `AgentStore` (`DesiredConfig`/`AdoptConfig`) with a monotonic
+  generation, hashed by `HashTunnels`. The agent reports its `configHash`/
+  `configGeneration` in the hello; the gateway reconciles its set onto the fresh
+  session's listeners and, on drift, pushes `push_config{generation, hash, tunnels[]}`
+  (agent applies + `config_ack`s: `applyPushedConfig`). First contact is bootstrapped by
+  the `hello_ok{configSeedNeeded}` flag, which asks the agent for one
+  `propose_config{tunnels[]}` seed. A local edit is a `propose_config` the gateway
+  adopts, bumps, and re-pushes — deterministic, not last-write-wins; a proposal on a
+  stale generation is refused and the authoritative set re-pushed
+  (`pushConfigOnConnect`/`adoptProposal`).
 - Legacy: per-tunnel `register_tunnel`/`unregister_tunnel` + `register_ok|register_err`.
 Steady state: `ping/pong` both directions (RTT/jitter/loss both sides; pong echoes
 `recvUnixNano` for one-way estimates); agent pushes `health{tunnelId, localUp}` on
@@ -139,6 +155,30 @@ TCP). Data conns resume the control conn's TLS session (`dialGateway` shares an 
 `ClientSessionCache`) and are drained on eviction alongside the mux (`agentSession`
 `dataConns`, `closeAll`). The gateway advertises the capability only because it serves
 the accept path end-to-end; a mux/legacy agent never offers it and rides `OpenStream`.
+
+QUIC data plane (agent config `transport = "quic"`; gateway `Gateway.QUICEnabled`, on by
+default): a separate wire, not a capability. The gateway binds a UDP QUIC listener on the
+**same port number** as the TCP control listener (`startQUIC`; TCP/UDP port spaces are
+independent, so the pairing code's one host:port serves both) and accepts sessions on it
+(`acceptQUIC`/`handleQUICSession`), reusing the same pre-auth guards, `Validator`, and the
+shared `buildAndAdmit`/`serveAdmitted` admission as the TCP path. A QUIC session is a
+`transport.Session` (`transport/quic.go`) that rides the existing `muxDataPlane` — control
+and every player are independent QUIC streams over one connection, so a lost packet on one
+stream can't head-of-line-block another (per-conn's benefit, one connection/handshake/NAT
+entry). No new control message or capability, and the hello frames are byte-identical.
+Liveness stays the app ping (`quicConfig` sets `KeepAlivePeriod=0`, `MaxIdleTimeout` above
+the 15 s budget); passive connection migration follows an agent whose IP changes. Eviction
+is simpler than per-conn — the session's `Close` (a `*quic.Conn`) tears down every stream,
+so `dataConns` stays empty (`closeAll` nil-guards the absent raw conn).
+
+Auto transport (agent config `transport = "auto"`, the shipped default): a connect-time
+fallback ladder, best-isolation first — QUIC → per-conn → mux (`transportPreference`).
+`runSessionAuto` tries each non-cooled rung; a rung that *connects* is served (Run backs
+off and the ladder re-evaluates on reconnect), a rung that fails to *connect* falls through
+immediately. A failed rung is cooled (`transportReprobeAfter`, cleared on `netnotify`
+change) only once a later rung succeeds — the "UDP blocked" tell; if every rung fails the
+link is simply down, so nothing is cooled. The rung that connects is reported to the GUI as
+`ActiveTransport` (tick `Status.Transport`) so a user can see what auto settled on.
 
 ## Analytics data model (`internal/analytics/schema.go`)
 

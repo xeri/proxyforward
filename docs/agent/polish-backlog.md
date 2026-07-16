@@ -14,9 +14,9 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
      Minecraft-aware hint's "Poll the server for MOTD, player count and version"
      claim (`frontend/src/screens/Tunnels.tsx:268-283`) — none are wired
      (`gateway.go handleClient`, no cap enforcement, no status poller).
-   - Settings: Transport "Per-connection" option (`Settings.tsx:139-144`), Prometheus
-     toggle + address (`Settings.tsx:227-232`), "Minimize to tray" and "Start on
-     login" (`Settings.tsx:122-125`) — all stored, all inert.
+   - Settings: Prometheus toggle + address, "Minimize to tray" and "Start on login"
+     — all stored, all inert. (The Transport selector is now fully wired: auto / quic /
+     per-conn / mux are all real, and the tick reports the active transport.)
    - Fix: either implement, or visibly mark ("not yet wired") / hide until real.
      Decide per-feature with the human (scope call — escalation trigger).
 
@@ -121,6 +121,23 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
     it. Fix: move `RoleCard` to `.pf-card` (or a "choice" recipe) reserving `.pf-signal`
     for the live-handshake step, or record it as a reviewed exception in a one-line
     comment (as #7 does for BandwidthChart's pickers).
+
+## QUIC transport follow-ons
+
+23. **Gateway per-session QUIC link bytes are unattributed** — the QUIC listener shares
+    one UDP socket across every agent session, so `sess.link` (the GUI's per-agent
+    LinkBytesIn/Out) can't be counted at the socket layer the way `NewCountingConn` wraps
+    a single yamux conn. Process totals (`g.linkTotals`) are exact; the agent side is exact
+    (one socket = one session). v1 leaves the gateway per-agent link bytes at 0 (renders
+    "—"). Proper fix: count at the stream layer inside `transport/quic.go` per accepted
+    session (would need the session's `*stats.LinkCounters` threaded in).
+24. **No QUIC connection-migration test** — passive migration (gateway follows an agent
+    whose public IP changes) is a claimed benefit but untested; a UDP relay that swaps its
+    source port mid-transfer would exercise it. Flaky-prone, hence deferred.
+25. **QUIC perf headroom on Windows** — `TestBurstThroughputQUIC` clears the floor
+    comfortably on loopback, but quic-go's GSO/GRO/ECN fast paths are largely Linux; a
+    Windows perf pass (and, if quic-go ever exposes a pluggable CC, BBR for lossy
+    residential links) is future work.
 
 ## Backend polish adjacent to UX
 
