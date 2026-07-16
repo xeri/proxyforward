@@ -36,6 +36,13 @@ const DEF = {
  * empty input so the default placeholder reads through. */
 const numStr = (n: number) => (n > 0 ? String(n) : '')
 
+/** Human labels for the active data-plane transport reported on the tick. */
+const TRANSPORT_LABEL: Record<string, string> = {
+  quic: 'QUIC',
+  'per-conn': 'Per-connection',
+  mux: 'Multiplexed',
+}
+
 type SectionDef = {id: string; label: string}
 
 /** Settings: a scrollspy rail beside regrouped sections. Engine-affecting
@@ -159,12 +166,19 @@ export function Settings({status}: {status: UIStatus}) {
                   onChange={v => patch(c => { c.Agent.GatewayPort = parseInt(v, 10) || 0 })} /></Field>
               </div>
               <div className="mt-3">
-                <Field label="Transport" hint="Multiplexed shares one gateway connection across all players; per-connection gives each player a dedicated connection, so one player's packet loss can't stall the others — at the cost of more connections.">
+                <Field label="Transport" hint="Automatic prefers QUIC — one connection where each player's packet loss can't stall the others — and falls back to per-connection or multiplexed if UDP is blocked. QUIC gives that isolation over a single connection; per-connection gives each player a dedicated connection; multiplexed shares one connection across all players (simplest, but one player's loss stalls everyone).">
                   <Select value={cfg.Agent.Transport} onChange={v => patch(c => { c.Agent.Transport = v })} options={[
-                    {value: 'mux', label: 'Multiplexed (default) — one connection'},
+                    {value: 'auto', label: 'Automatic (recommended) — prefer QUIC, fall back'},
+                    {value: 'quic', label: 'QUIC — one connection, no head-of-line blocking'},
                     {value: 'per-conn', label: 'Per-connection — one per player'},
+                    {value: 'mux', label: 'Multiplexed — one shared connection'},
                   ]} />
                 </Field>
+                {status.linkUp && status.transport && (
+                  <div className="mt-1.5 text-xs text-[var(--text-3)]">
+                    Currently connected via <span className="text-[var(--text-2)]">{TRANSPORT_LABEL[status.transport] ?? status.transport}</span>
+                  </div>
+                )}
               </div>
             </Section>
           ) : (

@@ -687,6 +687,7 @@ export namespace app {
 	    linkUp: boolean;
 	    rttMillis: number;
 	    agentConnected: boolean;
+	    transport: string;
 	    jitterMillis: number;
 	    packetLossPct: number;
 	    healthScore: string;
@@ -730,6 +731,7 @@ export namespace app {
 	        this.linkUp = source["linkUp"];
 	        this.rttMillis = source["rttMillis"];
 	        this.agentConnected = source["agentConnected"];
+	        this.transport = source["transport"];
 	        this.jitterMillis = source["jitterMillis"];
 	        this.packetLossPct = source["packetLossPct"];
 	        this.healthScore = source["healthScore"];
@@ -957,6 +959,7 @@ export namespace config {
 	    MaxConnsGlobal: number;
 	    MaxConnsPerIP: number;
 	    AuthAttemptsPerMin: number;
+	    QUICEnabled: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GatewayConfig(source);
@@ -972,6 +975,7 @@ export namespace config {
 	        this.MaxConnsGlobal = source["MaxConnsGlobal"];
 	        this.MaxConnsPerIP = source["MaxConnsPerIP"];
 	        this.AuthAttemptsPerMin = source["AuthAttemptsPerMin"];
+	        this.QUICEnabled = source["QUICEnabled"];
 	    }
 	}
 	export class Config {
