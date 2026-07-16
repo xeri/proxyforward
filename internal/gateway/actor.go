@@ -36,10 +36,29 @@ type agentSession struct {
 	// in the gateway GUI's identity badges. Set at admission, immutable after.
 	hostname string
 	localIPs []string
+	// scope restricts which public ports / tunnel IDs this agent may bind, from
+	// its per-agent allowlist record (empty = unrestricted). Set at admission,
+	// immutable after — enforced in validateSpec.
+	scope Scope
+
+	// enrolled is true when the agent authenticated per-identity (an Ed25519
+	// pubkey), not via the legacy shared token. Gateway-authoritative config
+	// (CapGatewayConfig) is keyed to that identity, so it engages only when enrolled.
+	// reportedConfigHash is the config hash the agent sent in its hello, compared
+	// once at connect to decide whether to push. Both immutable after admission.
+	enrolled           bool
+	reportedConfigHash string
+	// agentConfigGen is the config generation the agent currently holds: seeded from
+	// its hello, advanced on each config_ack. It is the basis a propose_config is
+	// checked against, so a stale proposal can't clobber newer authoritative state.
+	agentConfigGen atomic.Uint64
 
 	// caps is the negotiated capability set, fixed before admission —
 	// immutable for the session's lifetime, so reads need no locking.
 	caps control.CapSet
+	// dp is the data plane chosen from caps at admission (mux vs per-conn);
+	// handleClient acquires every player's leg through it. Immutable like caps.
+	dp dataPlane
 
 	sess    atomic.Pointer[sessionBox]
 	evicted atomic.Bool
@@ -123,12 +142,16 @@ func (a *agentSession) session() transport.Session {
 // closeAll tears down the underlying conn (which kills the mux, its streams,
 // and every splice riding them) plus every per-conn data connection (whose
 // splices ride dedicated conns, not the mux). Together these drain exactly this
-// agent's connections and none of another's.
+// agent's connections and none of another's. Under QUIC transport conn is nil —
+// closing the session (a *quic.Conn) is itself the whole drain boundary (all its
+// streams die with it) and dataConns is empty.
 func (a *agentSession) closeAll() {
 	if s := a.session(); s != nil {
 		s.Close()
 	}
-	a.conn.Close()
+	if a.conn != nil {
+		a.conn.Close()
+	}
 	a.dataConns.Range(func(_, v any) bool {
 		v.(net.Conn).Close()
 		return true
