@@ -283,8 +283,8 @@ func (g *Gateway) RevokeAgent(agentID string) bool {
 	}
 	ok := g.agents.Revoke(agentID)
 	if a := g.act(); a != nil {
-		// One actor hop: read the live session and evict it in the same fn. (Calling
-		// a.session here would nest a.do inside a.do and deadlock.)
+		// One actor hop: read the live session and evict it in the same fn. Looking it
+		// up through an accessor that itself calls a.do would nest a.do and deadlock.
 		a.do(func() {
 			if s := a.agents[agentID]; s != nil {
 				a.evict(s, "agent revoked")
@@ -1369,16 +1369,22 @@ func (g *Gateway) pushConfigOnConnect(sess *agentSession) {
 	if !ok || gen == 0 {
 		return // bootstrap: await the agent's seed propose_config
 	}
-	g.act().reconcile(sess, g.validSpecs(sess, stored), g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
-	hash := control.HashTunnels(stored)
+	// Push exactly the set the current scope permits binding, not the raw stored
+	// set: if the scope was narrowed after a tunnel was adopted, that tunnel is no
+	// longer bound here, and pushing it would show the agent a phantom "live" tunnel
+	// with no listener behind it. In the common (unchanged-scope) case valid==stored,
+	// so the hash and payload are identical and nothing changes.
+	valid := g.validSpecs(sess, stored)
+	g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
+	hash := control.HashTunnels(valid)
 	if sess.reportedConfigHash == hash && sess.agentConfigGen.Load() == gen {
 		return // agent is already in sync; listeners are (re)bound, nothing to push
 	}
-	if err := sess.writeControl(control.TypePushConfig, control.PushConfig{Generation: gen, Hash: hash, Tunnels: stored}); err != nil {
+	if err := sess.writeControl(control.TypePushConfig, control.PushConfig{Generation: gen, Hash: hash, Tunnels: valid}); err != nil {
 		sess.logger.Warn("push_config on connect failed", "err", err)
 		return
 	}
-	sess.logger.Info("pushed authoritative config", "generation", gen, "tunnels", len(stored))
+	sess.logger.Info("pushed authoritative config", "generation", gen, "tunnels", len(valid))
 }
 
 // adoptProposal handles a propose_config from an enrolled gateway-config agent: a

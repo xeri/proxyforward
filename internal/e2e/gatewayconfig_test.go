@@ -127,3 +127,50 @@ func TestGatewayConfigDriftOnReconnect(t *testing.T) {
 		t.Fatalf("reconnect must not bump the generation: %+v", agents)
 	}
 }
+
+// TestGatewayConfigScopeNarrowingHidesTunnel: narrowing an agent's scope after a
+// tunnel was adopted must not leave the agent showing a phantom tunnel. On the next
+// reconnect the gateway reconciles and pushes only the in-scope set, so the
+// now-out-of-scope tunnel is neither bound here nor learned by the agent. (gateway-config)
+func TestGatewayConfigScopeNarrowingHidesTunnel(t *testing.T) {
+	echoA, closeA := echoServer(t)
+	defer closeA()
+	h := newHarnessWith(t, echoA, harnessOpts{enroll: true})
+	h.waitPublicPort()
+	rec := waitConfigGen(t, h.gw, 1)
+
+	// Adopt a second tunnel B alongside A (A pinned to its resolved port so it does
+	// not flap through the promote).
+	echoB, closeB := echoServer(t)
+	defer closeB()
+	portA, ok := h.agent.TunnelPublicPort(h.tunnelID)
+	if !ok {
+		t.Fatal("tunnel A has no resolved port before promote")
+	}
+	tunnelB := config.NewID()
+	h.agent.ApplyTunnels([]config.Tunnel{
+		{ID: h.tunnelID, Name: "test", Type: config.TunnelTCP, LocalAddr: echoA, PublicPort: portA, Enabled: true},
+		{ID: tunnelB, Name: "b", Type: config.TunnelTCP, LocalAddr: echoB, PublicPort: 0, Enabled: true},
+	})
+	waitConfigGen(t, h.gw, 2)
+	waitPortForTunnel(t, h.agent, tunnelB)
+
+	// Narrow the agent's scope to tunnel A only, then reconnect it.
+	if !h.gw.SetAgentScope(rec.AgentID, gateway.Scope{TunnelIDs: []string{h.tunnelID}}) {
+		t.Fatal("SetAgentScope reported the agent was not found")
+	}
+	h.stopAgent()
+	h.startAgent()
+
+	// A comes back live; B must be neither pushed to the agent nor bound.
+	h.waitPublicPort()
+	roundTrip(t, fmt.Sprintf("127.0.0.1:%d", portA), []byte("in-scope tunnel survives"))
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := h.agent.TunnelPublicPort(tunnelB); !ok {
+			return // B correctly excluded from the pushed set
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("out-of-scope tunnel B was still pushed to the agent after scope narrowing")
+}
