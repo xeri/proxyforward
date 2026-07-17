@@ -206,6 +206,12 @@ func (a *App) startEngineLocked() {
 		a.logger.Error("engine start failed", "err", err)
 		return
 	}
+	if eng.Agent != nil {
+		// Make the gateway's authoritative push durable: without this the pushed
+		// set lives only in memory and the config file keeps a set the gateway no
+		// longer holds until the next connect re-pushes it.
+		eng.Agent.SetConfigPersister(a.persistPushedConfig)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	a.eng, a.cancel, a.done, a.mode = eng, cancel, done, ModeEngine
@@ -605,6 +611,12 @@ func (a *App) GetConfig() *config.Config {
 
 // SaveTunnels validates and persists a new tunnel set, hot-applying it to a
 // live agent (no restart, no dropped sessions on unchanged tunnels).
+//
+// Under mutual consent (a config-consent session) it instead *proposes* the edit
+// and changes nothing — not the running set, not the file. An approval returns as
+// the gateway's authoritative push, which applies and persists it
+// (persistPushedConfig); a rejection leaves the agent exactly as it was, with the
+// reason on PendingConsent. So a save there means "submitted", and the UI says so.
 func (a *App) SaveTunnels(tunnels []config.Tunnel) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -613,14 +625,41 @@ func (a *App) SaveTunnels(tunnels []config.Tunnel) error {
 	if err := trial.Validate(); err != nil {
 		return err
 	}
+	if a.eng != nil && a.eng.Agent != nil && a.eng.Agent.ConsentActive() {
+		proposed, err := a.eng.Agent.ProposeTunnels(tunnels)
+		if err != nil || proposed {
+			// Awaiting the gateway's decision: persist nothing yet. Its approval
+			// arrives as a push, and persistPushedConfig writes that.
+			return err
+		}
+		// Nothing the gateway owns changed, so the edit already applied locally —
+		// only this side has to remember it.
+	}
 	a.cfg.Agent.Tunnels = tunnels
 	if err := a.cfg.Save(a.configPath); err != nil {
 		return err
 	}
-	if a.eng != nil && a.eng.Agent != nil {
+	if a.eng != nil && a.eng.Agent != nil && !a.eng.Agent.ConsentActive() {
 		a.eng.Agent.ApplyTunnels(tunnels)
 	}
 	return nil
+}
+
+// persistPushedConfig saves a gateway-pushed tunnel set to disk. The push is the
+// single commit point for every authoritative config change (a consent approval, a
+// port reclaim, an auto-reassign), and the app and agent share one *config.Config,
+// so the new set is already what the editor reads — this is what makes it survive a
+// restart instead of being silently re-pushed every connect.
+//
+// It runs on the agent's control-reader goroutine and takes a.mu itself; the agent
+// calls it without holding its own cfgMu, so SaveTunnels' a.mu → cfgMu order is
+// never inverted. A failed write is reported to the agent, which logs and relies on
+// the gateway's re-push at the next connect.
+func (a *App) persistPushedConfig(tunnels []config.Tunnel, _ uint64) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfg.Agent.Tunnels = tunnels
+	return a.cfg.Save(a.configPath)
 }
 
 // SaveSettings persists settings edits. Engine-affecting changes (role

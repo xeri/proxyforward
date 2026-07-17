@@ -214,15 +214,16 @@ func (a *Agent) authFields() (pub, sig []byte, ticket string) {
 func (a *Agent) SetCapabilityOffer(caps []string) { a.offerCaps = caps }
 
 // offerFor is the capability set to offer when connecting over a specific
-// transport. It is transport-independent (tunnel-sync + conn-stats + gateway-config)
-// plus per-conn-data only for the per-conn transport — deliberately NOT
-// control.SupportedCapabilities, which would offer per-conn regardless and force
-// it on every agent. QUIC and mux offer no per-conn-data (QUIC rides the mux data
-// plane; the auto ladder computes this per rung). gateway-config is offered by every
-// agent but the gateway negotiates it away unless the agent is enrolled (it is keyed
-// to a durable identity), so a shared-token agent falls back to tunnel-sync.
+// transport. It is transport-independent (tunnel-sync + conn-stats + gateway-config
+// + config-consent) plus per-conn-data only for the per-conn transport —
+// deliberately NOT control.SupportedCapabilities, which would offer per-conn
+// regardless and force it on every agent. QUIC and mux offer no per-conn-data (QUIC
+// rides the mux data plane; the auto ladder computes this per rung). gateway-config
+// and config-consent are offered by every agent but the gateway negotiates them away
+// unless the agent is enrolled (both are keyed to a durable identity), so a
+// shared-token agent falls back to tunnel-sync.
 func offerFor(transport string) []string {
-	caps := []string{control.CapTunnelSync, control.CapConnStats, control.CapGatewayConfig}
+	caps := []string{control.CapTunnelSync, control.CapConnStats, control.CapGatewayConfig, control.CapConfigConsent}
 	if transport == config.TransportPerConn {
 		caps = append(caps, control.CapPerConn)
 	}
@@ -728,6 +729,15 @@ type session struct {
 	// every per-conn data conn — mirrored into a.linkTotals. Without counting
 	// the data conns the GUI's link card would under-report per-conn payload.
 	linkCounters *stats.LinkCounters
+
+	// pendingIncoming holds a gateway-authored config edit awaiting this machine's
+	// approval; pendingLocal an edit authored here awaiting the gateway's; and
+	// lastDecline the reason the gateway last refused one (control.CapConfigConsent
+	// — see consent.go). Living on the session makes them session-scoped by
+	// construction: a disconnect drops them, exactly as intended.
+	pendingIncoming atomic.Pointer[pendingConsent]
+	pendingLocal    atomic.Pointer[pendingConsent]
+	lastDecline     atomic.Pointer[string]
 }
 
 // Has reports whether the session negotiated a capability.
@@ -988,6 +998,33 @@ func (s *session) handleControlMsg(env *control.Envelope) error {
 		}
 		s.agent.applyPushedConfig(pc.Tunnels, pc.Generation)
 		return s.write(control.TypeConfigAck, control.ConfigAck{Generation: pc.Generation, Hash: pc.Hash})
+
+	case control.TypeConfigProposal:
+		// A gateway-authored edit awaiting this machine's consent; held, never
+		// applied here (see consent.go).
+		if !s.Has(control.CapConfigConsent) {
+			s.agent.logger.Warn("ignoring config_proposal: capability not negotiated")
+			return nil
+		}
+		prop, err := control.Decode[control.ConfigProposal](env)
+		if err != nil {
+			return err
+		}
+		s.holdGatewayProposal(*prop)
+		return nil
+
+	case control.TypeConfigDecision:
+		// The gateway's verdict on an edit authored here (see consent.go).
+		if !s.Has(control.CapConfigConsent) {
+			s.agent.logger.Warn("ignoring config_decision: capability not negotiated")
+			return nil
+		}
+		dec, err := control.Decode[control.ConfigDecision](env)
+		if err != nil {
+			return err
+		}
+		s.resolveLocalDecision(*dec)
+		return nil
 
 	case control.TypeConnStats:
 		cs, err := control.Decode[control.ConnStats](env)

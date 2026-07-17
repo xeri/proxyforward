@@ -58,6 +58,10 @@ func (e *Engine) analyticsOp(op string, body json.RawMessage) (json.RawMessage, 
 	if isAgentAdminOp(op) {
 		return e.agentAdminOp(op, body)
 	}
+	// Agent-role consent ops act on the live agent's session state — same reasoning.
+	if isAgentConsentOp(op) {
+		return e.agentConsentOp(op, body)
+	}
 	if e.DB == nil {
 		return nil, fmt.Errorf("analytics store unavailable")
 	}
