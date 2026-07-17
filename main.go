@@ -25,6 +25,7 @@ import (
 	"proxyforward/internal/engine"
 	"proxyforward/internal/link"
 	"proxyforward/internal/logging"
+	"proxyforward/internal/secureio"
 	"proxyforward/internal/svc"
 	"proxyforward/internal/version"
 	"proxyforward/internal/wincon"
@@ -64,7 +65,7 @@ func main() {
 // in the event log).
 func installCrashLog() *os.File {
 	dir := filepath.Join(config.DefaultDir(false), "logs")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := secureio.MkdirAll(dir); err != nil {
 		return nil
 	}
 	f, err := os.OpenFile(filepath.Join(dir, "crash.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)

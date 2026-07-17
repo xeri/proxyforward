@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
+	"proxyforward/internal/secureio"
 )
 
 type Role string
@@ -267,7 +268,9 @@ func (c *Config) Save(path string) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	// The config holds the gateway/agent tokens and the enrollment ticket, and the
+	// temp+rename below inherits the directory's ACL rather than any mode of its own.
+	if err := secureio.MkdirAll(dir); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	tmp, err := os.CreateTemp(dir, ".config-*.toml.tmp")

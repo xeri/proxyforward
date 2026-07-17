@@ -19,6 +19,7 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 
 	"proxyforward/internal/config"
+	"proxyforward/internal/secureio"
 )
 
 // FormatVersion is bumped only for changes an older reader cannot tolerate;
@@ -188,7 +189,9 @@ func Decode(data []byte, passphrase string) (role string, files map[string][]byt
 // with the Windows AV-scanner retry). The config is written last so a crash
 // mid-import can never leave a config referencing files that are not there.
 func WriteFiles(files map[string][]byte, destDir string) error {
-	if err := os.MkdirAll(destDir, 0o700); err != nil {
+	// An imported bundle lands the gateway key and config here; harden the
+	// destination before writing them, not after.
+	if err := secureio.MkdirAll(destDir); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	order := []string{FileCert, FileKey, FileStats, FileConfig}

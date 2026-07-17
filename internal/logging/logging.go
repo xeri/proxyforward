@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"proxyforward/internal/secureio"
 	"strings"
 )
 
@@ -45,7 +46,11 @@ func New(opts Options) (*slog.Logger, func() error, error) {
 		handlers = append(handlers, slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	}
 	if opts.FilePath != "" {
-		if err := os.MkdirAll(filepath.Dir(opts.FilePath), 0o700); err != nil {
+		// In service mode this sits under %ProgramData%, which grants local Users
+		// read by inheritance. Logs are not secrets by design, but they record
+		// hosts, peer IPs, and agent ids — and the 0o700 this replaces bought
+		// nothing on Windows, which is the platform that ships.
+		if err := secureio.MkdirAll(filepath.Dir(opts.FilePath)); err != nil {
 			return nil, nil, fmt.Errorf("create log dir: %w", err)
 		}
 		rw, err := newRotatingWriter(opts.FilePath, 10*1024*1024, 3)

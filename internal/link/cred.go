@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"proxyforward/internal/secureio"
 	"strings"
 )
 
@@ -177,7 +178,9 @@ func LoadOrCreateIdentity(dir string) (ed25519.PrivateKey, ed25519.PublicKey, er
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal agent identity: %w", err)
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	// secureio.MkdirAll, not os.MkdirAll: the 0600 below is a no-op on Windows, so
+	// the directory's ACL is what actually keeps this agent's identity key private.
+	if err := secureio.MkdirAll(dir); err != nil {
 		return nil, nil, fmt.Errorf("create identity dir: %w", err)
 	}
 	out := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})

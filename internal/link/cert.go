@@ -20,6 +20,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"proxyforward/internal/secureio"
 	"strings"
 	"time"
 )
@@ -53,7 +54,11 @@ func LoadOrCreateCert(dir string) (tls.Certificate, string, error) {
 	if err != nil {
 		return tls.Certificate{}, "", err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	// secureio.MkdirAll, not os.MkdirAll: the 0600 on the key write below is a
+	// no-op on Windows, so the directory's ACL is the only thing protecting the
+	// gateway's private key — and an attacker holding it can impersonate the
+	// gateway to every agent that pinned this cert.
+	if err := secureio.MkdirAll(dir); err != nil {
 		return tls.Certificate{}, "", fmt.Errorf("create cert dir: %w", err)
 	}
 	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {

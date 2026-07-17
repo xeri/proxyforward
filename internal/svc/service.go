@@ -11,6 +11,7 @@ import (
 	"github.com/kardianos/service"
 
 	"proxyforward/internal/config"
+	"proxyforward/internal/secureio"
 )
 
 const (
@@ -187,10 +188,16 @@ func seedServiceConfig() error {
 		}
 		return fmt.Errorf("read user config for seeding: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	// secureio, not os.MkdirAll: the destination is under %ProgramData%, whose
+	// default ACL grants BUILTIN\Users read and is inherited by everything created
+	// beneath it. What we are about to copy in is the user's config — gateway token,
+	// agent token, enrollment ticket — and the engine will later put gateway.key and
+	// gateway_agents.json beside it. A mode argument would not have helped: Windows
+	// ignores it, so 0o755/0o644 here were never the permissions this ran with.
+	if err := secureio.MkdirAll(filepath.Dir(dst)); err != nil {
 		return fmt.Errorf("create service config dir: %w", err)
 	}
-	if err := os.WriteFile(dst, data, 0o644); err != nil {
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
 		return fmt.Errorf("seed service config: %w", err)
 	}
 	return nil
