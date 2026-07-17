@@ -236,6 +236,10 @@ func (a *App) startEngineLocked() {
 		// longer holds until the next connect re-pushes it.
 		eng.Agent.SetConfigPersister(a.persistPushedConfig)
 	}
+	// A lifecycle op over the pipe (an attached GUI, or another GUI driving this
+	// engine) persists the stopped flag through a.mu — this config is shared
+	// with the app, so the engine must not write it bare.
+	eng.SetStoppedPersister(a.persistStoppedErr)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	a.eng, a.cancel, a.done, a.mode = eng, cancel, done, ModeEngine
@@ -780,11 +784,19 @@ func (a *App) SetTheme(theme string) error {
 // This is deliberately not a teardown. Tearing the daemon down would drop back
 // to the wizard, which is a lie: the role is still configured, it is just off.
 func (a *App) StopEngine(force bool) error {
+	a.mu.Lock()
+	mode := a.mode
+	a.mu.Unlock()
+	// Attached: the run belongs to another process, so drive it over the pipe.
+	// That daemon persists its own stopped flag and returns promptly (the IPC
+	// cycle is too short to wait out a clean unwind); the GUI watches runState
+	// settle over the tick.
+	if mode == ModeAttached {
+		return a.analyticsCall(engine.OpStopRun, stopRunReq{Force: force}, nil)
+	}
+
 	a.engMu.Lock()
 	defer a.engMu.Unlock()
-	if err := a.refuseIfAttached("the engine runs in another process (service or headless run); stop it there"); err != nil {
-		return err
-	}
 	a.mu.Lock()
 	eng := a.eng
 	a.mu.Unlock()
@@ -799,16 +811,28 @@ func (a *App) StopEngine(force bool) error {
 	return eng.StopRun(force)
 }
 
+// stopRunReq is the OpStopRun body; force skips the clean-unwind wait.
+type stopRunReq struct {
+	Force bool `json:"force"`
+}
+
 // StartEngine starts the tunnel run. Usually a resume: the daemon is already
 // up and only its run is stopped, so it costs one StartRun. When no daemon is
 // live — a first start, or one whose supervisor died with the pipe — it builds
 // and starts a fresh one.
 func (a *App) StartEngine() error {
+	a.mu.Lock()
+	mode := a.mode
+	a.mu.Unlock()
+	// Attached: start the other process's run over the pipe. It clears its own
+	// stopped flag. There is no rebuild path here — a daemon that is not running
+	// is not one an attached client can conjure, it is one nobody is serving.
+	if mode == ModeAttached {
+		return a.analyticsCall(engine.OpStartRun, nil, nil)
+	}
+
 	a.engMu.Lock()
 	defer a.engMu.Unlock()
-	if err := a.refuseIfAttached("the engine runs in another process (service or headless run); start it there"); err != nil {
-		return err
-	}
 
 	a.mu.Lock()
 	eng := a.eng
@@ -853,12 +877,20 @@ func (a *App) StartEngine() error {
 // logged, not fatal — the run is already in the asked-for state, and the worst
 // case is the next launch disagreeing, which the operator can redo.
 func (a *App) persistStopped(stopped bool) {
+	if err := a.persistStoppedErr(stopped); err != nil {
+		a.logger.Error("persist engine stopped state", "stopped", stopped, "err", err)
+	}
+}
+
+// persistStoppedErr is persistStopped surfacing its error, wired into the
+// engine as its StoppedPersister: a lifecycle op arriving over the pipe (an
+// attached GUI, or another GUI driving this one's engine) persists through the
+// same a.mu that guards the config the engine and the app share.
+func (a *App) persistStoppedErr(stopped bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cfg.Engine.Stopped = stopped
-	if err := a.cfg.Save(a.configPath); err != nil {
-		a.logger.Error("persist engine stopped state", "stopped", stopped, "err", err)
-	}
+	return a.cfg.Save(a.configPath)
 }
 
 // RestartEngine bounces the in-process engine to pick up settings changes.

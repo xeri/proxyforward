@@ -53,6 +53,11 @@ func (e *Engine) analyticsOp(op string, body json.RawMessage) (json.RawMessage, 
 		}
 		return encodeResult(e.Stats.AgentHistory(q.AgentID, q.WindowMs, q.MaxBuckets), nil)
 	}
+	// Lifecycle ops drive the tunnel run itself, not the store — they must
+	// answer with the DB down (a stopped engine may be exactly why it is down).
+	if isLifecycleOp(op) {
+		return e.lifecycleOp(op)
+	}
 	// Gateway agent-administration ops act on the live gateway (allowlist, sessions,
 	// event ring), not the analytics store, so they answer even when the DB is down.
 	if isAgentAdminOp(op) {

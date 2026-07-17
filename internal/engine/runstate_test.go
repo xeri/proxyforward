@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -224,6 +225,83 @@ func TestStopRunReportsAnUncleanStop(t *testing.T) {
 	if el := time.Since(start); el < stopGrace {
 		t.Errorf("StopRun returned after %v, want it to wait out stopGrace (%v)", el, stopGrace)
 	}
+}
+
+// TestLifecycleOpsDriveTheRunOverThePipe is the attached/service case: a GUI
+// that does not host the engine drives its run over the IPC pipe, and the
+// daemon persists its own stopped flag — an attached client cannot write a
+// file on the daemon's disk. With no StoppedPersister set (the service and
+// headless runs), setStopped writes the engine's own config, which is what
+// this exercises.
+func TestLifecycleOpsDriveTheRunOverThePipe(t *testing.T) {
+	eng := newTestEngine(t, func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	startSupervisor(t, eng)
+	if got, _ := eng.RunState(); got != RunRunning {
+		t.Fatalf("run state = %q, want %q", got, RunRunning)
+	}
+
+	// stop_run over the wire returns promptly — the IPC cycle is too short to
+	// wait out a clean unwind — so the reply is "stopping" or already
+	// "stopped", never a blocked call. The GUI watches it settle.
+	if rs := driveLifecycle(t, OpStopRun, stopRunBody(true)); rs != string(RunStopping) && rs != string(RunStopped) {
+		t.Errorf("stop_run returned runState %q, want stopping or stopped", rs)
+	}
+	waitRunState(t, eng, RunStopped)
+	// The intent lands on disk regardless of how far the unwind got: setStopped
+	// runs before StopRun. This is the service self-persist path (no persister).
+	if !reloadStopped(t, eng.configPath) {
+		t.Error("stop_run did not persist [engine] stopped (service self-persist path)")
+	}
+
+	// start_run brings it back and clears the flag.
+	if rs := driveLifecycle(t, OpStartRun, nil); rs != string(RunRunning) {
+		t.Errorf("start_run returned runState %q, want %q", rs, RunRunning)
+	}
+	if reloadStopped(t, eng.configPath) {
+		t.Error("start_run did not clear [engine] stopped")
+	}
+}
+
+// driveLifecycle sends one lifecycle op over the pipe and returns the runState
+// the daemon reports back.
+func driveLifecycle(t *testing.T, op string, body json.RawMessage) string {
+	t.Helper()
+	c, err := ipc.Dial(time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+	raw, err := c.Analytics(op, body)
+	if err != nil {
+		t.Fatalf("%s over pipe: %v", op, err)
+	}
+	var resp struct {
+		RunState string `json:"runState"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("decode %s reply: %v", op, err)
+	}
+	return resp.RunState
+}
+
+func stopRunBody(force bool) json.RawMessage {
+	b, _ := json.Marshal(struct {
+		Force bool `json:"force"`
+	}{force})
+	return b
+}
+
+// reloadStopped reads [engine] stopped straight off disk.
+func reloadStopped(t *testing.T, path string) bool {
+	t.Helper()
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	return cfg.Engine.Stopped
 }
 
 // TestStoreSurvivesStopStartCycle: the analytics store is supervisor-scoped, so

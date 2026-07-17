@@ -1029,6 +1029,18 @@ export namespace config {
 	        this.PrometheusAddr = source["PrometheusAddr"];
 	    }
 	}
+	export class EngineConfig {
+	    Stopped: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new EngineConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Stopped = source["Stopped"];
+	    }
+	}
 	export class GatewayConfig {
 	    BindAddr: string;
 	    ControlPort: number;
@@ -1065,6 +1077,7 @@ export namespace config {
 	    Role: string;
 	    Agent: AgentConfig;
 	    Gateway: GatewayConfig;
+	    Engine: EngineConfig;
 	    Metrics: MetricsConfig;
 	    Logging: LoggingConfig;
 	    UI: UIConfig;
@@ -1079,6 +1092,7 @@ export namespace config {
 	        this.Role = source["Role"];
 	        this.Agent = this.convertValues(source["Agent"], AgentConfig);
 	        this.Gateway = this.convertValues(source["Gateway"], GatewayConfig);
+	        this.Engine = this.convertValues(source["Engine"], EngineConfig);
 	        this.Metrics = this.convertValues(source["Metrics"], MetricsConfig);
 	        this.Logging = this.convertValues(source["Logging"], LoggingConfig);
 	        this.UI = this.convertValues(source["UI"], UIConfig);
@@ -1103,6 +1117,7 @@ export namespace config {
 		    return a;
 		}
 	}
+	
 	
 	
 	

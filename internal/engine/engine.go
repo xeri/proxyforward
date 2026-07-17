@@ -23,6 +23,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"proxyforward/internal/agent"
@@ -127,6 +128,11 @@ type Engine struct {
 	runState  RunState
 	// runErr is why the run stopped on its own, or nil when it was asked to.
 	runErr error
+
+	// stoppedPersister persists the run's on/off intent; nil means the engine
+	// writes its own config (a hostless service/headless run). See
+	// SetStoppedPersister.
+	stoppedPersister atomic.Pointer[StoppedPersister]
 }
 
 // conns returns the active role's connection registry.
