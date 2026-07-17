@@ -3,3 +3,5 @@ node_modules
 frontend/dist
 # `wails build -nsis` downloads the WebView2 bootstrapper here.
 build/windows/installer/tmp
+# Agent-session git worktrees live inside the repo; never stage a second checkout.
+.claude/worktrees/
