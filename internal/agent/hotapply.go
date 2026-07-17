@@ -14,23 +14,20 @@ import (
 //
 // The caller owns validation (config.Validate) and persistence (Save); this
 // only makes the running engine match.
+//
+// It must not be called on a config-consent session — there an edit needs the
+// gateway's approval before it changes anything, so the caller routes to
+// ProposeTunnels instead (App.SaveTunnels does). Called anyway, it refuses rather
+// than apply behind the operator's back.
 func (a *Agent) ApplyTunnels(tunnels []config.Tunnel) {
-	a.cfgMu.Lock()
-	old := a.cfg.Agent.Tunnels
-	a.cfg.Agent.Tunnels = tunnels
-	a.cfgMu.Unlock()
+	if a.ConsentActive() {
+		a.logger.Warn("refusing to hot-apply on a config-consent session; edits must be proposed")
+		return
+	}
 
+	old := a.swapLocal(tunnels)
 	oldEnabled := enabledByID(old)
 	newEnabled := enabledByID(tunnels)
-
-	// Forget state for tunnels that are gone (or disabled).
-	for id := range oldEnabled {
-		if _, ok := newEnabled[id]; !ok {
-			a.publicPorts.Delete(id)
-			a.localUp.Delete(id)
-			a.bwLimiters.Release(id)
-		}
-	}
 
 	sess := a.curSession.Load()
 	if sess == nil {
@@ -86,6 +83,52 @@ func (a *Agent) ApplyTunnels(tunnels []config.Tunnel) {
 	}
 }
 
+// swapLocal replaces the running tunnel set and forgets the state of tunnels that
+// are gone (or newly disabled), touching nothing on the gateway. It returns the
+// previous set. Shared by the hot-apply path and the local-only edits consent lets
+// through unproposed.
+func (a *Agent) swapLocal(tunnels []config.Tunnel) (old []config.Tunnel) {
+	a.cfgMu.Lock()
+	old = a.cfg.Agent.Tunnels
+	a.cfg.Agent.Tunnels = tunnels
+	a.cfgMu.Unlock()
+
+	newEnabled := enabledByID(tunnels)
+	for id := range enabledByID(old) {
+		if _, ok := newEnabled[id]; !ok {
+			a.publicPorts.Delete(id)
+			a.localUp.Delete(id)
+			a.bwLimiters.Release(id)
+		}
+	}
+	return old
+}
+
+// overlayDraft lays an authored draft over the current tunnels: a draft entry wins
+// (it is what the user just authored and the gateway approved), unknown ones are
+// appended, and everything else carries through. It exists because the wire spec
+// carries only the gateway's half of a tunnel, so a set coming back from the gateway
+// cannot restore agent-local fields for a tunnel this agent has not adopted yet.
+func overlayDraft(existing, draft []config.Tunnel) []config.Tunnel {
+	if len(draft) == 0 {
+		return existing
+	}
+	out := append([]config.Tunnel(nil), existing...)
+	at := make(map[string]int, len(out))
+	for i, t := range out {
+		at[t.ID] = i
+	}
+	for _, d := range draft {
+		if i, ok := at[d.ID]; ok {
+			out[i] = d
+			continue
+		}
+		at[d.ID] = len(out)
+		out = append(out, d)
+	}
+	return out
+}
+
 // applyPushedConfig replaces the agent's enabled tunnel set with the gateway's
 // authoritative one (CapGatewayConfig). The wire spec carries only gateway-relevant
 // fields, so agent-local fields (LocalAddr, ProxyProtocolV2) are kept by ID and
@@ -94,9 +137,16 @@ func (a *Agent) ApplyTunnels(tunnels []config.Tunnel) {
 // the optional configPersister; with none set the running set is updated in memory and
 // the gateway re-pushes on the next reconnect.
 func (a *Agent) applyPushedConfig(specs []control.TunnelSpec, generation uint64) {
+	// A set this agent proposed comes back naming tunnels the local config may not
+	// hold yet, and the wire never carried their LocalAddr/PP2 — so overlay the
+	// authored draft still awaiting its decision, or an approved new tunnel would
+	// go live on the gateway with nowhere to dial locally. Those fields were never
+	// the gateway's to approve; the specs still win for everything it does own.
+	draft := a.pendingDraft()
+
 	a.cfgMu.Lock()
 	old := a.cfg.Agent.Tunnels
-	merged := mergeTunnels(old, specs)
+	merged := mergeTunnels(overlayDraft(old, draft), specs)
 	a.cfg.Agent.Tunnels = merged
 	a.cfgMu.Unlock()
 	a.configGen.Store(generation)
@@ -145,18 +195,29 @@ func (a *Agent) applyPushedConfig(specs []control.TunnelSpec, generation uint64)
 // mergeTunnels applies a gateway-authoritative spec set to the agent's tunnels: each
 // pushed spec upserts by ID, keeping the agent-local fields the wire never carries
 // (LocalAddr, ProxyProtocolV2); enabled tunnels the push omits are dropped; disabled
-// local drafts are preserved. enabledSpecs(mergeTunnels(old, specs)) round-trips to
-// specs (for the hashed fields), so the agent's next hello hash matches the gateway's.
+// local drafts are preserved, and a push can never enable one. enabledSpecs(
+// mergeTunnels(old, specs)) round-trips to specs (for the hashed fields), so the
+// agent's next hello hash matches the gateway's.
+//
+// Enabling is the one thing the gateway has no say over. A disabled draft is the
+// user's "do not expose this", it keeps a LocalAddr naming a real local service, and
+// the gateway only ever learns the *enabled* set — so a spec for a disabled id is
+// either a mistake or a guess (ids are name slugs: tnl_rcon, tnl_ssh). The gateway is
+// routinely someone else's machine, and push_config auto-applies without consent by
+// design, so this is the boundary that keeps a push from serving a switched-off
+// service to the internet.
 func mergeTunnels(existing []config.Tunnel, specs []control.TunnelSpec) []config.Tunnel {
 	byID := make(map[string]config.Tunnel, len(existing))
 	for _, t := range existing {
 		byID[t.ID] = t
 	}
-	pushed := make(map[string]bool, len(specs))
 	out := make([]config.Tunnel, 0, len(specs)+len(existing))
 	for _, spec := range specs {
-		pushed[spec.ID] = true
-		t := byID[spec.ID] // keeps LocalAddr/Options for a known id; zero for a new one
+		known, isKnown := byID[spec.ID]
+		if isKnown && !known.Enabled {
+			continue // a disabled draft; carried through untouched below
+		}
+		t := known // keeps LocalAddr/Options for a known id; zero for a new one
 		t.ID = spec.ID
 		t.Name = spec.Name
 		t.Type = spec.Type
@@ -168,9 +229,10 @@ func mergeTunnels(existing []config.Tunnel, specs []control.TunnelSpec) []config
 		t.Options.BandwidthLimitScope = spec.BandwidthLimitScope
 		out = append(out, t)
 	}
-	// Disabled local drafts survive — the authoritative set governs only enabled tunnels.
+	// Every disabled draft survives exactly as authored — the loop above never
+	// emits one, so this cannot duplicate.
 	for _, t := range existing {
-		if !t.Enabled && !pushed[t.ID] {
+		if !t.Enabled {
 			out = append(out, t)
 		}
 	}
