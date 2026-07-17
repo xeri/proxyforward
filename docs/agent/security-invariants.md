@@ -41,15 +41,13 @@ a victim's name can be searched for (`cred.go agentFingerprintBytes`, floored by
 `TestAgentIDIsWideEnoughToBeUnforgeable`). `AgentStore.Enroll` refuses a colliding
 join besides, so a collision that is somehow found still fails closed.
 
-**The legacy shared token is a migration fallback only**, accepted while
-`Gateway.AcceptSharedToken` is on (default, for now). A shared-token agent
-self-asserts its `agentID`, so the old residual risk — supersede or port-squat,
-recoverable only by rotating the token for the whole fleet — persists *for that
-path only*. Enrolled agents are protected by their key and by revocation *because*
-the key-derived `agt_` namespace is **reserved**: a self-asserted ID can never name
-an enrolled one (`link/cred.go IsDerivedAgentID`, `gateway/auth.go
-sharedTokenValidator`). Turning `AcceptSharedToken` off once every agent is
-enrolled closes it for good.
+**Identity is the only authenticator** (`gateway/auth.go identityValidator`).
+The legacy fleet-wide shared token is gone, and with it its residual risk: a
+self-asserted `agentID` no longer exists on any path, so supersede, scope,
+revocation, and config all key on a label only a verified key can mint
+(`link/cred.go AgentID`). The bug class this closes was real — a token holder
+could once name itself an enrolled agent and inherit its session, ports, and
+scope — and it is closed by construction now, not by a reserved namespace.
 
 ## The pre-auth boundary
 
@@ -107,8 +105,8 @@ bare `continue` — a broken listener would spin.
 
 ## What an authenticated agent may do
 
-Authenticated is not trusted. The shared-token path admits anyone holding one
-string, and an enrolled agent can be compromised.
+Authenticated is not trusted. A pairing code can be shared beyond its intended
+machine, and an enrolled agent can be compromised.
 
 **Port 0 is not a port, it is "any port in the ephemeral range"** — so it is
 policy-*valid* only when nothing constrains the choice. A port-0 request names

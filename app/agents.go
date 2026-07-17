@@ -14,9 +14,9 @@ import (
 // shared JSON envelope (analyticsCall), so it works both in-process and attached
 // to a service daemon; all degrade to an empty/error result off the gateway role.
 
-// ListAgents returns the gateway's agent roster: every enrolled agent (online or
-// not) plus any connected shared-token agent, with identity, scope, and live
-// status. Empty on any error (agent role, detached, old daemon).
+// ListAgents returns the gateway's agent roster: every enrolled agent, online or
+// not, with identity, scope, and live status. Empty on any error (agent role,
+// detached, old daemon).
 func (a *App) ListAgents() []gateway.AgentView {
 	var out []gateway.AgentView
 	if err := a.analyticsCall(engine.OpListAgents, nil, &out); err != nil || out == nil {
@@ -69,11 +69,10 @@ func (a *App) SetAgentScope(agentID string, ports []int, tunnels []string) error
 	}{agentID, ports, tunnels})
 }
 
-// AgentDesiredConfig returns the gateway-authoritative desired tunnel set shown in an
-// agent's drill-in (read only; editing is Batch B). A returned error is the honest
-// unavailable state (agent role, detached, or an old daemon); on the wire a
-// zero-value view with Enrolled=false means a shared-token/unknown agent whose config
-// is agent-pushed, not gateway-held.
+// AgentDesiredConfig returns the gateway-authoritative desired tunnel set shown in
+// an agent's drill-in. A returned error is the honest unavailable state (agent
+// role, detached, or an old daemon); a zero-value view means the agent has not
+// seeded a config yet.
 func (a *App) AgentDesiredConfig(agentID string) (gateway.AgentConfigView, error) {
 	req := struct {
 		AgentID string `json:"agentId"`
@@ -85,14 +84,13 @@ func (a *App) AgentDesiredConfig(agentID string) (gateway.AgentConfigView, error
 	return out, nil
 }
 
-// ErrReclaimUnsupported is returned when a port reclaim can't proceed because one of
-// the two agents is a shared-token/legacy agent whose config the gateway can't
-// rewrite. The conflict card renders it as the reason the action is unavailable.
-var ErrReclaimUnsupported = errors.New("reclaim needs both agents enrolled — a shared-token agent's config is agent-pushed, not gateway-held")
+// errReclaimUnavailable is the honest refusal when the gateway reported the move
+// can't land right now. The conflict card renders it as the reason the action
+// failed.
+var errReclaimUnavailable = errors.New("the port can't be reclaimed right now — the agent may be offline, or the tunnel may have changed")
 
-// ReclaimPort reassigns tunnelID's public port to agentID, bumping whatever enrolled
-// agent currently holds that port to an ephemeral one (which gets a notice). It
-// refuses (ErrReclaimUnsupported) when either party is a shared-token/legacy agent.
+// ReclaimPort reassigns tunnelID's public port to agentID, bumping whatever agent
+// currently holds that port to an ephemeral one (which gets a notice).
 func (a *App) ReclaimPort(agentID, tunnelID string, port int) error {
 	req := struct {
 		AgentID  string `json:"agentId"`
@@ -106,7 +104,7 @@ func (a *App) ReclaimPort(agentID, tunnelID string, port int) error {
 		return err
 	}
 	if !resp.OK {
-		return ErrReclaimUnsupported
+		return errReclaimUnavailable
 	}
 	return nil
 }

@@ -25,7 +25,7 @@ const dataDialTimeout = 12 * time.Second
 // the entry done closes the conn it holds, so no descriptor leaks on a
 // timeout/dial-back race (goleak does not catch a leaked conn).
 type pendingConn struct {
-	agentID string              // only this agent may answer (shared token today)
+	agentID string              // only this agent may answer
 	link    *stats.LinkCounters // this agent's session counters, for byte accounting
 	ready   chan struct{}
 
@@ -91,10 +91,9 @@ func (g *Gateway) handleDataConn(conn net.Conn, hello *control.Hello, identity I
 	}
 	pc := v.(*pendingConn)
 	if pc.agentID != identity.AgentID {
-		// All agents share the gateway token today, so this check — not the
-		// token — is what stops agent B answering agent A's open_data. It is
-		// load-bearing until per-agent identity lands, and is the natural place
-		// that identity plugs in.
+		// The dial-back authenticated as *some* agent; this check binds it to the
+		// agent the open_data was addressed to, so agent B — however honestly
+		// enrolled — can never answer for agent A's player conn.
 		conn.Close()
 		return
 	}

@@ -192,14 +192,7 @@ func (g *Gateway) Start(ctx context.Context) error {
 	// slot only for the handshake. So no legitimate load can reach this, and the
 	// two numbers cannot drift apart when one is tuned.
 	g.preAuth = newPreAuthGate(g.cfg.Gateway.MaxConnsGlobal + preAuthHeadroom)
-	var shared *sharedTokenValidator
-	if g.cfg.Gateway.AcceptSharedToken {
-		shared = &sharedTokenValidator{token: g.cfg.Gateway.Token}
-	}
-	g.validator = compositeValidator{
-		identity: identityValidator{store: g.agents, now: time.Now},
-		shared:   shared,
-	}
+	g.validator = identityValidator{store: g.agents, now: time.Now}
 	a := newActor(g.logger)
 	g.actor.Store(a)
 	g.wg.Add(2)
@@ -349,14 +342,12 @@ func (g *Gateway) SetAgentScope(agentID string, scope Scope) bool {
 }
 
 // AgentView is one agent's management row for the GUI roster: its persisted
-// identity and policy joined with live-session status. An enrolled agent that is
-// offline still appears (Connected=false); a live shared-token agent that never
-// enrolled appears too (Enrolled=false). Scope is flattened to slices so the Wails
+// identity and policy joined with live-session status. An agent that is offline
+// still appears (Connected=false). Scope is flattened to slices so the Wails
 // binding generator can model it without a nested cross-package type.
 type AgentView struct {
 	AgentID       string   `json:"agentId"`
 	Nickname      string   `json:"nickname"`
-	Enrolled      bool     `json:"enrolled"`
 	Revoked       bool     `json:"revoked"`
 	ScopePorts    []int    `json:"scopePorts"`
 	ScopeTunnels  []string `json:"scopeTunnels"`
@@ -379,8 +370,10 @@ type AgentView struct {
 }
 
 // ListAgentViews joins the enrollment allowlist with live sessions and tunnel
-// counts into the roster the GUI polls: every enrolled agent (online or not) plus
-// any connected shared-token agent that isn't enrolled, sorted by agentID.
+// counts into the roster the GUI polls: every enrolled agent, online or not,
+// sorted by agentID. Every live session belongs to an allowlist record (identity
+// is the only way in, and revocation keeps the record), so the allowlist alone
+// is the roster's row set.
 func (g *Gateway) ListAgentViews() []AgentView {
 	live := map[string]AgentLink{}
 	for _, l := range g.Agents() {
@@ -390,14 +383,11 @@ func (g *Gateway) ListAgentViews() []AgentView {
 	for _, t := range g.Tunnels() {
 		tunCount[t.AgentID]++
 	}
-	seen := map[string]bool{}
 	var out []AgentView
 	for _, r := range g.ListAgents() {
-		seen[r.AgentID] = true
 		v := AgentView{
 			AgentID:      r.AgentID,
 			Nickname:     r.Nickname,
-			Enrolled:     true,
 			Revoked:      r.Revoked,
 			ScopePorts:   r.Scope.Ports,
 			ScopeTunnels: r.Scope.TunnelIDs,
@@ -411,29 +401,17 @@ func (g *Gateway) ListAgentViews() []AgentView {
 		}
 		out = append(out, v)
 	}
-	for id, l := range live {
-		if seen[id] {
-			continue
-		}
-		out = append(out, AgentView{
-			AgentID: id, Enrolled: false, Connected: true,
-			Hostname: l.Hostname, RemoteIP: l.RemoteIP, LinkUpSinceMs: l.LinkUpSinceMs,
-			Tunnels: tunCount[id], Version: l.Version, Transport: l.Transport,
-		})
-	}
 	sort.Slice(out, func(i, j int) bool { return out[i].AgentID < out[j].AgentID })
 	return out
 }
 
 // AgentConfigView is the gateway-authoritative desired tunnel set the GUI shows in
 // an agent's drill-in: the tunnels the gateway holds for that agent, and their
-// generation. Enrolled is false for a shared-token/unknown agent — whose config is
-// agent-pushed, not gateway-held — so the panel renders an honest unavailable state
-// rather than a misleading empty list.
+// generation. Generation 0 with no tunnels means the agent has not seeded a config
+// yet (or the id is unknown — a roster row that just vanished).
 type AgentConfigView struct {
 	Generation uint64               `json:"generation"`
 	Tunnels    []control.TunnelSpec `json:"tunnels"`
-	Enrolled   bool                 `json:"enrolled"`
 	// ConsentActive reports whether the live session negotiated config-consent —
 	// the editor's gate between "save proposes to the agent" and an honest
 	// "offline / legacy build" unavailable state. PendingInbound is an
@@ -446,17 +424,15 @@ type AgentConfigView struct {
 }
 
 // AgentDesiredConfig returns the gateway-held desired config for an agent, plus the
-// live session's consent state and any pending proposals. Enrolled=false means the
-// agent isn't in the allowlist — a shared-token agent pushes its own config, so
-// there is nothing gateway-authoritative to show.
+// live session's consent state and any pending proposals.
 func (g *Gateway) AgentDesiredConfig(agentID string) AgentConfigView {
 	if g.agents == nil {
 		return AgentConfigView{}
 	}
-	tunnels, gen, ok := g.agents.DesiredConfig(agentID)
-	view := AgentConfigView{Generation: gen, Tunnels: tunnels, Enrolled: ok}
+	tunnels, gen, _ := g.agents.DesiredConfig(agentID)
+	view := AgentConfigView{Generation: gen, Tunnels: tunnels}
 	if sess := g.liveSession(agentID); sess != nil {
-		view.ConsentActive = sess.enrolled && sess.Has(control.CapConfigConsent)
+		view.ConsentActive = sess.Has(control.CapConfigConsent)
 		view.PendingInbound = proposalView(sess.pendingInbound.Load())
 		view.PendingOutbound = proposalView(sess.pendingOutbound.Load())
 	}
@@ -464,15 +440,15 @@ func (g *Gateway) AgentDesiredConfig(agentID string) AgentConfigView {
 }
 
 // ReclaimPort gives public port `port` to requesterID's tunnel, bumping whatever
-// enrolled agent currently holds that port to an ephemeral one. This is arbitration,
-// not consent: the incumbent is pushed its new config and its GUI notices the change,
+// agent currently holds that port to an ephemeral one. This is arbitration, not
+// consent: the incumbent is pushed its new config and its GUI notices the change,
 // but it gets no veto — port allocation is the gateway's to decide.
 //
-// It reports false (no error) when the move isn't the gateway's to make: either party
-// authenticating with the legacy shared token pushes its own config, so the gateway
-// cannot rewrite it. The incumbent is released before the requester binds, so the
-// contested port is provably free in between (the actor's unbind waits out the accept
-// loop) and the requester's bind can't lose a race to auto-reassignment.
+// It reports false (no error) when the move can't land right now: the requester is
+// offline, or the named tunnel is gone from a stored config. The incumbent is
+// released before the requester binds, so the contested port is provably free in
+// between (the actor's unbind waits out the accept loop) and the requester's bind
+// can't lose a race to auto-reassignment.
 func (g *Gateway) ReclaimPort(requesterID, tunnelID string, port int) (bool, error) {
 	a := g.act()
 	if a == nil {
@@ -493,16 +469,11 @@ func (g *Gateway) ReclaimPort(requesterID, tunnelID string, port int) (bool, err
 	}); !ran {
 		return false, fmt.Errorf("gateway is shutting down")
 	}
-	// Only a live, enrolled requester has a gateway-held config to rewrite.
-	if requester == nil || !requester.enrolled {
+	// Only a live requester has a session to push the rewritten config to.
+	if requester == nil {
 		return false, nil
 	}
-	// A different agent on the port must be enrolled too, or the gateway has no
-	// authority to move it aside.
 	if incumbent != nil && incumbent != requester {
-		if !incumbent.enrolled {
-			return false, nil
-		}
 		// 0 asks for an ephemeral port; reconcile resolves it to the concrete one it
 		// actually bound, so the incumbent's stored + pushed config stay in step.
 		if !g.rewriteTunnelPort(incumbent, incumbentTunnel, 0) {
@@ -522,7 +493,7 @@ func (g *Gateway) ReclaimPort(requesterID, tunnelID string, port int) (bool, err
 	return true, nil
 }
 
-// rewriteTunnelPort rewrites one tunnel's public port in an enrolled agent's
+// rewriteTunnelPort rewrites one tunnel's public port in an agent's
 // authoritative config and re-publishes it — the same adopt → reconcile → push the
 // rest of the gateway-authoritative path uses (adoptProposal). It reports false when
 // the agent holds no such tunnel or the gateway is shutting down. A push to a
@@ -981,10 +952,8 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 	}
 	identity, err := g.validator.Validate(hello, g.fingerprint)
 	if err != nil {
-		code, msg, countFail := authErrorReply(err)
-		if countFail {
-			g.authLim.fail(ip)
-		}
+		code, msg := authErrorReply(err)
+		g.authLim.fail(ip)
 		logger.Warn("agent rejected", "code", code)
 		control.WriteMsg(ctrl, control.TypeHelloErr, control.HelloErr{Code: code, Message: msg})
 		sess.Close()
@@ -1026,11 +995,9 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 		LocalIPs:          netid.LocalIPv4s(),
 		ObservedIP:        ip,
 	}
-	if identity.PubKey != nil {
-		okMsg.AssignedAgentID = identity.AgentID
-		okMsg.GatewayID = g.gatewayID
-		okMsg.ConfigSeedNeeded = g.needsConfigSeed(identity, negotiated)
-	}
+	okMsg.AssignedAgentID = identity.AgentID
+	okMsg.GatewayID = g.gatewayID
+	okMsg.ConfigSeedNeeded = g.needsConfigSeed(identity, negotiated)
 	if err := control.WriteMsg(ctrl, control.TypeHelloOK, okMsg); err != nil {
 		logger.Debug("hello_ok write failed", "err", err)
 		return
@@ -1040,18 +1007,17 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 	g.serveAdmitted(ctx, admitted, ctrl, hello, negotiated)
 }
 
-// authErrorReply maps a validator error to a hello error code, a user-facing
-// message, and whether it counts as a failed credential for the per-IP limiter.
-func authErrorReply(err error) (code, msg string, countFail bool) {
+// authErrorReply maps a validator error to a hello error code and a user-facing
+// message. Every validator refusal is a failed credential, so the callers charge
+// the per-IP auth limiter unconditionally.
+func authErrorReply(err error) (code, msg string) {
 	switch {
 	case errors.Is(err, ErrRevoked):
-		return control.ErrCodeRevoked, "this gateway revoked this agent — re-pair with a fresh code", true
+		return control.ErrCodeRevoked, "this gateway revoked this agent — re-pair with a fresh code"
 	case errors.Is(err, ErrTicketUnknown), errors.Is(err, ErrTicketConsumed), errors.Is(err, ErrTicketExpired):
-		return control.ErrCodeBadToken, err.Error(), true
-	case errors.Is(err, ErrMissingAgentID):
-		return control.ErrCodeBadToken, "hello is missing agentId", false
+		return control.ErrCodeBadToken, err.Error()
 	default: // ErrBadToken and anything unexpected
-		return control.ErrCodeBadToken, "invalid token — re-pair with the gateway's current pairing code", true
+		return control.ErrCodeBadToken, "invalid credentials — re-pair with the gateway's current pairing code"
 	}
 }
 
@@ -1104,12 +1070,8 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthD
 	}
 	identity, err := g.validator.Validate(hello, g.fingerprint)
 	if err != nil {
-		// A credential failure counts toward the per-IP auth limiter; a malformed
-		// hello (missing agentID) does not.
-		code, msg, countFail := authErrorReply(err)
-		if countFail {
-			g.authLim.fail(ip)
-		}
+		code, msg := authErrorReply(err)
+		g.authLim.fail(ip)
 		logger.Warn("agent rejected", "code", code)
 		control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{Code: code, Message: msg})
 		conn.Close()
@@ -1155,11 +1117,9 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthD
 		LocalIPs:          netid.LocalIPv4s(),
 		ObservedIP:        ip,
 	}
-	if identity.PubKey != nil {
-		okMsg.AssignedAgentID = identity.AgentID
-		okMsg.GatewayID = g.gatewayID
-		okMsg.ConfigSeedNeeded = g.needsConfigSeed(identity, negotiated)
-	}
+	okMsg.AssignedAgentID = identity.AgentID
+	okMsg.GatewayID = g.gatewayID
+	okMsg.ConfigSeedNeeded = g.needsConfigSeed(identity, negotiated)
 	if err := control.WriteMsg(conn, control.TypeHelloOK, okMsg); err != nil {
 		logger.Debug("hello_ok write failed", "err", err)
 		conn.Close()
@@ -1200,23 +1160,11 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthD
 // afterwards the gateway is the source of truth and pushes, so the agent never
 // volunteers a set (which would race the connect-time push).
 func (g *Gateway) needsConfigSeed(identity Identity, negotiated []string) bool {
-	if identity.PubKey == nil || !control.NewCapSet(negotiated).Has(control.CapGatewayConfig) {
+	if !control.NewCapSet(negotiated).Has(control.CapGatewayConfig) {
 		return false
 	}
 	_, gen, ok := g.agents.DesiredConfig(identity.AgentID)
 	return ok && gen == 0
-}
-
-// withoutCap returns caps with one capability removed, preserving order. Used to
-// negotiate away a capability the peer offered but this session can't honor.
-func withoutCap(caps []string, drop string) []string {
-	out := caps[:0:0]
-	for _, c := range caps {
-		if c != drop {
-			out = append(out, c)
-		}
-	}
-	return out
 }
 
 // transportName labels a session's active data plane for GUI display, mirroring
@@ -1235,16 +1183,6 @@ func transportName(conn net.Conn, caps control.CapSet) string {
 
 func (g *Gateway) buildAndAdmit(ctx context.Context, conn net.Conn, hello *control.Hello, identity Identity, peerIP string, logger *slog.Logger) (*agentSession, []string, error) {
 	negotiated := control.IntersectCaps(hello.Capabilities, control.SupportedCapabilities)
-	// Gateway-authoritative config is keyed to a durable Ed25519 identity, so it is
-	// negotiated only for enrolled agents. A shared-token agent that offered the cap
-	// has it dropped here and keeps the agent-push SyncTunnels path. Consent layers
-	// on that config authority — there is nothing to approve without a gateway-held
-	// set — so it drops with it.
-	enrolled := identity.PubKey != nil
-	if !enrolled {
-		negotiated = withoutCap(negotiated, control.CapGatewayConfig)
-		negotiated = withoutCap(negotiated, control.CapConfigConsent)
-	}
 	caps := control.NewCapSet(negotiated)
 	// Session ctx: a child of the serving ctx, cancelled on eviction so throttled
 	// splices unblock per-agent (evict) and on shutdown (parent).
@@ -1253,7 +1191,7 @@ func (g *Gateway) buildAndAdmit(ctx context.Context, conn net.Conn, hello *contr
 		agentID:     identity.AgentID,
 		scope:       identity.Scope,
 		conn:        conn,
-		logger:      logger.With("agent", hello.AgentID),
+		logger:      logger.With("agent", identity.AgentID),
 		connectedAt: time.Now(),
 		remoteIP:    peerIP,
 		hostname:    hello.Hostname,
@@ -1266,7 +1204,6 @@ func (g *Gateway) buildAndAdmit(ctx context.Context, conn net.Conn, hello *contr
 		ctx:         sctx,
 		cancel:      cancel,
 
-		enrolled:           enrolled,
 		reportedConfigHash: hello.ConfigHash,
 	}
 	sess.agentConfigGen.Store(hello.ConfigGeneration)
@@ -1274,7 +1211,7 @@ func (g *Gateway) buildAndAdmit(ctx context.Context, conn net.Conn, hello *contr
 	if err != nil {
 		// The only admission refusals left are transient — anti-flap dampening
 		// of a same-agentID contest, or a shutting-down gateway. Neither is fatal.
-		logger.Warn("agent admission deferred", "agent", hello.AgentID, "err", err)
+		logger.Warn("agent admission deferred", "agent", identity.AgentID, "err", err)
 		cancel() // never entered the map, so evict won't cancel it
 		return nil, nil, err
 	}
@@ -1325,10 +1262,10 @@ func (g *Gateway) serveControl(ctx context.Context, sess *agentSession, ctrl tra
 	defer sess.setCtrl(nil)
 	go g.pingLoop(ctx, sess)
 	go g.rttSampler(ctx, sess)
-	// A fresh session starts with no listeners, so an enrolled gateway-config agent
-	// gets its authoritative set reconciled (and pushed on drift) before the read
-	// loop; a legacy/shared-token agent instead pushes its own set via SyncTunnels.
-	if sess.enrolled && sess.Has(control.CapGatewayConfig) {
+	// A fresh session starts with no listeners, so a gateway-config agent gets its
+	// authoritative set reconciled (and pushed on drift) before the read loop; a
+	// capability-degraded peer instead pushes its own set via SyncTunnels.
+	if sess.Has(control.CapGatewayConfig) {
 		g.pushConfigOnConnect(sess)
 	}
 	for {
@@ -1481,9 +1418,9 @@ func (g *Gateway) handleControlMsg(sess *agentSession, ctrl transport.Stream, en
 
 	case control.TypeProposeConfig:
 		// The agent promotes a local edit (or seeds the gateway on first contact).
-		// Only enrolled gateway-config sessions reach the authoritative store.
-		if !sess.enrolled || !sess.Has(control.CapGatewayConfig) {
-			sess.logger.Warn("ignoring propose_config: not an enrolled gateway-config session")
+		// Only gateway-config sessions reach the authoritative store.
+		if !sess.Has(control.CapGatewayConfig) {
+			sess.logger.Warn("ignoring propose_config: not a gateway-config session")
 			return nil
 		}
 		prop, err := control.Decode[control.ProposeConfig](env)
@@ -1506,7 +1443,7 @@ func (g *Gateway) handleControlMsg(sess *agentSession, ctrl transport.Stream, en
 	case control.TypeConfigProposal:
 		// An agent-authored config edit awaiting the operator's consent; held on the
 		// session, never auto-adopted (see consent.go).
-		if !sess.enrolled || !sess.Has(control.CapConfigConsent) {
+		if !sess.Has(control.CapConfigConsent) {
 			sess.logger.Warn("ignoring config_proposal: not a consent session")
 			return nil
 		}
@@ -1519,7 +1456,7 @@ func (g *Gateway) handleControlMsg(sess *agentSession, ctrl transport.Stream, en
 
 	case control.TypeConfigDecision:
 		// The agent's verdict on a gateway-authored proposal (see consent.go).
-		if !sess.enrolled || !sess.Has(control.CapConfigConsent) {
+		if !sess.Has(control.CapConfigConsent) {
 			sess.logger.Warn("ignoring config_decision: not a consent session")
 			return nil
 		}

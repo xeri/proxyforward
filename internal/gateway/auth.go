@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"crypto/ed25519"
-	"crypto/subtle"
 	"errors"
 	"time"
 
@@ -10,10 +9,9 @@ import (
 	"proxyforward/internal/link"
 )
 
-// Identity is what a Validator resolves a hello to. AgentID is the display label;
-// PubKey is the canonical cryptographic identity and is non-nil only when the agent
-// authenticated per-identity (not via the legacy shared token). Scope limits which
-// ports and tunnels the agent may bind.
+// Identity is what a Validator resolves a hello to: the key-derived agt_ display
+// label, the Ed25519 public key that is the agent's canonical identity, and the
+// Scope limiting which ports and tunnels it may bind.
 type Identity struct {
 	AgentID string
 	PubKey  ed25519.PublicKey
@@ -21,61 +19,23 @@ type Identity struct {
 }
 
 // Validator authenticates a hello on both the control and data accept paths.
-// gatewayCertFP is this gateway's pinned certificate fingerprint; a per-agent
-// validator checks the agent's proof-of-possession signature against it.
+// gatewayCertFP is this gateway's pinned certificate fingerprint; the validator
+// checks the agent's proof-of-possession signature against it.
 type Validator interface {
 	Validate(hello *control.Hello, gatewayCertFP string) (Identity, error)
 }
 
 // Auth failures. The accept paths map these to HelloErr codes.
 var (
-	ErrBadToken       = errors.New("bad token")
-	ErrMissingAgentID = errors.New("missing agentId")
-	ErrRevoked        = errors.New("agent identity revoked")
-	// ErrReservedAgentID rejects a shared-token peer that names itself in the
-	// key-derived agt_ namespace. Only a verified key mints those, so the claim is
-	// always a lie — and an accepted one would hand over the named agent's session,
-	// ports, and scope.
-	ErrReservedAgentID = errors.New("agentId is reserved for enrolled identities — this agent must enroll with a pairing code")
+	ErrBadToken = errors.New("bad token")
+	ErrRevoked  = errors.New("agent identity revoked")
 )
 
-// sharedTokenValidator is the legacy authenticator: one token admits every agent,
-// told apart only by the self-asserted agentID. Retained as a migration fallback,
-// gated by Gateway.AcceptSharedToken.
-//
-// Because the agentID here is *asserted* rather than proved, it must stay out of the
-// key-derived namespace: the gateway keys supersede, per-conn delivery, scope, and
-// gateway-authoritative config on that label, so a token holder allowed to name
-// itself agt_<victim> would evict the real agent, inherit its ports, and — a
-// shared-token identity carrying no Scope, and an empty Scope meaning unrestricted —
-// escape the victim's grant entirely. Revoking the victim would not even help: the
-// impersonator never presents the revoked key, so identityValidator's Revoked check
-// is never reached. Rejecting the prefix is what keeps the documented promise that
-// enrolled agents are protected by their key and by revocation; the residual risk of
-// this path stays confined to peers that are legacy on both sides.
-// Regression: TestSharedTokenCannotClaimDerivedAgentID.
-type sharedTokenValidator struct {
-	token string
-}
-
-func (v sharedTokenValidator) Validate(hello *control.Hello, _ string) (Identity, error) {
-	if subtle.ConstantTimeCompare([]byte(hello.Token), []byte(v.token)) != 1 {
-		return Identity{}, ErrBadToken
-	}
-	if hello.AgentID == "" {
-		return Identity{}, ErrMissingAgentID
-	}
-	if link.IsDerivedAgentID(hello.AgentID) {
-		return Identity{}, ErrReservedAgentID
-	}
-	return Identity{AgentID: hello.AgentID}, nil
-}
-
-// identityValidator authenticates an agent by its Ed25519 public key. It first
-// verifies the proof-of-possession signature against the gateway fingerprint, then
-// either enrolls the key (first contact, carrying a valid ticket) or checks it
-// against the allowlist. A revoked key returns ErrRevoked so the agent stops rather
-// than retry-hammering.
+// identityValidator is the only authenticator: an agent is its Ed25519 public
+// key. It first verifies the proof-of-possession signature against the gateway
+// fingerprint, then either enrolls the key (first contact, carrying a valid
+// ticket) or checks it against the allowlist. A revoked key returns ErrRevoked so
+// the agent stops rather than retry-hammering.
 type identityValidator struct {
 	store *AgentStore
 	now   func() time.Time
@@ -103,36 +63,4 @@ func (v identityValidator) Validate(hello *control.Hello, fp string) (Identity, 
 		return Identity{}, err // ErrTicket* — surfaced with its own message
 	}
 	return Identity{AgentID: rec.AgentID, PubKey: pub, Scope: rec.Scope}, nil
-}
-
-// compositeValidator prefers per-agent identity and falls back to the shared token
-// during migration. shared is nil once shared-token acceptance is turned off, at
-// which point a keyless (legacy) hello is rejected.
-type compositeValidator struct {
-	identity identityValidator
-	shared   *sharedTokenValidator
-}
-
-func (v compositeValidator) Validate(hello *control.Hello, fp string) (Identity, error) {
-	if len(hello.AgentPubKey) > 0 {
-		id, err := v.identity.Validate(hello, fp)
-		switch {
-		case err == nil, errors.Is(err, ErrRevoked):
-			// Authenticated, or a definitive revocation — never mask either.
-			return id, err
-		case errors.Is(err, ErrTicketUnknown), errors.Is(err, ErrTicketConsumed), errors.Is(err, ErrTicketExpired):
-			// An explicit enrollment attempt failed; surface it, don't fall back.
-			return id, err
-		}
-		// Unknown key or bad signature and no ticket: during migration, fall back to
-		// the shared token if the agent offered one and the gateway still accepts it.
-		if v.shared != nil && hello.Token != "" {
-			return v.shared.Validate(hello, fp)
-		}
-		return id, err
-	}
-	if v.shared != nil {
-		return v.shared.Validate(hello, fp)
-	}
-	return Identity{}, ErrBadToken
 }

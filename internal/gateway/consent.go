@@ -184,9 +184,6 @@ func (g *Gateway) ProposeAgentConfig(agentID string, tunnels []control.TunnelSpe
 	if sess == nil {
 		return fmt.Errorf("agent %s is not connected — proposals need a live session", agentID)
 	}
-	if !sess.enrolled {
-		return fmt.Errorf("agent %s uses the legacy shared token; its config is agent-pushed and cannot be edited here", agentID)
-	}
 	if !sess.Has(control.CapConfigConsent) {
 		return fmt.Errorf("agent %s runs a build without config-consent — update it to edit its tunnels from here", agentID)
 	}

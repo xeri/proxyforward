@@ -41,12 +41,8 @@ type agentSession struct {
 	// immutable after — enforced in validateSpec.
 	scope Scope
 
-	// enrolled is true when the agent authenticated per-identity (an Ed25519
-	// pubkey), not via the legacy shared token. Gateway-authoritative config
-	// (CapGatewayConfig) is keyed to that identity, so it engages only when enrolled.
 	// reportedConfigHash is the config hash the agent sent in its hello, compared
-	// once at connect to decide whether to push. Both immutable after admission.
-	enrolled           bool
+	// once at connect to decide whether to push. Immutable after admission.
 	reportedConfigHash string
 	// agentConfigGen is the config generation the agent currently holds: seeded from
 	// its hello, advanced on each config_ack. It is the basis a propose_config is

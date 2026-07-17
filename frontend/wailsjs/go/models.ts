@@ -1198,7 +1198,6 @@ export namespace gateway {
 	export class AgentConfigView {
 	    generation: number;
 	    tunnels: control.TunnelSpec[];
-	    enrolled: boolean;
 	    consentActive: boolean;
 	    pendingInbound?: ProposalView;
 	    pendingOutbound?: ProposalView;
@@ -1211,7 +1210,6 @@ export namespace gateway {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.generation = source["generation"];
 	        this.tunnels = this.convertValues(source["tunnels"], control.TunnelSpec);
-	        this.enrolled = source["enrolled"];
 	        this.consentActive = source["consentActive"];
 	        this.pendingInbound = this.convertValues(source["pendingInbound"], ProposalView);
 	        this.pendingOutbound = this.convertValues(source["pendingOutbound"], ProposalView);
@@ -1238,7 +1236,6 @@ export namespace gateway {
 	export class AgentView {
 	    agentId: string;
 	    nickname: string;
-	    enrolled: boolean;
 	    revoked: boolean;
 	    scopePorts: number[];
 	    scopeTunnels: string[];
@@ -1261,7 +1258,6 @@ export namespace gateway {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.agentId = source["agentId"];
 	        this.nickname = source["nickname"];
-	        this.enrolled = source["enrolled"];
 	        this.revoked = source["revoked"];
 	        this.scopePorts = source["scopePorts"];
 	        this.scopeTunnels = source["scopeTunnels"];

@@ -89,8 +89,8 @@ all of these looked reasonable right up until they didn't.
   the live session — a session captures its scope at admission (`gateway.go
   SetAgentScope`). Same agentID supersedes, a distinct one joins alongside (`actor.go
   admit`). `agentID` width is a security parameter (`cred.go agentFingerprintBytes`).
-  The shared token is a migration fallback only (`Gateway.AcceptSharedToken`); the
-  `agt_` namespace is reserved against it (`link/cred.go IsDerivedAgentID`).
+  Identity is the **only** authenticator — every accept path funnels through
+  `gateway/auth.go identityValidator`; there is no shared-token fallback.
 - **The unit of abuse accounting is the network, not the address** (`limits.go
   sourceNet`): IPv4 address, IPv6 **/64**. Any new per-source limit keys on it or it
   is decorative. Callers pass the raw IP — `remoteIP`'s other callers need it whole.

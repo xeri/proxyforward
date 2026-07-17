@@ -10,6 +10,10 @@
 //   &link=down       — the tunnel link is down (reconnecting / waiting)
 //   &mode=attached   — a service owns the engine; gated actions reject
 //   &fatal=1         — terminal engine error (bad token) surfaces
+//   &engine=stopped  — the tunnel run is deliberately off (runState stopped, no
+//                      fatal): the "am I on" axis. Distinct from &fatal (a crash)
+//                      and &link=down (trying, failing): here nothing is trying.
+//                      Start/Stop mutate it, so the controls can be driven live.
 //   &fresh=1         — first-run data: no history, no peers yet
 //   &fx=high         — high-fx glass: refraction filter on the palette
 //   &fx=low          — low-fx glass: solid cards, no caustics/chart glow
@@ -64,6 +68,8 @@ export function installDevMock() {
   const axisLinkDown = params.get('link') === 'down'
   const axisAttached = params.get('mode') === 'attached'
   const axisFatal = params.get('fatal') === '1'
+  const axisStopped = params.get('engine') === 'stopped'
+  const axisService = params.get('service') || '' // '' (not installed) | running | stopped
   const axisFresh = params.get('fresh') === '1'
   const axisAnalyticsOff = params.get('analytics') === 'off'
   const axisUnpaired = params.get('paired') === '0'
@@ -208,11 +214,11 @@ export function installDevMock() {
   // each agent's share, with the RTT overlay shifted to that agent's baseline,
   // so every agent's chart looks distinct and agrees with its roster card.
   const AGENT_SCALE: Record<string, {factor: number; rtt: number}> = {
-    agentid: {factor: 1, rtt: 24},
-    '7788990011223344aabbccddeeff0011': {factor: 0.4, rtt: 74},
-    ccddeeff001122334455667788990011: {factor: 0.06, rtt: 180},
-    aa00bb11cc22dd33ee44ff5566778899: {factor: 0.6, rtt: 30},
-    f0e1d2c3b4a5968778695a4b3c2d1e0f: {factor: 0.25, rtt: 55},
+    agt_5w7d2k9rq3v8xj4m: {factor: 1, rtt: 24},
+    'agt_7s9wv2rk4mq8x3dn': {factor: 0.4, rtt: 74},
+    agt_cmp4t8vw2j6x9k3r: {factor: 0.06, rtt: 180},
+    agt_ah3n7d5q9v2m8k4w: {factor: 0.6, rtt: 30},
+    agt_f6x2r9km5v7d3p8t: {factor: 0.25, rtt: 55},
   }
   const agentBandwidth = (agentId: string, windowMs: number, maxBuckets: number) => {
     const {factor, rtt} = AGENT_SCALE[agentId] ?? {factor: 0.25, rtt: 40}
@@ -271,7 +277,7 @@ export function installDevMock() {
   const NOW0 = Date.now()
   const extraAgents = [
     {
-      agentId: '7788990011223344aabbccddeeff0011', hostname: 'SURVIVAL-RIG',
+      agentId: 'agt_7s9wv2rk4mq8x3dn', hostname: 'SURVIVAL-RIG',
       lan: ['10.0.0.9'], remote: '198.51.100.7', upSinceMs: NOW0 - 42 * 60_000,
       jitter: 41, loss: 1.3, rtt: 74, factor: 0.4,
       version: '0.0.9-dev', transport: 'per-conn', // older build → the roster "Update" badge
@@ -288,7 +294,7 @@ export function installDevMock() {
       }] as any[],
     },
     {
-      agentId: 'ccddeeff001122334455667788990011', hostname: 'MINIGAMES-PI',
+      agentId: 'agt_cmp4t8vw2j6x9k3r', hostname: 'MINIGAMES-PI',
       lan: ['192.168.1.30'], remote: '92.184.100.23', upSinceMs: NOW0 - 12 * 60_000,
       jitter: 22, loss: 7.5, rtt: 180, factor: 0.06,
       version: '0.1.0-dev', transport: 'quic',
@@ -296,7 +302,7 @@ export function installDevMock() {
       conns: [] as any[],
     },
     {
-      agentId: 'aa00bb11cc22dd33ee44ff5566778899', hostname: 'CREATIVE-HUB',
+      agentId: 'agt_ah3n7d5q9v2m8k4w', hostname: 'CREATIVE-HUB',
       lan: ['10.0.0.12'], remote: '84.113.9.201', upSinceMs: NOW0 - 6 * 3_600_000,
       jitter: 5, loss: 0, rtt: 30, factor: 0.6,
       version: '0.1.0-dev', transport: 'mux',
@@ -308,7 +314,7 @@ export function installDevMock() {
       }] as any[],
     },
     {
-      agentId: 'f0e1d2c3b4a5968778695a4b3c2d1e0f', hostname: 'SKYBLOCK-BOX',
+      agentId: 'agt_f6x2r9km5v7d3p8t', hostname: 'SKYBLOCK-BOX',
       lan: ['192.168.0.20'], remote: '51.68.220.14', upSinceMs: NOW0 - 95 * 60_000,
       jitter: 34, loss: 0.4, rtt: 55, factor: 0.25,
       version: '0.1.0-dev', transport: 'quic',
@@ -325,18 +331,17 @@ export function installDevMock() {
 
   // ---- agent directory (roster: ListAgents / RenameAgent / SetAgentScope /
   //      RevokeAgent) ----
-  // The gateway's enrollment store as the roster sees it: every enrolled agent
-  // (online or offline) plus the connected shared-token agent. Connected entries
-  // mirror the live fleet (agent0 + the &fleet=multi extras) by agentId, so the
-  // roster, the status.agents health join, and the drill-in all agree; the
-  // offline and revoked entries exist ONLY here (never in status.agents), which
-  // is what exercises the roster's offline/revoked states. Renames, scope edits,
-  // and revokes land in `agentOverrides` and surface on the next ListAgents poll
-  // — the same write-then-repoll loop the real bindings drive. agentId carries
-  // the agt_ prefix for enrolled identities and the self-asserted string for the
-  // shared-token agent (agent0), matching link.AgentID / the gateway store.
+  // The gateway's enrollment store as the roster sees it: every enrolled agent,
+  // online or offline. Connected entries mirror the live fleet (agent0 + the
+  // &fleet=multi extras) by agentId, so the roster, the status.agents health
+  // join, and the drill-in all agree; the offline and revoked entries exist ONLY
+  // here (never in status.agents), which is what exercises the roster's
+  // offline/revoked states. Renames, scope edits, and revokes land in
+  // `agentOverrides` and surface on the next ListAgents poll — the same
+  // write-then-repoll loop the real bindings drive. Every agentId wears the
+  // key-derived agt_ prefix, matching link.AgentID / the gateway store.
   const mkView = (o: any) => ({
-    agentId: o.agentId, nickname: o.nickname || '', enrolled: o.enrolled !== false,
+    agentId: o.agentId, nickname: o.nickname || '',
     revoked: !!o.revoked, scopePorts: o.scopePorts || [], scopeTunnels: o.scopeTunnels || [],
     issuedAtMs: o.issuedAtMs || 0, connected: !!o.connected, hostname: o.hostname || '',
     remoteIp: o.remoteIp || '', linkUpSinceMs: o.linkUpSinceMs || 0, tunnels: o.tunnels || 0,
@@ -352,17 +357,17 @@ export function installDevMock() {
   // Enrollment metadata for the connected extras (nickname/scope/enrolled age),
   // keyed by the same agentId the live fleet and AGENT_SCALE use.
   const EXTRA_ENROLL: Record<string, {nick: string; ports: number[]; tuns: string[]; days: number}> = {
-    '7788990011223344aabbccddeeff0011': {nick: 'Survival server', ports: [25566, 25569, 25572], tuns: [], days: 26},
-    ccddeeff001122334455667788990011: {nick: '', ports: [25568], tuns: [], days: 12},
-    aa00bb11cc22dd33ee44ff5566778899: {nick: 'Creative hub', ports: [], tuns: [], days: 47},
-    f0e1d2c3b4a5968778695a4b3c2d1e0f: {nick: 'Skyblock island', ports: [], tuns: ['c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f'], days: 9},
+    'agt_7s9wv2rk4mq8x3dn': {nick: 'Survival server', ports: [25566, 25569, 25572], tuns: [], days: 26},
+    agt_cmp4t8vw2j6x9k3r: {nick: '', ports: [25568], tuns: [], days: 12},
+    agt_ah3n7d5q9v2m8k4w: {nick: 'Creative hub', ports: [], tuns: [], days: 47},
+    agt_f6x2r9km5v7d3p8t: {nick: 'Skyblock island', ports: [], tuns: ['c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f'], days: 9},
   }
   const connectedViews = () => {
     if (!state.linkUp) return []
-    // agent0 is the connected shared-token agent: no nickname (→ hostname title),
-    // enrolled:false, unrestricted. Its id is self-asserted, not agt_-prefixed.
+    // agent0: the default connected agent — no nickname (→ hostname title),
+    // unrestricted scope.
     const a0 = mkView({
-      agentId: 'agentid', enrolled: false, connected: true, hostname: 'DESKTOP-DEV',
+      agentId: 'agt_5w7d2k9rq3v8xj4m', connected: true, hostname: 'DESKTOP-DEV',
       remoteIp: '84.23.101.7', linkUpSinceMs: LINK_UP_SINCE, tunnels: 1, issuedAtMs: INSTALLED_AT,
       version: '0.1.0-dev', transport: 'mux', // matches the gateway version → no Update badge
     })
@@ -370,7 +375,7 @@ export function installDevMock() {
     const extras = extraAgents.map(a => {
       const e = EXTRA_ENROLL[a.agentId] ?? {nick: '', ports: [], tuns: [], days: 20}
       return mkView({
-        agentId: a.agentId, nickname: e.nick, enrolled: true, connected: true,
+        agentId: a.agentId, nickname: e.nick, connected: true,
         hostname: a.hostname, remoteIp: a.remote, linkUpSinceMs: a.upSinceMs,
         tunnels: a.tunnels.length, scopePorts: e.ports, scopeTunnels: e.tuns,
         issuedAtMs: now0 - e.days * 86_400_000, version: a.version, transport: a.transport,
@@ -381,14 +386,14 @@ export function installDevMock() {
   // Enrolled agents that are NOT currently connected, plus one revoked — always
   // in the roster regardless of link state, so their states always render.
   const offlineViews = [
-    mkView({agentId: 'agt_h4t2q9zm', nickname: 'Backup box', enrolled: true, hostname: 'BACKUP-NAS', scopePorts: [25580], issuedAtMs: now0 - 18 * 86_400_000}),
-    mkView({agentId: 'agt_b7k3n5pd', enrolled: true, hostname: 'SEASONAL-SMP', issuedAtMs: now0 - 40 * 86_400_000}),
+    mkView({agentId: 'agt_h4t2q9zm', nickname: 'Backup box', hostname: 'BACKUP-NAS', scopePorts: [25580], issuedAtMs: now0 - 18 * 86_400_000}),
+    mkView({agentId: 'agt_b7k3n5pd', hostname: 'SEASONAL-SMP', issuedAtMs: now0 - 40 * 86_400_000}),
   ]
   const revokedViews = [
-    mkView({agentId: 'agt_x2m8r6ct', nickname: 'Old laptop', enrolled: true, revoked: true, hostname: 'LAPTOP-OLD', issuedAtMs: now0 - 63 * 86_400_000}),
+    mkView({agentId: 'agt_x2m8r6ct', nickname: 'Old laptop', revoked: true, hostname: 'LAPTOP-OLD', issuedAtMs: now0 - 63 * 86_400_000}),
   ]
   const knownAgentIds = new Set<string>([
-    'agentid', ...extraAgents.map(a => a.agentId),
+    'agt_5w7d2k9rq3v8xj4m', ...extraAgents.map(a => a.agentId),
     ...offlineViews.map(v => v.agentId), ...revokedViews.map(v => v.agentId),
   ])
   // Mutations from the write bindings, applied over the composed roster.
@@ -411,11 +416,10 @@ export function installDevMock() {
   }
 
   // ---- gateway-authoritative desired config (AgentDesiredConfig drill-in panel) ----
-  // Enrolled agents return their gateway-held tunnel set + generation; the shared-token
-  // agent (agentid) and any unknown id return enrolled:false → the panel's honest
-  // unavailable state ("config is agent-pushed"). SEASONAL-SMP is enrolled with no
-  // config yet → the empty "will seed on connect" state; the connected extras mirror
-  // their live tunnels so the drill-in list matches what the fleet is serving.
+  // Agents return their gateway-held tunnel set + generation; an unknown id gets
+  // the zero view. SEASONAL-SMP has no config yet → the empty "will seed on
+  // connect" state; agent0 and the connected extras mirror their live tunnels so
+  // the drill-in list matches what the fleet is serving.
   const toSpec = (t: any) => ({
     id: t.id, name: t.name, type: 'tcp', publicPort: t.port,
     bandwidthLimitMbps: t.bandwidthLimitMbps ?? 0, bandwidthLimitScope: t.bandwidthLimitScope ?? '',
@@ -426,7 +430,7 @@ export function installDevMock() {
     agt_x2m8r6ct: {gen: 2, tunnels: []},
   }
   // consentState decorates a config view with the live session's approval state.
-  // Only a connected, enrolled agent can be consent-capable; an offline one has no
+  // Only a connected agent can be consent-capable; an offline one has no
   // session, so the editor must fall back to its honest unavailable state rather
   // than offer a Save that could never be delivered.
   const consentState = (id: string, connected: boolean) => ({
@@ -435,12 +439,15 @@ export function installDevMock() {
     pendingOutbound: id === CONSENT_AGENT ? gwPendingOut ?? undefined : undefined,
   })
   const agentDesiredConfig = (id: string) => {
-    if (state.role !== 'gateway') return {generation: 0, tunnels: [], enrolled: false, consentActive: false}
+    if (state.role !== 'gateway') return {generation: 0, tunnels: [], consentActive: false}
+    if (id === 'agt_5w7d2k9rq3v8xj4m') {
+      return {generation: 2, tunnels: [toSpec({id: tunnelID, name: 'Minecraft', port: 25565})], ...consentState(id, state.linkUp)}
+    }
     const extra = extraAgents.find(a => a.agentId === id)
-    if (extra) return {generation: 3 + extra.tunnels.length, tunnels: extra.tunnels.map(toSpec), enrolled: true, ...consentState(id, true)}
+    if (extra) return {generation: 3 + extra.tunnels.length, tunnels: extra.tunnels.map(toSpec), ...consentState(id, true)}
     const off = OFFLINE_CONFIG[id]
-    if (off) return {generation: off.gen, tunnels: off.tunnels.map(toSpec), enrolled: true, ...consentState(id, false)}
-    return {generation: 0, tunnels: [], enrolled: false, consentActive: false} // agentid (shared-token) / unknown
+    if (off) return {generation: off.gen, tunnels: off.tunnels.map(toSpec), ...consentState(id, false)}
+    return {generation: 0, tunnels: [], consentActive: false} // unknown id
   }
 
   // ---- config consent (mutual approval) ----
@@ -452,7 +459,7 @@ export function installDevMock() {
   // identical to the current one.
   // SURVIVAL-RIG: enrolled, connected, and already the reclaim card's subject, so the
   // consent surfaces land on an agent every other gateway axis also populates.
-  const CONSENT_AGENT = '7788990011223344aabbccddeeff0011'
+  const CONSENT_AGENT = 'agt_7s9wv2rk4mq8x3dn'
   // A proposal is only interesting if it *differs* from what is served today: move
   // the first tunnel's port and add one, so the approval diff has both kinds of row.
   const consentTunnels = (base: any[], addName: string) => [
@@ -495,7 +502,7 @@ export function installDevMock() {
   if (axisConflict === 'both') {
     pushEvent({
       timeMs: evNow - 52 * 60_000, kind: 'port-reassigned',
-      agentId: 'aa00bb11cc22dd33ee44ff5566778899', tunnelId: 'ab00cd11ef22ab33cd44ef5566778890',
+      agentId: 'agt_ah3n7d5q9v2m8k4w', tunnelId: 'ab00cd11ef22ab33cd44ef5566778890',
       requestedPort: 25569, actualPort: 25574,
       message: 'Requested public port 25569 was busy; CREATIVE-HUB’s "Creative" tunnel was auto-assigned 25574.',
     })
@@ -507,24 +514,28 @@ export function installDevMock() {
     // informational — the honest gate, not a hidden action.
     pushEvent({
       timeMs: evNow - 8 * 60_000, kind: 'port-reassigned',
-      agentId: '7788990011223344aabbccddeeff0011', tunnelId: 'cc22334455667788990011aabbccddff',
+      agentId: 'agt_7s9wv2rk4mq8x3dn', tunnelId: 'cc22334455667788990011aabbccddff',
       requestedPort: 25569, actualPort: 25572,
       message: 'Requested public port 25569 was already bound; SURVIVAL-RIG’s "Lobby" tunnel was auto-assigned 25572 instead.',
     })
   }
   if (axisConflict === 'clone' || axisConflict === 'both') {
     pushEvent({
-      timeMs: evNow - 3 * 60_000, kind: 'clone-suspected', agentId: 'agentid',
-      message: 'Agent "agentid" reconnected from 203.0.113.77:52210 while still linked from 84.23.101.7:53880 — possible cloned identity or a shared token in use on two machines.',
+      timeMs: evNow - 3 * 60_000, kind: 'clone-suspected', agentId: 'agt_5w7d2k9rq3v8xj4m',
+      message: 'Agent "agt_5w7d2k9rq3v8xj4m" reconnected from 203.0.113.77:52210 while still linked from 84.23.101.7:53880 — possible cloned identity key in use on two machines.',
     })
   }
   const gatewayEvents = (sinceSeq: number) => gwEvents.filter(e => e.seq > (sinceSeq || 0))
 
-  const up = !isWizard && !axisLinkDown && !axisFatal
+  // baseUp is "would the link be up if the run were on" — Start restores to it;
+  // up folds in the deliberate stop, which Stop drops to.
+  const baseUp = !isWizard && !axisLinkDown && !axisFatal
+  const up = baseUp && !axisStopped
   const state = {
     role: isGateway ? 'gateway' : 'agent',
     linkUp: up,
     agentConnected: up,
+    runState: axisStopped ? 'stopped' : 'running',
     rtt: 24,
     bytesIn: 0,
     bytesOut: 0,
@@ -535,7 +546,7 @@ export function installDevMock() {
   }
   const config = {
     Role: state.role,
-    Agent: {AgentID: 'agentid', GatewayHost: 'play.example.com', GatewayPort: 8474, Token: 'tok', CertFingerprint: 'sha256:ab', Transport: 'auto',
+    Agent: {AgentID: 'agt_5w7d2k9rq3v8xj4m', GatewayHost: 'play.example.com', GatewayPort: 8474, Token: 'tok', CertFingerprint: 'sha256:ab', Transport: 'auto',
       Tunnels: [{ID: tunnelID, Name: 'Minecraft', Type: 'tcp', LocalAddr: '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
         Options: {MinecraftAware: true, ProxyProtocolV2: false, OfflineMOTD: 'Server is offline — back soon', BandwidthLimitMbps: 40, BandwidthLimitScope: 'per-direction'}}]},
     Gateway: {BindAddr: '0.0.0.0', ControlPort: 8474, Token: 'tok', PublicHost: 'play.example.com', PortAllowlist: [],
@@ -580,7 +591,7 @@ export function installDevMock() {
     // scope them. A downed gateway link means zero agents. The agent role sends
     // no roster at all (undefined), like the real backend.
     const agent0 = {
-      agentId: 'agentid', hostname: 'DESKTOP-DEV', lanIps: ['10.0.0.5'], remoteIp: '84.23.101.7',
+      agentId: 'agt_5w7d2k9rq3v8xj4m', hostname: 'DESKTOP-DEV', lanIps: ['10.0.0.5'], remoteIp: '84.23.101.7',
       linkUpSinceMs: LINK_UP_SINCE, rttMillis: state.rtt, jitterMillis: jitter, packetLossPct: loss,
       healthScore: healthOf(jitter, loss),
       linkBytesIn: Math.round(state.bytesIn * 1.06) + 2_400_000,
@@ -602,7 +613,7 @@ export function installDevMock() {
     const rosterOld = gw && axisFleet === 'old'
     const gwTunnels = gw
       ? (state.linkUp
-        ? [{id: tunnelID, name: 'Minecraft', publicPort: 25565, localUp: true, localKnown: true, agentId: 'agentid', bandwidthLimitMbps: 40, bandwidthLimitScope: 'per-direction'},
+        ? [{id: tunnelID, name: 'Minecraft', publicPort: 25565, localUp: true, localKnown: true, agentId: 'agt_5w7d2k9rq3v8xj4m', bandwidthLimitMbps: 40, bandwidthLimitScope: 'per-direction'},
           ...fleetExtras.flatMap(a => a.tunnels.map((t: any) => ({
             id: t.id, name: t.name, publicPort: t.port, localUp: t.localUp, localKnown: true, agentId: a.agentId,
             bandwidthLimitMbps: t.bandwidthLimitMbps ?? 0, bandwidthLimitScope: t.bandwidthLimitScope ?? '',
@@ -611,7 +622,7 @@ export function installDevMock() {
       : [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true}]
     const gwConns = gw
       ? (state.linkUp
-        ? [...state.conns.map((c: any) => ({...c, agentId: 'agentid'})),
+        ? [...state.conns.map((c: any) => ({...c, agentId: 'agt_5w7d2k9rq3v8xj4m'})),
           ...fleetExtras.flatMap(a => a.conns.map(c => ({...c, agentId: a.agentId})))]
         : [])
       : (state.linkUp ? state.conns : [])
@@ -648,6 +659,7 @@ export function installDevMock() {
     historyUnsupported: false,
     analyticsUnsupported: axisAnalyticsOff,
     engineFatal: axisFatal ? 'authentication failed: the gateway rejected this agent\'s token (it may have been rotated) — re-pair with a fresh code' : '',
+    runState: isWizard ? 'running' : state.runState,
     }
   }
 
@@ -658,7 +670,7 @@ export function installDevMock() {
   const pushLog = (level: string, msg: string, attrs = '') => logs.push({seq: ++logSeq, timeMs: Date.now(), level, msg, attrs})
   pushLog('INFO', 'starting', 'role=' + state.role + ' version=0.1.0-dev')
   pushLog('INFO', 'gateway control listener up', 'addr=0.0.0.0:8474')
-  pushLog('INFO', 'agent connected', 'id=agentid rtt=24ms')
+  pushLog('INFO', 'agent connected', 'id=agt_5w7d2k9rq3v8xj4m rtt=24ms')
   pushLog('WARN', 'local server is down', 'tunnel=Minecraft local_addr=127.0.0.1:25565')
 
   if (!isWizard) setInterval(() => {
@@ -991,6 +1003,11 @@ export function installDevMock() {
     state.role = r
   }
 
+  // Mutable service state (the badge + the installed-but-stopped warning).
+  let serviceState = axisService === 'running' ? 'running'
+    : axisService === 'stopped' ? 'stopped'
+      : 'not-installed'
+
   const ok = <T,>(v: T) => Promise.resolve(v)
   // Attached mode: a service owns the engine — gated bindings reject exactly
   // like the real backend so the UI's disabled/degraded states can be tested.
@@ -1134,6 +1151,22 @@ export function installDevMock() {
     },
     SetTheme: (t: string) => { config.UI.Theme = t; return ok(undefined) },
     RestartEngine: () => gated(() => undefined),
+    // Start/Stop drive the run and mutate the mock world, so the next poll shows
+    // the result — the real write-then-repoll loop. Not gated: unlike Restart,
+    // these work attached too (they ride the IPC lifecycle ops). Stop drops the
+    // link and marks stopped; Start restores whatever the axes said the link was.
+    StopEngine: (_force: boolean) => {
+      state.runState = 'stopped'
+      state.linkUp = false
+      state.agentConnected = false
+      return ok(undefined)
+    },
+    StartEngine: () => {
+      state.runState = 'running'
+      state.linkUp = baseUp
+      state.agentConnected = baseUp
+      return ok(undefined)
+    },
     RegenerateToken: () => gated(() => undefined),
     OpenConfigDir: () => ok(undefined),
     OpenExternal: (u: string) => { window.open(u, '_blank'); return ok(undefined) },
@@ -1147,9 +1180,13 @@ export function installDevMock() {
     ImportSetup: () => gated(() => undefined),
     FirewallStatus: () => ok(true),
     FirewallRepair: () => ok(undefined),
-    ServiceStatus: () => ok('Not installed'),
-    InstallService: () => ok(undefined),
-    UninstallService: () => ok(undefined),
+    // Service state is mutable so Install/Start/Stop/Uninstall drive the badge
+    // and the installed-but-stopped warning on the next poll.
+    ServiceStatus: () => ok(serviceState),
+    InstallService: () => { serviceState = 'running'; return ok(undefined) },
+    UninstallService: () => { serviceState = 'not-installed'; return ok(undefined) },
+    StartService: () => { serviceState = 'running'; return ok(undefined) },
+    StopService: () => { serviceState = 'stopped'; return ok(undefined) },
     MeasureLatency: () => gated(() => new Promise(r => setTimeout(() => {
       const avg = 21 + Math.random() * 6
       r({

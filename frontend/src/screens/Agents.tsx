@@ -186,8 +186,8 @@ function useAgentConfig(agentId: string, pollMs = 3000): {
 /**
  * Agents (gateway role): the fleet — a wall of machine cards, the gateway
  * analogue of the Players wall of faces. The roster now comes from ListAgents
- * (every enrolled agent, online or off, plus any connected shared-token agent);
- * live health/RTT joins in from status.agents for the connected ones. Selecting
+ * (every enrolled agent, online or off); live health/RTT joins in from
+ * status.agents for the connected ones. Selecting
  * one drills into a focused per-agent view with rename/scope/revoke controls.
  * One identity surface; the cards are frost, never Signal Glass — N equal cards
  * can't each answer the pointer.
@@ -666,20 +666,18 @@ function ConflictCards({conflicts, roster, tunnels, rosterIds, onSelect, onDismi
 }) {
   if (conflicts.length === 0) return null
   const byId = new Map(roster.map(v => [v.agentId, v]))
-  const enrolled = (id?: string): boolean => {
+  const eligible = (id?: string): boolean => {
     const v = id ? byId.get(id) : undefined
-    return !!v && v.enrolled && !v.revoked
+    return !!v && !v.revoked
   }
-  // The agent holding the contested port right now — non-null only when the reclaim is
-  // the gateway's to make: BOTH the agent that wanted the port and the one holding it
-  // are enrolled, so both configs are gateway-held and rewritable, and the holder is
-  // somebody else. A shared-token party pushes its own config, so the gateway would
-  // refuse; we don't offer an action that can't work.
+  // The agent holding the contested port right now — non-null only when the reclaim
+  // is the gateway's to make: both parties are still in the roster (not revoked) and
+  // the holder is somebody else. We don't offer an action that can't work.
   const incumbentOf = (e: GwEvent): AgentView | null => {
     if (e.kind !== 'port-reassigned' || !e.requestedPort || !e.tunnelId) return null
-    if (!enrolled(e.agentId)) return null
+    if (!eligible(e.agentId)) return null
     const holderId = tunnels.find(t => t.publicPort === e.requestedPort)?.agentId
-    if (!holderId || holderId === e.agentId || !enrolled(holderId)) return null
+    if (!holderId || holderId === e.agentId || !eligible(holderId)) return null
     return byId.get(holderId) ?? null
   }
   return (
@@ -948,7 +946,7 @@ function AgentManagement({view, onChanged}: {view: AgentView; onChanged: () => v
         </div>
 
         <div className="text-[11px] text-[var(--text-3)]">
-          Enrolled {fmtDate(view.issuedAtMs)} · {view.enrolled ? 'Ed25519 identity' : 'shared token'}
+          Enrolled {fmtDate(view.issuedAtMs)} · Ed25519 identity
         </div>
       </div>
 
@@ -1036,9 +1034,8 @@ function InboundProposalBanner({agentId, proposal, current, onDecided}: {
  * the agent's job.
  *
  * Four states: skeleton while AgentDesiredConfig resolves, the tunnel list, a written
- * empty state for an enrolled agent with no config yet, and the honest-unavailable
- * state told two ways apart — a shared-token agent (config is agent-pushed, not
- * gateway-held) vs a daemon too old to report it. */
+ * empty state for an agent with no config yet, and the honest-unavailable state
+ * for a daemon too old to report gateway-held config. */
 function AgentConfigPanel({view}: {view: AgentView}) {
   const {cfg, loading, err, refresh} = useAgentConfig(view.agentId)
   const server = useMemo(() => cfg?.tunnels ?? [], [cfg])
@@ -1061,7 +1058,7 @@ function AgentConfigPanel({view}: {view: AgentView}) {
   // direction. Ours would silently supersede itself; and countering the agent's
   // still-pending proposal just races it, since approving either one moves the
   // generation and the loser is dropped as stale. Decide theirs first.
-  const editable = !!cfg?.enrolled && !!cfg.consentActive && !pendingOut && !pendingIn
+  const editable = !!cfg?.consentActive && !pendingOut && !pendingIn
   const edit = (id: string, port: number) => {
     setDirty(true)
     setDraft(d => d.map(t => (t.id === id ? {...t, publicPort: port} as control.TunnelSpec : t)))
@@ -1079,7 +1076,7 @@ function AgentConfigPanel({view}: {view: AgentView}) {
   const rows = dirty ? draft : server
   return (
     <Card label="Gateway config" pad={false}
-      action={cfg?.enrolled ? <div className="pr-1"><MonoChip>gen {cfg.generation}</MonoChip></div> : undefined}>
+      action={cfg ? <div className="pr-1"><MonoChip>gen {cfg.generation}</MonoChip></div> : undefined}>
       {loading ? (
         <div className="space-y-2 px-5 pb-5 pt-1" aria-busy="true">
           {[0, 1].map(i => (
@@ -1093,12 +1090,9 @@ function AgentConfigPanel({view}: {view: AgentView}) {
       ) : err ? (
         <div className="px-5 pb-5"><EmptyState icon={<IconServer size={24} />} title="Config unavailable"
           hint="The background service is an older version that doesn't report gateway-held config. Update it to see this agent's authoritative tunnel set." /></div>
-      ) : cfg && !cfg.enrolled ? (
-        <div className="px-5 pb-5"><EmptyState icon={<IconShield size={24} />} title="Shared-token agent"
-          hint="This agent authenticates with the legacy shared token, so its tunnel config is agent-pushed — the gateway holds none to show." /></div>
       ) : (
         <>
-          {(pendingIn || pendingOut || (cfg?.enrolled && !cfg.consentActive)) && (
+          {(pendingIn || pendingOut || (cfg && !cfg.consentActive)) && (
             <div className="space-y-2 px-5 pb-3">
               {pendingIn && (
                 <InboundProposalBanner agentId={view.agentId} proposal={pendingIn} current={server} onDecided={refresh} />
@@ -1114,7 +1108,7 @@ function AgentConfigPanel({view}: {view: AgentView}) {
                   </div>
                 </Banner>
               )}
-              {cfg?.enrolled && !cfg.consentActive && (
+              {cfg && !cfg.consentActive && (
                 <Banner tone="info">
                   {view.connected
                     ? 'This agent runs a build without config approvals, so its tunnels can’t be edited from here. Update the agent to edit them.'

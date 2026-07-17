@@ -134,9 +134,9 @@ the control stream → tunnel registration:
 - Capability `tunnel-sync`: one `sync_tunnels{seq, tunnels[]}` desired-state frame;
   gateway's actor reconciles (identical specs keep listeners + live conns:
   `actor.reconcile`), answers `sync_result` (stale seq dropped agent-side).
-- Capability `gateway-config` (enrolled agents only — it is keyed to the Ed25519
-  identity, so the gateway negotiates it away for a shared-token agent, which then
-  falls back to `tunnel-sync`): the gateway is authoritative. It stores each identity's
+- Capability `gateway-config` (keyed to the agent's Ed25519 identity; a peer
+  that never learned the capability falls back to `tunnel-sync`): the gateway is
+  authoritative. It stores each identity's
   desired set in the `AgentStore` (`DesiredConfig`/`AdoptConfig`) with a monotonic
   generation, hashed by `HashTunnels`. The agent reports its `configHash`/
   `configGeneration` in the hello; the gateway reconciles its set onto the fresh
@@ -147,8 +147,8 @@ the control stream → tunnel registration:
   adopts, bumps, and re-pushes — deterministic, not last-write-wins; a proposal on a
   stale generation is refused and the authoritative set re-pushed
   (`pushConfigOnConnect`/`adoptProposal`).
-- Capability `config-consent` (layers on `gateway-config`, so it drops with it for a
-  shared-token agent): mutual consent for *authored* edits. Either side proposes
+- Capability `config-consent` (layers on `gateway-config`, so it is negotiated
+  only alongside it): mutual consent for *authored* edits. Either side proposes
   `config_proposal{proposalId, baseGen, tunnels[], hash}`; the other holds it for its
   user and answers `config_decision{proposalId, approved, reason, generation, hash}`.
   Held state lives on the live session (`agentSession.pendingInbound`/`pendingOutbound`,
@@ -262,10 +262,9 @@ single writer, atomic temp+rename with the AV-retry of `setup.atomicWrite`) — 
 LoadAgentStore`). Each record carries identity, nickname, scope, and the gateway-authoritative
 desired tunnel set (see "Control-plane message flow").
 
-**Validators.** A `compositeValidator` tries the identity path first, then — only while
-`Gateway.AcceptSharedToken` is on (a migration default) — falls back to the legacy shared token
-(`gateway/auth.go compositeValidator sharedTokenValidator`; token and fingerprint still compare
-in constant time). Every accept path (TCP control, QUIC, per-conn data) funnels through the one
+**Validators.** `gateway/auth.go identityValidator` is the only authenticator: verify the
+proof-of-possession signature, then allowlist lookup (or ticket enrollment on first contact).
+Every accept path (TCP control, QUIC, per-conn data) funnels through the one
 `Validator.Validate` seam, so identity is enforced uniformly.
 
 **Revocation.** `Gateway.RevokeAgent` removes the pubkey from the allowlist and evicts any live

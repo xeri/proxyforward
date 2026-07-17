@@ -35,7 +35,7 @@ type reclaimFixture struct {
 	port      int
 }
 
-func newReclaimFixture(t *testing.T, requesterEnrolled, incumbentEnrolled bool) *reclaimFixture {
+func newReclaimFixture(t *testing.T) *reclaimFixture {
 	t.Helper()
 	store, err := LoadAgentStore(t.TempDir())
 	if err != nil {
@@ -61,15 +61,15 @@ func newReclaimFixture(t *testing.T, requesterEnrolled, incumbentEnrolled bool) 
 	g.agents = store
 	g.actor.Store(a)
 
-	mk := func(id string, enrolled bool) *agentSession {
-		s := &agentSession{agentID: id, scope: Scope{}, enrolled: enrolled, logger: discardLogger()}
+	mk := func(id string) *agentSession {
+		s := &agentSession{agentID: id, scope: Scope{}, logger: discardLogger()}
 		if _, err := a.admit(s); err != nil {
 			t.Fatalf("admit %s: %v", id, err)
 		}
 		return s
 	}
-	inc := mk("agt_incumbent", incumbentEnrolled)
-	req := mk("agt_requester", requesterEnrolled)
+	inc := mk("agt_incumbent")
+	req := mk("agt_requester")
 
 	port := freePort(t)
 	seed := func(sess *agentSession, tunnelID string, p int) {
@@ -114,13 +114,13 @@ func findEvent(a *actor, kind string) *GatewayEvent {
 	return nil
 }
 
-// TestReclaimPort: an operator hands a contested public port to one enrolled agent.
-// The enrolled incumbent is bumped off it first (so the port is free before the
-// requester binds), both agents' authoritative configs are rewritten and re-adopted
-// (a bumped generation is what a push carries), the listeners actually move, and the
+// TestReclaimPort: an operator hands a contested public port to one agent. The
+// incumbent is bumped off it first (so the port is free before the requester
+// binds), both agents' authoritative configs are rewritten and re-adopted (a
+// bumped generation is what a push carries), the listeners actually move, and the
 // action is recorded as a port-reclaimed event. (#27)
 func TestReclaimPort(t *testing.T) {
-	f := newReclaimFixture(t, true, true)
+	f := newReclaimFixture(t)
 
 	_, incGen0 := storedPort(t, f.store, "agt_incumbent", "tnl_incumbent")
 	_, reqGen0 := storedPort(t, f.store, "agt_requester", "tnl_requester")
@@ -130,7 +130,7 @@ func TestReclaimPort(t *testing.T) {
 		t.Fatalf("ReclaimPort: %v", err)
 	}
 	if !ok {
-		t.Fatal("ReclaimPort between two enrolled agents must succeed")
+		t.Fatal("ReclaimPort between two live agents must succeed")
 	}
 
 	// The requester now owns the contested port, in the store and on a real listener.
@@ -170,46 +170,35 @@ func TestReclaimPort(t *testing.T) {
 	}
 }
 
-// TestReclaimPortRefusesLegacyParty: the gateway can only rewrite a per-identity
-// agent's config — a shared-token agent pushes its own. If either side of the trade
-// is legacy the op is refused and nothing moves. (#27)
-func TestReclaimPortRefusesLegacyParty(t *testing.T) {
-	cases := []struct {
-		name                                 string
-		requesterEnrolled, incumbentEnrolled bool
-	}{
-		{"legacy requester", false, true},
-		{"legacy incumbent", true, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newReclaimFixture(t, tc.requesterEnrolled, tc.incumbentEnrolled)
+// TestReclaimPortRefusesOfflineRequester: a reclaim rewrites and pushes the
+// requester's config over its live session, so with no session there is nothing
+// to land the move on — the op is refused and nothing moves. (#27)
+func TestReclaimPortRefusesOfflineRequester(t *testing.T) {
+	f := newReclaimFixture(t)
+	f.a.do(func() { f.a.evict(f.requester, "test: take the requester offline") })
 
-			ok, err := f.g.ReclaimPort("agt_requester", "tnl_requester", f.port)
-			if err != nil {
-				t.Fatalf("a refusal is not an error: %v", err)
-			}
-			if ok {
-				t.Fatal("reclaim must be refused when either party is a shared-token agent")
-			}
-			// Nothing moved: the incumbent keeps the port, the requester doesn't get it.
-			if incPort, _ := storedPort(t, f.store, "agt_incumbent", "tnl_incumbent"); incPort != f.port {
-				t.Fatalf("refused reclaim moved the incumbent to %d", incPort)
-			}
-			if reqPort, _ := storedPort(t, f.store, "agt_requester", "tnl_requester"); reqPort == f.port {
-				t.Fatal("refused reclaim handed the port to the requester anyway")
-			}
-			if ev := findEvent(f.a, EventPortReclaimed); ev != nil {
-				t.Fatalf("a refused reclaim must record no event, got %+v", *ev)
-			}
-		})
+	ok, err := f.g.ReclaimPort("agt_requester", "tnl_requester", f.port)
+	if err != nil {
+		t.Fatalf("a refusal is not an error: %v", err)
+	}
+	if ok {
+		t.Fatal("reclaim must be refused when the requester has no live session")
+	}
+	// Nothing moved: the incumbent keeps the port, the requester doesn't get it.
+	if incPort, _ := storedPort(t, f.store, "agt_incumbent", "tnl_incumbent"); incPort != f.port {
+		t.Fatalf("refused reclaim moved the incumbent to %d", incPort)
+	}
+	if reqPort, _ := storedPort(t, f.store, "agt_requester", "tnl_requester"); reqPort == f.port {
+		t.Fatal("refused reclaim handed the port to the requester anyway")
+	}
+	if ev := findEvent(f.a, EventPortReclaimed); ev != nil {
+		t.Fatalf("a refused reclaim must record no event, got %+v", *ev)
 	}
 }
 
-// TestAgentDesiredConfigReturnsStoredSet: the drill-in's read-only config panel gets
-// the gateway-held tunnel set and its generation for an enrolled agent, and an
-// honest Enrolled=false (never a misleading empty set) for a shared-token or unknown
-// agent, whose config is agent-pushed. (#29)
+// TestAgentDesiredConfigReturnsStoredSet: the drill-in's config panel gets the
+// gateway-held tunnel set and its generation; an unknown agent gets the zero
+// view (generation 0, no tunnels — the same shape as not-yet-seeded). (#29)
 func TestAgentDesiredConfigReturnsStoredSet(t *testing.T) {
 	store, err := LoadAgentStore(t.TempDir())
 	if err != nil {
@@ -235,9 +224,6 @@ func TestAgentDesiredConfigReturnsStoredSet(t *testing.T) {
 	g.agents = store
 
 	view := g.AgentDesiredConfig("agt_one")
-	if !view.Enrolled {
-		t.Fatal("an enrolled agent's config view must report Enrolled")
-	}
 	if view.Generation != gen {
 		t.Fatalf("generation = %d, want the stored %d", view.Generation, gen)
 	}
@@ -250,11 +236,8 @@ func TestAgentDesiredConfigReturnsStoredSet(t *testing.T) {
 		}
 	}
 
-	// A shared-token / unknown agent: nothing gateway-held to show, said honestly.
-	unknown := g.AgentDesiredConfig("agentid")
-	if unknown.Enrolled {
-		t.Fatal("an unknown/shared-token agent must not report Enrolled")
-	}
+	// An unknown agent: nothing gateway-held to show.
+	unknown := g.AgentDesiredConfig("agt_gone")
 	if len(unknown.Tunnels) != 0 || unknown.Generation != 0 {
 		t.Fatalf("unknown agent view = %+v, want the zero value", unknown)
 	}

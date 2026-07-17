@@ -33,8 +33,8 @@ func bindN(t *testing.T, a *actor, sess *agentSession, pol bindPolicy, n int, id
 // could ask for a listener per invented tunnel id and get one every time, until
 // the host's ephemeral range was exhausted: no more tunnels for any other agent,
 // and no more outbound connections for the machine itself. An authenticated peer
-// is not a trusted one — the shared-token path admits anyone holding one string,
-// and an enrolled agent can be compromised.
+// is not a trusted one — a pairing code can be shared beyond its intended
+// machine, and an enrolled agent can be compromised.
 func TestListenerCapBoundsAnUnscopedAgent(t *testing.T) {
 	a := newActor(discardLogger())
 	ctx, cancel := context.WithCancel(context.Background())
