@@ -11,7 +11,7 @@ import (
 	"proxyforward/internal/stats"
 )
 
-func Serve(ctx context.Context, logger *slog.Logger, src Sources) error {
+func Serve(ctx context.Context, logger *slog.Logger, src Sources, owners ...string) error {
 	return ErrUnsupported
 }
 

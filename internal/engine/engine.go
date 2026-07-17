@@ -178,12 +178,16 @@ func (e *Engine) Run(ctx context.Context) error {
 	defer cancel()
 	errCh := make(chan error, 2)
 	go func() {
+		// Extra pipe owners are a service-mode affair: there the engine runs as
+		// LocalSystem, so granting "the account we run as" grants nobody a GUI can
+		// use, and the installer left its SID behind for this. Absent in the
+		// GUI-hosted case, where the engine already is the person using it.
 		err := ipc.Serve(runCtx, e.logger, ipc.Sources{
 			Status:    e.Status,
 			History:   e.History,
 			Peers:     e.Peers,
 			Analytics: e.analyticsSource,
-		})
+		}, ipc.PipeOwners(e.configDir)...)
 		if errors.Is(err, ipc.ErrUnsupported) {
 			e.logger.Debug("ipc pipe unsupported on this platform")
 			err = nil

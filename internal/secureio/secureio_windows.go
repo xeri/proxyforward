@@ -64,3 +64,8 @@ func currentUserSID() (string, error) {
 	}
 	return user.User.Sid.String(), nil
 }
+
+// CurrentUserSID is the account this process runs as, in string form — the third
+// principal in dirSDDL, and the one the service installer records so the engine
+// (running as LocalSystem by then) can still let that person's GUI in.
+func CurrentUserSID() (string, error) { return currentUserSID() }

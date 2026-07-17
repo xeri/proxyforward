@@ -151,8 +151,18 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   stream must not dial one (`agent/agent.go enabledTunnelByID`) — `push_config`
   auto-applies without consent, so both halves are load-bearing
   (`TestMergeTunnelsKeepsDisabledDraftsDisabled`, `TestEnabledTunnelByIDIgnoresDisabledTunnels`).
-- The IPC pipe ACL admits Administrators, SYSTEM, and the interactive user only
-  (`ipc/server_windows.go pipeSecurity`).
+- **The IPC pipe is no easier to reach than the config dir it fronts.** Same three
+  principals as `secureio`, deliberately: SYSTEM, Administrators, and the account
+  serving it (`ipc/security_windows.go pipeSecurity`) — never a *group* like `IU`
+  (INTERACTIVE = every logged-on account, which is what it used to grant under a
+  comment claiming otherwise). The pipe is not a status feed: `OpIssuePairing`,
+  `OpRevokeAgent` and `OpSetAgentScope` ride the same envelope, and a pairing code
+  carries the gateway token — so a wider ACL is a hole straight through
+  `secureio` (`TestPipeDeniesOtherInteractiveUsers`). Service mode runs as
+  LocalSystem, so the installer records its own SID for the GUI
+  (`ipc/owner.go PipeOwnerFile`); an unelevated admin can't be let in via `BA`
+  because UAC filters that SID to deny-only. Any SID formatted into the SDDL is
+  parsed first, and a pipe whose ACL can't be built is not served.
 - Diagnostics bundles redact every secret, host, IP, and identity; peer IPs become
   stable sha256 pseudonyms (`app/tools.go`, leak-tested in `app/tools_test.go`).
   Anything new that exports data must pass the same no-leak test style — seeding

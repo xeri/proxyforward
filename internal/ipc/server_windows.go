@@ -5,6 +5,7 @@ package ipc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"sync"
@@ -23,16 +24,22 @@ const (
 	idleTimeout    = 2 * time.Minute
 )
 
-// pipeSecurity admits Administrators (BA), the interactive user (IU), and
-// SYSTEM (SY) — the GUI runs as the logged-in user, the daemon may run as a
-// service; remote access is impossible on local pipes by construction.
-const pipeSecurity = "D:P(A;;GA;;;BA)(A;;GA;;;SY)(A;;GA;;;IU)"
-
 // Serve owns the named pipe until ctx is cancelled. Each client connection
 // gets its own goroutine; requests are strictly request/response.
-func Serve(ctx context.Context, logger *slog.Logger, src Sources) error {
+//
+// owners are additional SIDs allowed to reach the pipe beyond SYSTEM,
+// Administrators, and the account this process runs as — see pipeSecurity. A
+// GUI-hosted engine passes none; a service-mode engine passes the SID the
+// installer recorded.
+func Serve(ctx context.Context, logger *slog.Logger, src Sources, owners ...string) error {
+	sddl, err := pipeSecurity(owners)
+	if err != nil {
+		// Refusing to serve is the only safe answer: the alternative is a pipe
+		// whose ACL we could not build, and this ACL is the authorization model.
+		return fmt.Errorf("ipc pipe security: %w", err)
+	}
 	ln, err := winio.ListenPipe(PipeName, &winio.PipeConfig{
-		SecurityDescriptor: pipeSecurity,
+		SecurityDescriptor: sddl,
 		MessageMode:        false,
 	})
 	if err != nil {

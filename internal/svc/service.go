@@ -11,6 +11,7 @@ import (
 	"github.com/kardianos/service"
 
 	"proxyforward/internal/config"
+	"proxyforward/internal/ipc"
 	"proxyforward/internal/secureio"
 )
 
@@ -105,6 +106,14 @@ func RunService(run RunFunc) error {
 // elevation.
 func InstallService(args []string) error {
 	if err := seedServiceConfig(); err != nil {
+		return err
+	}
+	// The engine will run as LocalSystem, so it cannot work out who owns this
+	// install once it starts. Record it now, while we are still that person.
+	if err := secureio.MkdirAll(filepath.Dir(config.DefaultPath(true))); err != nil {
+		return fmt.Errorf("create service config dir: %w", err)
+	}
+	if err := ipc.RecordPipeOwner(filepath.Dir(config.DefaultPath(true))); err != nil {
 		return err
 	}
 	s, err := newService(nil)
