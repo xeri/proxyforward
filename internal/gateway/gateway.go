@@ -1160,10 +1160,13 @@ func (g *Gateway) buildAndAdmit(ctx context.Context, conn net.Conn, hello *contr
 	negotiated := control.IntersectCaps(hello.Capabilities, control.SupportedCapabilities)
 	// Gateway-authoritative config is keyed to a durable Ed25519 identity, so it is
 	// negotiated only for enrolled agents. A shared-token agent that offered the cap
-	// has it dropped here and keeps the agent-push SyncTunnels path.
+	// has it dropped here and keeps the agent-push SyncTunnels path. Consent layers
+	// on that config authority — there is nothing to approve without a gateway-held
+	// set — so it drops with it.
 	enrolled := identity.PubKey != nil
 	if !enrolled {
 		negotiated = withoutCap(negotiated, control.CapGatewayConfig)
+		negotiated = withoutCap(negotiated, control.CapConfigConsent)
 	}
 	caps := control.NewCapSet(negotiated)
 	// Session ctx: a child of the serving ctx, cancelled on eviction so throttled

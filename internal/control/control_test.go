@@ -143,8 +143,19 @@ func TestCapSet(t *testing.T) {
 
 func TestSupportedCapabilities(t *testing.T) {
 	s := NewCapSet(SupportedCapabilities)
-	if !s.Has(CapTunnelSync) || !s.Has(CapConnStats) || !s.Has(CapPerConn) || !s.Has(CapGatewayConfig) {
+	if !s.Has(CapTunnelSync) || !s.Has(CapConnStats) || !s.Has(CapPerConn) || !s.Has(CapGatewayConfig) || !s.Has(CapConfigConsent) {
 		t.Fatalf("supported set missing a built-in capability: %v", SupportedCapabilities)
+	}
+	// config-consent layers on gateway-config: a peer can hold gateway-config
+	// alone (today's auto-adopt), but consent without it would mean approving
+	// against a set the gateway doesn't own.
+	if s.Has(CapConfigConsent) && !s.Has(CapGatewayConfig) {
+		t.Fatal("config-consent must never be supported without gateway-config")
+	}
+	// A gateway-config-only peer (an older build) must negotiate consent away and
+	// keep the auto-adopt path.
+	if got := IntersectCaps(SupportedCapabilities, []string{CapGatewayConfig}); !reflect.DeepEqual(got, []string{CapGatewayConfig}) {
+		t.Fatalf("against a gateway-config-only peer: got %v want [gateway-config]", got)
 	}
 	// tunnel-udp is deliberately NOT advertised: it isn't implemented
 	// end-to-end (the gateway rejects udp specs), so offering it would be a

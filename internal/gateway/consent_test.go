@@ -406,6 +406,53 @@ func TestConsentGatedMessagesIgnoredWithoutCap(t *testing.T) {
 	}
 }
 
+// TestConsentNegotiatedOnlyWhenEnrolled: consent is keyed to a durable identity
+// exactly like the gateway-held config it layers on, so a shared-token agent that
+// offers it has it negotiated away and keeps the agent-push path. Otherwise a
+// self-asserted identity could hold an operator's approval hostage.
+func TestConsentNegotiatedOnlyWhenEnrolled(t *testing.T) {
+	offered := []string{control.CapTunnelSync, control.CapGatewayConfig, control.CapConfigConsent}
+	cases := []struct {
+		name       string
+		identity   Identity
+		wantConfig bool
+	}{
+		{"enrolled agent keeps consent", Identity{AgentID: "agt_one", PubKey: pub(1)}, true},
+		{"shared-token agent loses consent", Identity{AgentID: "agt_one"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newActor(discardLogger())
+			ctx, cancel := context.WithCancel(context.Background())
+			go a.run(ctx)
+			t.Cleanup(cancel)
+			g := &Gateway{cfg: config.Default()}
+			g.actor.Store(a)
+
+			hello := &control.Hello{AgentID: tc.identity.AgentID, Capabilities: offered}
+			sess, negotiated, err := g.buildAndAdmit(ctx, nil, hello, tc.identity, "127.0.0.1", discardLogger())
+			if err != nil {
+				t.Fatalf("buildAndAdmit: %v", err)
+			}
+			set := control.NewCapSet(negotiated)
+			if set.Has(control.CapConfigConsent) != tc.wantConfig {
+				t.Fatalf("negotiated %v, want config-consent present=%v", negotiated, tc.wantConfig)
+			}
+			// Consent must never outlive the config authority it layers on.
+			if set.Has(control.CapConfigConsent) && !set.Has(control.CapGatewayConfig) {
+				t.Fatalf("negotiated consent without gateway-config: %v", negotiated)
+			}
+			if sess.Has(control.CapConfigConsent) != tc.wantConfig {
+				t.Fatal("the session's cap set must match the negotiated list")
+			}
+			// tunnel-sync survives either way — a shared-token agent still works.
+			if !set.Has(control.CapTunnelSync) {
+				t.Fatalf("tunnel-sync must survive negotiation: %v", negotiated)
+			}
+		})
+	}
+}
+
 // TestConsentBlocksProposeConfigBypass: once consent is negotiated and the gateway
 // holds adopted config, a bare propose_config (the auto-adopt path) is refused —
 // otherwise a peer could bypass the operator's approval. Only the first-contact

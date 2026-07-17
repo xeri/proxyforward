@@ -64,13 +64,12 @@ const (
 	// immediate auto-apply of the adopted truth (connect-sync, drift
 	// correction, port reclaim) — because resource arbitration is gateway
 	// authority, not a negotiation. A peer with only CapGatewayConfig keeps
-	// the propose_config auto-adopt path. NOT advertised until implemented
-	// end-to-end.
+	// the propose_config auto-adopt path.
 	CapConfigConsent = "config-consent"
 )
 
 // SupportedCapabilities is everything this build implements, both roles.
-var SupportedCapabilities = []string{CapTunnelSync, CapConnStats, CapPerConn, CapGatewayConfig}
+var SupportedCapabilities = []string{CapTunnelSync, CapConnStats, CapPerConn, CapGatewayConfig, CapConfigConsent}
 
 // IntersectCaps returns offered ∩ supported, preserving supported's order.
 // Nil-safe on both arguments; unknown offered strings are simply dropped.

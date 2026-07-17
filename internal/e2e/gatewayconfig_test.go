@@ -7,8 +7,17 @@ import (
 
 	"proxyforward/internal/agent"
 	"proxyforward/internal/config"
+	"proxyforward/internal/control"
 	"proxyforward/internal/gateway"
 )
+
+// gatewayConfigOnlyOffer is the capability offer of an agent build that predates
+// config-consent: the gateway owns its tunnel set, but edits auto-adopt with no
+// approval round-trip. Today's agents offer consent too (offerFor), so this is how
+// a test pins the legacy path — the one a peer that never learned to ask still uses.
+func gatewayConfigOnlyOffer() []string {
+	return []string{control.CapTunnelSync, control.CapConnStats, control.CapGatewayConfig}
+}
 
 // waitConfigGen polls until the gateway's single enrolled agent has reached (at least)
 // the given authoritative config generation, returning its record.
@@ -68,11 +77,14 @@ func TestGatewayConfigSeed(t *testing.T) {
 // TestGatewayConfigPromote: a local edit is promoted to the gateway, which adopts it
 // (generation bumps to 2), resolves the added tunnel's port, and pushes the set back
 // so the new tunnel goes live — deterministic reconciliation, not last-write-wins.
-// (gateway-config)
+// This is the pre-consent contract, so it pins a gateway-config-only agent: a peer
+// that never negotiated config-consent must keep auto-adopting forever. Today's
+// agents negotiate consent and take the approval path instead
+// (TestConfigConsentAgentEditNeedsApproval). (gateway-config)
 func TestGatewayConfigPromote(t *testing.T) {
 	echoA, closeA := echoServer(t)
 	defer closeA()
-	h := newHarnessWith(t, echoA, harnessOpts{enroll: true})
+	h := newHarnessWith(t, echoA, harnessOpts{enroll: true, offerCaps: gatewayConfigOnlyOffer()})
 	h.waitPublicPort()
 	waitConfigGen(t, h.gw, 1)
 
@@ -135,7 +147,9 @@ func TestGatewayConfigDriftOnReconnect(t *testing.T) {
 func TestGatewayConfigScopeNarrowingHidesTunnel(t *testing.T) {
 	echoA, closeA := echoServer(t)
 	defer closeA()
-	h := newHarnessWith(t, echoA, harnessOpts{enroll: true})
+	// Scope enforcement is orthogonal to consent; a gateway-config-only agent keeps
+	// the setup to one auto-adopted edit rather than an approval round-trip.
+	h := newHarnessWith(t, echoA, harnessOpts{enroll: true, offerCaps: gatewayConfigOnlyOffer()})
 	h.waitPublicPort()
 	rec := waitConfigGen(t, h.gw, 1)
 
