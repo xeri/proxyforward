@@ -171,7 +171,13 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   its own pairing code. The owner is the check because it's the part a squatter
   can't fake (claiming a SID you don't hold needs `SeRestorePrivilege`).
 - Diagnostics bundles redact every secret, host, IP, and identity; peer IPs become
-  stable sha256 pseudonyms (`app/tools.go`, leak-tested in `app/tools_test.go`).
+  pseudonyms that are stable **within one bundle** and meaningless outside it
+  (`app/tools.go ipPseudonymiser`, leak-tested in `app/tools_test.go`). The salt is
+  the property, not the hash: IPv4 is 2^32 wide, so an *unsalted* digest is a table
+  lookup and a "pseudonym" anyone can invert
+  (`TestIPPseudonymIsNotJustAnEncoding`). Minting it is the one part of a bundle
+  that isn't best-effort — the fallback isn't a weaker salt, it's shipping the
+  addresses.
   Anything new that exports data must pass the same no-leak test style — seeding
   *every* channel it ships, since a leak test that leaves one empty passes vacuously.
   Bundles **ship logs**, so redacting only the config is theatre: log text is scrubbed
