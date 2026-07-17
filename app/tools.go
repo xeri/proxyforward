@@ -60,8 +60,19 @@ func testReachability(host string, port int) (string, error) {
 // that could identify a host, network, or client is masked so the bundle is safe to
 // share — logs included, via logScrubber: they are shipped, so redacting only the
 // config would leave the same secrets in cleartext one file over.
+// status is the live link snapshot for health.txt, or nil when no engine is
+// running in this process.
 // Leak-tested by TestWriteDiagnosticsNoLeaks, which seeds every channel here.
-func writeDiagnostics(path string, cfg *config.Config, configDir, health string, ring *logging.Ring) error {
+func writeDiagnostics(path string, cfg *config.Config, configDir string, status *ipc.Status, ring *logging.Ring) error {
+	// The salt every pseudonym in this bundle is minted under, before anything is
+	// written. Everything else here is best-effort, but this fails the whole
+	// bundle: the alternative to a salt is not "a weaker salt", it is shipping the
+	// addresses, and a bundle exists to be handed to strangers.
+	pseudo, err := newPseudonymiser()
+	if err != nil {
+		return err
+	}
+
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -75,10 +86,12 @@ func writeDiagnostics(path string, cfg *config.Config, configDir, health string,
 		fmt.Fprintln(w, version.String())
 	}
 
-	// health.txt — live link identity/quality snapshot (already non-secret).
-	if health != "" {
+	// health.txt — live link quality snapshot. Rendered here rather than handed in
+	// ready-made, so the one function that owns this bundle's redaction owns
+	// everything the bundle says.
+	if status != nil {
 		if w, err := zw.Create("health.txt"); err == nil {
-			io.WriteString(w, health)
+			io.WriteString(w, diagnosticsHealth(*status, pseudo))
 		}
 	}
 
@@ -91,15 +104,7 @@ func writeDiagnostics(path string, cfg *config.Config, configDir, health string,
 		}
 	}
 
-	// stats.redacted.json — bandwidth/lifetime history with peer IPs pseudonymised
-	// under a salt minted for this bundle alone. Everything else here is
-	// best-effort, but this fails the whole bundle: the alternative to a salt is
-	// not "a weaker salt", it is shipping the addresses, and a bundle exists to be
-	// handed to strangers.
-	pseudo, err := newIPPseudonymiser()
-	if err != nil {
-		return err
-	}
+	// stats.redacted.json — bandwidth/lifetime history with peer IPs pseudonymised.
 	if raw, err := os.ReadFile(filepath.Join(configDir, "stats.json")); err == nil {
 		if w, err := zw.Create("stats.redacted.json"); err == nil {
 			w.Write(redactStatsJSON(raw, pseudo))
@@ -269,7 +274,7 @@ func redactConfig(cfg *config.Config) config.Config {
 // redactStatsJSON pseudonymizes client IPs in the persisted stats file. Parse
 // failures return the input unchanged rather than dropping the file — the raw
 // bytes only ever contain peer IPs, which the caller has already accepted.
-func redactStatsJSON(raw []byte, pseudo *ipPseudonymiser) []byte {
+func redactStatsJSON(raw []byte, pseudo *pseudonymiser) []byte {
 	var top map[string]json.RawMessage
 	if json.Unmarshal(raw, &top) != nil {
 		return raw
@@ -291,7 +296,7 @@ func redactStatsJSON(raw []byte, pseudo *ipPseudonymiser) []byte {
 		if json.Unmarshal(ipRaw, &ip) != nil || ip == "" {
 			continue
 		}
-		if b, err := json.Marshal(pseudo.hash(ip)); err == nil {
+		if b, err := json.Marshal(pseudo.ip(ip)); err == nil {
 			p["ip"] = b
 		}
 	}
@@ -305,8 +310,9 @@ func redactStatsJSON(raw []byte, pseudo *ipPseudonymiser) []byte {
 	return out
 }
 
-// ipPseudonymiser maps client IPs to pseudonyms that are stable within one
-// bundle and meaningless outside it.
+// pseudonymiser maps the identifiers that would otherwise name a machine — peer
+// IPs, hostnames — to labels that are stable within one bundle and meaningless
+// outside it.
 //
 // The salt is the whole point, and it was missing. A bare sha256 of an IP is not
 // a pseudonym: IPv4 is 2^32 addresses, so every possible digest fits in a table
@@ -314,41 +320,63 @@ func redactStatsJSON(raw []byte, pseudo *ipPseudonymiser) []byte {
 // encoding of the address wearing a hash's clothes, and the bundles it protects
 // are the ones users post in issues and hand to strangers for support. IPv6 is
 // only nominally better, since the addresses that matter come from a handful of
-// guessable prefixes.
+// guessable prefixes. Hostnames are worse still: a digest of "DESKTOP-7A1B2C" or
+// "alices-laptop" is a dictionary away from the name it hides.
 //
 // A fresh random salt per bundle keeps exactly the property the redaction is for
 // — the same peer reads as the same pseudonym throughout one bundle, so a support
 // reader can still follow it — and drops the one nobody asked for: correlating a
 // peer across bundles, or back to an address. The salt is never written anywhere;
 // it dies with the bundle that used it.
-type ipPseudonymiser struct{ salt []byte }
+type pseudonymiser struct{ salt []byte }
 
-func newIPPseudonymiser() (*ipPseudonymiser, error) {
+func newPseudonymiser() (*pseudonymiser, error) {
 	salt := make([]byte, 32)
 	if _, err := rand.Read(salt); err != nil {
-		return nil, fmt.Errorf("diagnostics: no randomness for the ip salt: %w", err)
+		return nil, fmt.Errorf("diagnostics: no randomness for the redaction salt: %w", err)
 	}
-	return &ipPseudonymiser{salt: salt}, nil
+	return &pseudonymiser{salt: salt}, nil
 }
 
-// hash pseudonymises one IP. HMAC rather than sha256(salt || ip): it is the
-// construction that is actually specified for keyed hashing, and it costs nothing
-// here.
-func (p *ipPseudonymiser) hash(ip string) string {
+// label pseudonymises one value within a named domain. HMAC rather than
+// sha256(salt || v): it is the construction actually specified for keyed hashing,
+// and it costs nothing here. The domain is mixed in so a host and an IP that
+// happen to spell the same string do not read as the same thing — the prefix on
+// the label is then a fact about it rather than decoration.
+func (p *pseudonymiser) label(kind, v string) string {
 	mac := hmac.New(sha256.New, p.salt)
-	mac.Write([]byte(ip))
-	return fmt.Sprintf("ip-%x", mac.Sum(nil)[:6])
+	mac.Write([]byte(kind))
+	mac.Write([]byte{0})
+	mac.Write([]byte(v))
+	return fmt.Sprintf("%s-%x", kind, mac.Sum(nil)[:6])
 }
 
-// diagnosticsHealth renders the live link snapshot for health.txt. It reports
-// hostnames and quality metrics (safe to share) but only the count of LAN IPs,
-// never the addresses themselves.
-func diagnosticsHealth(s ipc.Status) string {
+func (p *pseudonymiser) ip(v string) string   { return p.label("ip", v) }
+func (p *pseudonymiser) host(v string) string { return p.label("host", v) }
+
+// diagnosticsHealth renders the live link snapshot for health.txt: quality
+// metrics as measured, hostnames pseudonymised, and only the *count* of LAN IPs.
+//
+// The hostnames used to be printed verbatim, under a comment calling them safe to
+// share. They are the opposite: a machine name is routinely a person's name
+// ("alices-laptop") or an employer's internal naming, this file's own next line
+// already refuses to print LAN addresses, and config.redacted.toml two files over
+// masks GatewayHost for precisely this reason. A bundle is made to be handed to
+// strangers, so health.txt was the one file undoing the rest.
+func diagnosticsHealth(s ipc.Status, p *pseudonymiser) string {
 	msOrNA := func(v float64) string {
 		if v < 0 {
 			return "n/a"
 		}
 		return fmt.Sprintf("%.1f ms", v)
+	}
+	// A hostname is either absent — which is itself the diagnostic answer — or it
+	// is a name, and a name gets a pseudonym.
+	host := func(v string) string {
+		if v == "" {
+			return "—"
+		}
+		return p.host(v)
 	}
 	dash := func(v string) string {
 		if v == "" {
@@ -360,8 +388,8 @@ func diagnosticsHealth(s ipc.Status) string {
 	fmt.Fprintf(&b, "role:           %s\n", s.Role)
 	fmt.Fprintf(&b, "health:         %s\n", dash(s.HealthScore))
 	fmt.Fprintf(&b, "link up:        %v\n", s.LinkUp || s.AgentConnected)
-	fmt.Fprintf(&b, "local hostname: %s\n", dash(s.LocalHostname))
-	fmt.Fprintf(&b, "peer hostname:  %s\n", dash(s.PeerHostname))
+	fmt.Fprintf(&b, "local hostname: %s\n", host(s.LocalHostname))
+	fmt.Fprintf(&b, "peer hostname:  %s\n", host(s.PeerHostname))
 	fmt.Fprintf(&b, "rtt:            %s\n", msOrNA(float64(s.RTTMillis)))
 	fmt.Fprintf(&b, "jitter:         %s\n", msOrNA(s.JitterMillis))
 	if s.PacketLossPct < 0 {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"proxyforward/internal/config"
+	"proxyforward/internal/ipc"
 	"proxyforward/internal/logging"
 )
 
@@ -58,7 +59,7 @@ func TestRedactConfigMasksEverySecret(t *testing.T) {
 
 func TestRedactStatsJSONHashesPeerIPs(t *testing.T) {
 	in := []byte(`{"v":3,"lifetime":{"bytesIn":10},"peers":[{"ip":"203.0.113.9","totalConns":4},{"ip":"198.51.100.2","totalConns":1}]}`)
-	pseudo, err := newIPPseudonymiser()
+	pseudo, err := newPseudonymiser()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,28 +84,75 @@ func TestRedactStatsJSONHashesPeerIPs(t *testing.T) {
 // strangers. Two bundles must therefore disagree about the same peer.
 func TestIPPseudonymIsNotJustAnEncoding(t *testing.T) {
 	const peer = "203.0.113.9"
-	a, err := newIPPseudonymiser()
+	a, err := newPseudonymiser()
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := newIPPseudonymiser()
+	b, err := newPseudonymiser()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.hash(peer) == b.hash(peer) {
+	if a.ip(peer) == b.ip(peer) {
 		t.Error("the same IP pseudonymises identically across bundles: the mapping is a fixed function of the address, so anyone can invert it by enumerating IPv4")
 	}
 
 	// Within one bundle it must still be stable, or a support reader cannot follow
 	// a peer through the file, which is the only reason to keep any token at all.
 	// Both calls must run; they are deliberately the same expression.
-	first, again := a.hash(peer), a.hash(peer)
+	first, again := a.ip(peer), a.ip(peer)
 	if first != again {
 		t.Error("the same IP pseudonymises differently within one bundle: repeated appearances are no longer correlatable")
 	}
 	// And it must still tell peers apart.
-	if a.hash(peer) == a.hash("198.51.100.2") {
+	if a.ip(peer) == a.ip("198.51.100.2") {
 		t.Error("two different peers share a pseudonym")
+	}
+	// A hostname and an IP that spell the same string must not read as the same
+	// thing, or the "ip-"/"host-" prefix on a label is a claim the label cannot
+	// back — and a reader correlating the two would be correlating nothing.
+	const same = "203.0.113.9"
+	if a.ip(same) == a.host(same) {
+		t.Error("an ip and a hostname with the same spelling share a pseudonym: the domains are not separated")
+	}
+}
+
+// TestDiagnosticsHealthPseudonymisesHostnames: health.txt printed both hostnames
+// verbatim under a comment calling them safe to share. A machine name is
+// routinely a person's name or an employer's internal naming, the same function
+// already refuses to print LAN addresses, and config.redacted.toml masks
+// GatewayHost one file over. Bundles are made to be handed to strangers.
+func TestDiagnosticsHealthPseudonymisesHostnames(t *testing.T) {
+	p, err := newPseudonymiser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := diagnosticsHealth(ipc.Status{
+		Role:          "gateway",
+		LocalHostname: "alices-laptop",
+		PeerHostname:  "prod-mc-01.corp.internal",
+		RTTMillis:     42,
+		JitterMillis:  -1,
+		PacketLossPct: -1,
+		LocalLANIPs:   []string{"192.168.1.5", "10.0.0.9"},
+		PeerLANIPs:    []string{"192.168.9.9"},
+	}, p)
+
+	for _, secret := range []string{"alices-laptop", "prod-mc-01", "corp.internal", "192.168.1.5", "10.0.0.9", "192.168.9.9"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("health.txt leaks %q:\n%s", secret, out)
+		}
+	}
+	// It must stay a health report: the metrics are the reason the file exists.
+	for _, want := range []string{"host-", "42", "gateway", "local LAN IPs:  2"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("health.txt lost %q — redaction by shipping nothing is not redaction:\n%s", want, out)
+		}
+	}
+	// An absent hostname is a diagnostic answer, not a name to hide: it must not
+	// pseudonymise the empty string into a plausible-looking machine.
+	empty := diagnosticsHealth(ipc.Status{Role: "agent", JitterMillis: -1, PacketLossPct: -1}, p)
+	if !strings.Contains(empty, "local hostname: —") {
+		t.Errorf("an unset hostname should read as unset:\n%s", empty)
 	}
 }
 
@@ -151,8 +199,22 @@ func TestWriteDiagnosticsNoLeaks(t *testing.T) {
 		t.Fatal("setup bug: the seeded log does not contain the token, so this test would pass vacuously")
 	}
 
+	// health.txt used to be handed in ready-made — the test passed the literal
+	// "health: good\n" — so the sweep below never saw a byte diagnosticsHealth
+	// produced, and the hostnames it printed verbatim went unnoticed. Seed it like
+	// every other channel: a real Status, carrying the names a real one carries.
+	status := &ipc.Status{
+		Role:          "agent",
+		LocalHostname: "alices-laptop",
+		PeerHostname:  "gw.secret.example.com",
+		RTTMillis:     42,
+		JitterMillis:  -1,
+		PacketLossPct: -1,
+		LocalLANIPs:   []string{"10.9.8.7"},
+	}
+
 	out := filepath.Join(dir, "diag.zip")
-	if err := writeDiagnostics(out, cfg, dir, "health: good\n", ring); err != nil {
+	if err := writeDiagnostics(out, cfg, dir, status, ring); err != nil {
 		t.Fatal(err)
 	}
 
@@ -192,7 +254,7 @@ func TestWriteDiagnosticsNoLeaks(t *testing.T) {
 	for _, secret := range []string{
 		"AGENTTOKENSECRET", "GWTOKENSECRET", "AGENTIDSECRET", "deadbeefsecret",
 		"gw.secret.example.com", "public.secret.example.com", "192.168.50.1",
-		"10.9.8.7", "127.0.0.99", "203.0.113.77",
+		"10.9.8.7", "127.0.0.99", "203.0.113.77", "alices-laptop",
 	} {
 		if strings.Contains(all, secret) {
 			t.Errorf("diagnostics bundle leaked %q", secret)

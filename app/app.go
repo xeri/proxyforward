@@ -935,12 +935,13 @@ func (a *App) ExportDiagnostics() (string, error) {
 	}
 	a.mu.Lock()
 	cfg := *a.cfg
-	var health string
+	var status *ipc.Status
 	if a.eng != nil {
-		health = diagnosticsHealth(a.eng.Status())
+		st := a.eng.Status()
+		status = &st
 	}
 	a.mu.Unlock()
-	if err := writeDiagnostics(path, &cfg, a.configDir, health, a.ring); err != nil {
+	if err := writeDiagnostics(path, &cfg, a.configDir, status, a.ring); err != nil {
 		return "", err
 	}
 	return path, nil

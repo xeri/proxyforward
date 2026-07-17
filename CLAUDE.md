@@ -178,16 +178,19 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   wins the race would otherwise *be* the engine to the GUI — feeding it status and
   its own pairing code. The owner is the check because it's the part a squatter
   can't fake (claiming a SID you don't hold needs `SeRestorePrivilege`).
-- Diagnostics bundles redact every secret, host, IP, and identity; peer IPs become
-  pseudonyms that are stable **within one bundle** and meaningless outside it
-  (`app/tools.go ipPseudonymiser`, leak-tested in `app/tools_test.go`). The salt is
-  the property, not the hash: IPv4 is 2^32 wide, so an *unsalted* digest is a table
-  lookup and a "pseudonym" anyone can invert
-  (`TestIPPseudonymIsNotJustAnEncoding`). Minting it is the one part of a bundle
-  that isn't best-effort — the fallback isn't a weaker salt, it's shipping the
+- Diagnostics bundles redact every secret, host, IP, and identity; peer IPs *and
+  hostnames* become pseudonyms that are stable **within one bundle** and meaningless
+  outside it (`app/tools.go pseudonymiser`, leak-tested in `app/tools_test.go`). The
+  salt is the property, not the hash: IPv4 is 2^32 wide, so an *unsalted* digest is a
+  table lookup and a "pseudonym" anyone can invert
+  (`TestIPPseudonymIsNotJustAnEncoding`); a hostname is a dictionary away besides
+  (`TestDiagnosticsHealthPseudonymisesHostnames`). Minting it is the one part of a
+  bundle that isn't best-effort — the fallback isn't a weaker salt, it's shipping the
   addresses.
   Anything new that exports data must pass the same no-leak test style — seeding
-  *every* channel it ships, since a leak test that leaves one empty passes vacuously.
+  *every* channel it ships, since a leak test that leaves one empty passes vacuously
+  (health.txt was handed in pre-rendered, so it went unswept and shipped both
+  hostnames in cleartext; `writeDiagnostics` now renders everything it redacts).
   Bundles **ship logs**, so redacting only the config is theatre: log text is scrubbed
   of the config's own secrets (`tools.go logScrubber`).
 - Never log a secret; the scrubber is a net, not a licence (it only knows what config
