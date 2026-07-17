@@ -142,7 +142,6 @@ func TestQUICPreAuthReplyCannotBlockForever(t *testing.T) {
 	frame := helloFrame(t, control.Hello{
 		ProtocolVersion: control.ProtocolVersion + 1,
 		Kind:            control.KindControl,
-		AgentID:         "agt_hostile",
 	})
 	sess := &stalledSession{st: newStalledStream(frame), closed: make(chan struct{})}
 	t.Cleanup(func() { sess.Close() })

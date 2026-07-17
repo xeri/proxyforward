@@ -13,7 +13,7 @@ import (
 
 func TestRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
-	in := Hello{ProtocolVersion: 1, Kind: KindControl, AgentID: "a1", Token: "t", AppVersion: "0.1", Capabilities: []string{CapTunnelSync}}
+	in := Hello{ProtocolVersion: 1, Kind: KindControl, AppVersion: "0.1", Capabilities: []string{CapTunnelSync}}
 	if err := WriteMsg(&buf, TypeHello, in); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestLegacyHelloCompat(t *testing.T) {
 	if NewCapSet(h.Capabilities).Has(CapTunnelSync) {
 		t.Fatal("empty cap set claims tunnel-sync")
 	}
-	out, err := json.Marshal(Hello{ProtocolVersion: 1, Kind: KindControl, AgentID: "a1", Token: "t"})
+	out, err := json.Marshal(Hello{ProtocolVersion: 1, Kind: KindControl})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func TestTruncatedFrame(t *testing.T) {
 
 func FuzzReadMsg(f *testing.F) {
 	var seed bytes.Buffer
-	WriteMsg(&seed, TypeHello, Hello{ProtocolVersion: 1, AgentID: "x", Token: "y"})
+	WriteMsg(&seed, TypeHello, Hello{ProtocolVersion: 1, Kind: KindControl})
 	f.Add(seed.Bytes())
 	f.Add([]byte{0, 0, 0, 1, '{'})
 	f.Add([]byte{0xff, 0xff, 0xff, 0xff})

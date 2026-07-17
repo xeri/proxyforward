@@ -8,11 +8,12 @@ import (
 	"proxyforward/internal/control"
 )
 
-// A legacy peer sends no hostname/localIps/observedIp/recvUnixNano. New structs
-// must encode identically (omitempty) and decode legacy frames without error.
+// Optional hello fields ride omitempty, and frames from older builds must decode
+// without error — including a pre-removal frame still carrying agentId/token,
+// whose unknown keys are simply ignored (auth then fails honestly downstream).
 func TestHelloWireBackCompat(t *testing.T) {
-	// Empty identity fields must not appear on the wire.
-	h := control.Hello{ProtocolVersion: 1, Kind: control.KindControl, AgentID: "a", Token: "t", AppVersion: "v"}
+	// Empty optional fields must not appear on the wire.
+	h := control.Hello{ProtocolVersion: 1, Kind: control.KindControl, AppVersion: "v"}
 	b, err := json.Marshal(h)
 	if err != nil {
 		t.Fatal(err)
@@ -23,13 +24,15 @@ func TestHelloWireBackCompat(t *testing.T) {
 		}
 	}
 
-	// A legacy frame decodes cleanly, leaving the new fields zero.
+	// A pre-removal frame — self-asserted agentId and a bearer token — decodes
+	// cleanly; the removed keys are ignored rather than an error, so an old build
+	// reaches the auth path and gets its honest bad_token there.
 	var got control.Hello
 	if err := json.Unmarshal([]byte(`{"protocolVersion":1,"kind":"control","agentId":"a","token":"t"}`), &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Hostname != "" || got.LocalIPs != nil {
-		t.Errorf("legacy frame produced non-zero new fields: %+v", got)
+		t.Errorf("pre-removal frame produced non-zero optional fields: %+v", got)
 	}
 
 	// New fields round-trip.
@@ -82,12 +85,13 @@ func TestHelloOKAndPongOmitEmpty(t *testing.T) {
 	}
 }
 
-// The enrollment + gateway-config hello fields are additive: a legacy hello
-// (shared-token only) must encode without any of them, decode them as zero, and a
-// populated hello must round-trip. Byte-identical legacy frames are the invariant.
+// The enrollment + gateway-config hello fields ride omitempty: a minimal hello
+// (a data-kind dial-back, or any hello with nothing to report) must encode
+// without them, an old frame decodes them as zero, and a populated hello must
+// round-trip. Byte-minimal frames are the invariant.
 func TestHelloEnrollmentFieldsBackCompat(t *testing.T) {
-	legacy := control.Hello{ProtocolVersion: 1, Kind: control.KindControl, AgentID: "a", Token: "t", AppVersion: "v"}
-	b, err := json.Marshal(legacy)
+	minimal := control.Hello{ProtocolVersion: 1, Kind: control.KindControl, AppVersion: "v"}
+	b, err := json.Marshal(minimal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,13 +101,13 @@ func TestHelloEnrollmentFieldsBackCompat(t *testing.T) {
 		}
 	}
 
-	// A legacy frame decodes with every new field zero.
+	// An old build's frame decodes with every unknown/absent field zero.
 	var got control.Hello
 	if err := json.Unmarshal([]byte(`{"protocolVersion":1,"kind":"control","agentId":"a","token":"t"}`), &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.AgentPubKey != nil || got.AgentSig != nil || got.EnrollTicket != "" || got.ConfigHash != "" || got.ConfigGeneration != 0 {
-		t.Errorf("legacy frame produced non-zero enrollment fields: %+v", got)
+		t.Errorf("old frame produced non-zero enrollment fields: %+v", got)
 	}
 
 	// A populated enrollment hello round-trips.

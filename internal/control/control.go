@@ -182,11 +182,13 @@ type Envelope struct {
 }
 
 // Hello is sent by the agent immediately after TLS, before any multiplexing.
+// It carries no self-asserted identity and no bearer token: AgentPubKey/AgentSig
+// below are the only authenticator, and the gateway derives the agent's identity
+// from the verified key. A pre-removal peer's hello still decodes (its agentId
+// and token keys are simply ignored) and fails auth with an honest bad_token.
 type Hello struct {
 	ProtocolVersion int    `json:"protocolVersion"`
 	Kind            string `json:"kind"` // control | data
-	AgentID         string `json:"agentId"`
-	Token           string `json:"token"`
 	AppVersion      string `json:"appVersion"`
 	// ConnID correlates a per-conn-mode data connection with its OpenConn
 	// offer; empty on control connections.
@@ -204,8 +206,8 @@ type Hello struct {
 	// Together they authenticate an already-enrolled agent per-identity against
 	// the gateway's allowlist; first-contact enrollment rides EnrollTicket below.
 	// Identity is field-driven, not a capability (acted on before negotiation).
-	// Both omitempty: a legacy agent that only knows the shared token sends
-	// neither and the gateway falls back to the token.
+	// Both omitempty (the wire rule for optional fields); a hello without them
+	// authenticates as nothing and is refused.
 	AgentPubKey []byte `json:"agentPubKey,omitempty"`
 	AgentSig    []byte `json:"agentSig,omitempty"`
 	// EnrollTicket is a pairing ticket present only on a first-contact enrollment
