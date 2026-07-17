@@ -3,6 +3,8 @@ package app
 import (
 	"archive/zip"
 	"bufio"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -89,10 +91,18 @@ func writeDiagnostics(path string, cfg *config.Config, configDir, health string,
 		}
 	}
 
-	// stats.redacted.json — bandwidth/lifetime history with peer IPs hashed.
+	// stats.redacted.json — bandwidth/lifetime history with peer IPs pseudonymised
+	// under a salt minted for this bundle alone. Everything else here is
+	// best-effort, but this fails the whole bundle: the alternative to a salt is
+	// not "a weaker salt", it is shipping the addresses, and a bundle exists to be
+	// handed to strangers.
+	pseudo, err := newIPPseudonymiser()
+	if err != nil {
+		return err
+	}
 	if raw, err := os.ReadFile(filepath.Join(configDir, "stats.json")); err == nil {
 		if w, err := zw.Create("stats.redacted.json"); err == nil {
-			w.Write(redactStatsJSON(raw))
+			w.Write(redactStatsJSON(raw, pseudo))
 		}
 	}
 
@@ -259,7 +269,7 @@ func redactConfig(cfg *config.Config) config.Config {
 // redactStatsJSON pseudonymizes client IPs in the persisted stats file. Parse
 // failures return the input unchanged rather than dropping the file — the raw
 // bytes only ever contain peer IPs, which the caller has already accepted.
-func redactStatsJSON(raw []byte) []byte {
+func redactStatsJSON(raw []byte, pseudo *ipPseudonymiser) []byte {
 	var top map[string]json.RawMessage
 	if json.Unmarshal(raw, &top) != nil {
 		return raw
@@ -281,7 +291,7 @@ func redactStatsJSON(raw []byte) []byte {
 		if json.Unmarshal(ipRaw, &ip) != nil || ip == "" {
 			continue
 		}
-		if b, err := json.Marshal(hashIP(ip)); err == nil {
+		if b, err := json.Marshal(pseudo.hash(ip)); err == nil {
 			p["ip"] = b
 		}
 	}
@@ -295,11 +305,39 @@ func redactStatsJSON(raw []byte) []byte {
 	return out
 }
 
-// hashIP maps a client IP to a stable, non-reversible pseudonym so repeated
-// appearances stay correlatable in the bundle without exposing the address.
-func hashIP(ip string) string {
-	sum := sha256.Sum256([]byte(ip))
-	return fmt.Sprintf("ip-%x", sum[:6])
+// ipPseudonymiser maps client IPs to pseudonyms that are stable within one
+// bundle and meaningless outside it.
+//
+// The salt is the whole point, and it was missing. A bare sha256 of an IP is not
+// a pseudonym: IPv4 is 2^32 addresses, so every possible digest fits in a table
+// anyone can build in minutes and query instantly — "ip-3f2a…" was a reversible
+// encoding of the address wearing a hash's clothes, and the bundles it protects
+// are the ones users post in issues and hand to strangers for support. IPv6 is
+// only nominally better, since the addresses that matter come from a handful of
+// guessable prefixes.
+//
+// A fresh random salt per bundle keeps exactly the property the redaction is for
+// — the same peer reads as the same pseudonym throughout one bundle, so a support
+// reader can still follow it — and drops the one nobody asked for: correlating a
+// peer across bundles, or back to an address. The salt is never written anywhere;
+// it dies with the bundle that used it.
+type ipPseudonymiser struct{ salt []byte }
+
+func newIPPseudonymiser() (*ipPseudonymiser, error) {
+	salt := make([]byte, 32)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, fmt.Errorf("diagnostics: no randomness for the ip salt: %w", err)
+	}
+	return &ipPseudonymiser{salt: salt}, nil
+}
+
+// hash pseudonymises one IP. HMAC rather than sha256(salt || ip): it is the
+// construction that is actually specified for keyed hashing, and it costs nothing
+// here.
+func (p *ipPseudonymiser) hash(ip string) string {
+	mac := hmac.New(sha256.New, p.salt)
+	mac.Write([]byte(ip))
+	return fmt.Sprintf("ip-%x", mac.Sum(nil)[:6])
 }
 
 // diagnosticsHealth renders the live link snapshot for health.txt. It reports

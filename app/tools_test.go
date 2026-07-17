@@ -58,7 +58,11 @@ func TestRedactConfigMasksEverySecret(t *testing.T) {
 
 func TestRedactStatsJSONHashesPeerIPs(t *testing.T) {
 	in := []byte(`{"v":3,"lifetime":{"bytesIn":10},"peers":[{"ip":"203.0.113.9","totalConns":4},{"ip":"198.51.100.2","totalConns":1}]}`)
-	out := redactStatsJSON(in)
+	pseudo, err := newIPPseudonymiser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := redactStatsJSON(in, pseudo)
 	s := string(out)
 	if strings.Contains(s, "203.0.113.9") || strings.Contains(s, "198.51.100.2") {
 		t.Fatalf("peer IPs survived redaction: %s", s)
@@ -69,6 +73,38 @@ func TestRedactStatsJSONHashesPeerIPs(t *testing.T) {
 	// Non-PII fields are preserved.
 	if !strings.Contains(s, "\"totalConns\"") || !strings.Contains(s, "bytesIn") {
 		t.Fatalf("redaction dropped non-PII fields: %s", s)
+	}
+}
+
+// TestIPPseudonymIsNotJustAnEncoding is the difference between a pseudonym and a
+// reversible encoding of the address. IPv4 is 2^32 addresses: an unsalted digest
+// of one is a table lookup, so "ip-3f2a…" told anyone who received a bundle
+// exactly which addresses had connected — and bundles are made to be handed to
+// strangers. Two bundles must therefore disagree about the same peer.
+func TestIPPseudonymIsNotJustAnEncoding(t *testing.T) {
+	const peer = "203.0.113.9"
+	a, err := newIPPseudonymiser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := newIPPseudonymiser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.hash(peer) == b.hash(peer) {
+		t.Error("the same IP pseudonymises identically across bundles: the mapping is a fixed function of the address, so anyone can invert it by enumerating IPv4")
+	}
+
+	// Within one bundle it must still be stable, or a support reader cannot follow
+	// a peer through the file, which is the only reason to keep any token at all.
+	// Both calls must run; they are deliberately the same expression.
+	first, again := a.hash(peer), a.hash(peer)
+	if first != again {
+		t.Error("the same IP pseudonymises differently within one bundle: repeated appearances are no longer correlatable")
+	}
+	// And it must still tell peers apart.
+	if a.hash(peer) == a.hash("198.51.100.2") {
+		t.Error("two different peers share a pseudonym")
 	}
 }
 
