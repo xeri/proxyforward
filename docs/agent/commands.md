@@ -26,8 +26,9 @@ build/bin/proxyforward.exe --version  # verify the stamp
 ## UI-only iteration (the mock state matrix)
 
 `http://localhost:5173/?mock=agent` — scenarios `agent|gateway|wizard`, plus
-composable axes `&link=down &mode=attached &fatal=1 &fresh=1 &analytics=off
-&paired=0 &geo=off|empty|error|pending &fx=low|high &fleet=multi|old
+composable axes `&link=down &mode=attached &fatal=1 &engine=stopped
+&service=running|stopped &fresh=1 &analytics=off &paired=0
+&geo=off|empty|error|pending &fx=low|high &fleet=multi|old
 &conflict=port|clone|both &deeplink=1 &pending=in|out|both &consent=off`. Axis semantics are documented in
 `docs/agent/architecture.md` ("devmock axes") and the `devmock.ts` header. This is
 the UI state-matrix test harness — walk the relevant axes before calling UI work
@@ -40,6 +41,17 @@ go run . gateway --config <tmp>\gw.toml
 go run . pair <code> --config <tmp>\ag.toml
 go run . agent --config <tmp>\ag.toml
 ```
+
+## Service lifecycle (Windows, elevation-gated)
+
+```
+proxyforward service install     # + start | stop | uninstall | run
+```
+
+`install`/`uninstall`/`start`/`stop` self-elevate when not already admin (one UAC
+prompt per action); the GUI's Settings → System row calls the same verbs. `run` is
+what the SCM invokes. A stopped run persists (`[engine] stopped`), so a service that
+starts with it set serves the pipe and holds the tunnel down until Start.
 
 Private configs keep your real setup untouched (`docs/agent/reasoning.md` step 0).
 

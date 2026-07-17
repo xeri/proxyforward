@@ -14,8 +14,11 @@ app/                    Wails-bound layer: App methods = the whole JS API; 2 Hz 
                         avatars (player-head cache + /pf/avatar/ HTTP); setup export/
                         import (.pfsetup); diagnostics bundle (redacted)
 internal/
-  engine/               Composition root: role engine + IPC pipe + stats sampler +
-                        analytics recorder/resolver; analytics_api.go = op registry
+  engine/               Composition root, two nested lifetimes: Run = supervisor
+                        (IPC pipe + stats sampler + analytics + metrics, lives as
+                        long as the process is configured); StartRun/StopRun = the
+                        tunnel run inside it (stop leaves the pipe serving).
+                        analytics_api.go = op registry; lifecycle_api.go = start/stop ops
   agent/                Dial→hello→register→serve; health probes; hot-apply; probe.go
   gateway/              TLS listener, pre-auth, admission; actor.go = ONE goroutine
                         owning sessions+listeners; limits.go; per-conn RTT sampler

@@ -160,6 +160,16 @@ all of these looked reasonable right up until they didn't.
 - Exactly one process owns ports and config: every engine serves the named pipe
   `\\.\pipe\proxyforward`; a GUI that finds it attaches as a thin client; pipe
   conflict is fatal by design (`engine.go Run`, `app/app.go Startup`).
+- **The pipe outlives the tunnel run.** `Run` is a supervisor (pipe, store, sampler,
+  metrics) with the role run — `StartRun`/`StopRun` — nested inside it; a run that
+  stops or dies fatally leaves the supervisor serving, because the GUI needs the pipe
+  most when the tunnel is down (to show why, and to start it again). So a fatal never
+  takes the pipe with it, and "stopped" is a second axis (`engine.go RunState`), never
+  a fourth mode or the wizard. Stop is persisted (`config.go EngineConfig`), driveable
+  over the pipe (`OpStartRun`/`OpStopRun`), and always completes — the wait for a clean
+  unwind is the caller's, bounded by `stopGrace`; force skips it. The daemon must
+  persist its own stopped flag (`SetStoppedPersister`): an attached client cannot write
+  the daemon's disk.
 
 ### Hot path & performance budgets (`internal/relay/relay.go`)
 - The splice (`relay.go Splice`): pooled buffers, zero per-iteration allocations,
