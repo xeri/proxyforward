@@ -3,7 +3,9 @@
 package ipc
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"unsafe"
 
@@ -76,4 +78,78 @@ func currentUserSID() (string, error) {
 		return "", err
 	}
 	return user.User.Sid.String(), nil
+}
+
+// ErrUntrustedServer is returned by Dial when something is answering the pipe
+// but it is not an engine this user should trust.
+var ErrUntrustedServer = errors.New("ipc: the process answering the pipe is not a trusted engine")
+
+// fder is go-winio's promoted handle accessor (win32Pipe embeds *win32File).
+type fder interface{ Fd() uintptr }
+
+// verifyServer checks who *created* the pipe we just opened, and is the mirror of
+// pipeSecurity: that says who may reach the engine, this says who may be it.
+//
+// A named pipe belongs to whoever creates its first instance, and any local
+// process may create one under a name nobody holds yet. So a low-privileged
+// process that gets there first — at boot, or after the engine dies — becomes the
+// engine as far as the GUI is concerned: App.Startup finds a pipe answering,
+// attaches as a thin client, and from then on believes whatever it is told and
+// tells it whatever it is asked. That is not only spoofed status; the GUI would
+// display an attacker's pairing code as its own, and a pairing code is how an
+// agent is told which gateway to trust.
+//
+// The owner is the right thing to check because it is the one part a squatter
+// cannot fake: setting an object's owner to a SID you do not hold needs
+// SeRestorePrivilege, so an unprivileged process cannot claim to be SYSTEM. (An
+// elevated attacker can — but an elevated attacker already owns the machine, so
+// there is no boundary left to defend.)
+func verifyServer(conn net.Conn) error {
+	f, ok := conn.(fder)
+	if !ok {
+		// Never happens with go-winio, and if it ever did we would be trusting an
+		// unverified pipe silently. Fail closed.
+		return fmt.Errorf("%w: cannot inspect the pipe handle", ErrUntrustedServer)
+	}
+	// GENERIC_READ maps to include READ_CONTROL, which is what this needs; DialPipe
+	// asks for it, so the owner is readable on any pipe we could open at all.
+	sd, err := windows.GetSecurityInfo(windows.Handle(f.Fd()), windows.SE_KERNEL_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return fmt.Errorf("%w: cannot read its owner: %w", ErrUntrustedServer, err)
+	}
+	owner, _, err := sd.Owner()
+	if err != nil {
+		return fmt.Errorf("%w: cannot read its owner: %w", ErrUntrustedServer, err)
+	}
+	trusted, err := trustedServerOwner(owner)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrUntrustedServer, err)
+	}
+	if !trusted {
+		return fmt.Errorf("%w: it belongs to %s — expected this account, SYSTEM, or an administrator", ErrUntrustedServer, owner)
+	}
+	return nil
+}
+
+// trustedServerOwner reports whether sid may own the engine's pipe: SYSTEM (the
+// service), Administrators (an elevated engine), or this very account (the
+// ordinary GUI-hosted engine — the same three principals pipeSecurity grants).
+func trustedServerOwner(sid *windows.SID) (bool, error) {
+	for _, w := range []windows.WELL_KNOWN_SID_TYPE{
+		windows.WinLocalSystemSid,
+		windows.WinBuiltinAdministratorsSid,
+	} {
+		known, err := windows.CreateWellKnownSid(w)
+		if err != nil {
+			return false, err
+		}
+		if sid.Equals(known) {
+			return true, nil
+		}
+	}
+	self, err := currentUserSID()
+	if err != nil {
+		return false, err
+	}
+	return sid.String() == self, nil
 }

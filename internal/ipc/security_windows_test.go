@@ -3,8 +3,11 @@
 package ipc
 
 import (
+	"context"
+	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -121,6 +124,94 @@ func TestPipeGrantsRecordedOwner(t *testing.T) {
 	}
 	if grantsSID(t, sddl, sidOf(t, windows.WinInteractiveSid)) {
 		t.Error("granting an owner reintroduced INTERACTIVE")
+	}
+}
+
+// TestDialAcceptsOurOwnEngine is the other half of
+// TestTrustedServerOwnerRejectsAStranger: refusing a squatter is worthless if it
+// also refuses the real thing. A GUI-hosted engine runs as this account, so it
+// owns its pipe and Dial must accept it end to end.
+func TestDialAcceptsOurOwnEngine(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Serve(ctx, slog.New(slog.DiscardHandler), Sources{
+			Status: func() Status { return Status{Role: "gateway"} },
+		})
+	}()
+
+	// The pipe appears asynchronously; retry the dial briefly.
+	var (
+		c   *Client
+		err error
+	)
+	for range 100 {
+		if c, err = Dial(200 * time.Millisecond); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		cancel()
+		t.Fatalf("Dial refused this account's own engine: %v", err)
+	}
+	if _, err := c.Status(); err != nil {
+		t.Errorf("status through a verified pipe failed: %v", err)
+	}
+	c.Close()
+	cancel()
+	<-done
+}
+
+// TestTrustedServerOwnerRejectsAStranger pins the predicate. A well-formed SID
+// belonging to nobody stands in for the squatter: an unprivileged process cannot
+// set its pipe's owner to SYSTEM (that needs SeRestorePrivilege), so the owner it
+// is stuck with is its own — and that must not be trusted.
+func TestTrustedServerOwnerRejectsAStranger(t *testing.T) {
+	stranger, err := windows.StringToSid("S-1-5-21-1111111111-2222222222-3333333333-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := trustedServerOwner(stranger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Error("a stranger's SID is trusted to own the engine's pipe: any local process can be the engine")
+	}
+
+	// The three that must be: SYSTEM (service), Administrators (elevated engine),
+	// and this account (the ordinary GUI-hosted engine).
+	for name, w := range map[string]windows.WELL_KNOWN_SID_TYPE{
+		"SYSTEM":         windows.WinLocalSystemSid,
+		"Administrators": windows.WinBuiltinAdministratorsSid,
+	} {
+		sid, err := windows.CreateWellKnownSid(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ok, err := trustedServerOwner(sid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Errorf("%s is not trusted to own the pipe; a real engine would be refused", name)
+		}
+	}
+	self, err := currentUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	selfSID, err := windows.StringToSid(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err = trustedServerOwner(selfSID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Error("this account is not trusted to own its own engine's pipe")
 	}
 }
 

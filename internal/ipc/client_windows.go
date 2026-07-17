@@ -22,9 +22,18 @@ type Client struct {
 
 // Dial connects to a running daemon's pipe. A quick failure means no daemon
 // is running — the GUI's cue to start its own engine in-process.
+//
+// It verifies who owns the pipe before handing it back. Any local process may
+// create a pipe under a name nobody holds yet, so "something answered" is not
+// evidence that an engine did, and a caller that attaches anyway is taking its
+// status, its pairing codes, and its instructions from whoever won a race.
 func Dial(timeout time.Duration) (*Client, error) {
 	conn, err := winio.DialPipe(PipeName, &timeout)
 	if err != nil {
+		return nil, err
+	}
+	if err := verifyServer(conn); err != nil {
+		conn.Close()
 		return nil, err
 	}
 	return &Client{conn: conn}, nil

@@ -1,4 +1,4 @@
-<!-- Generated 2026-07-13 by Claude (Fable 5) from a full-repo audit at commit 4a8b0c9;
+<!-- Generated 2026-07-13 by Claude (Fable 5) from a full-repo audit;
      restructured the same day per the docs-suite evaluation. This file = identity +
      invariants + reality check + routing, ~200-line budget. Conventions auto-load from
      .claude/rules/ by path; procedures are .claude/skills/; reference is docs/agent/.
@@ -163,6 +163,13 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   (`ipc/owner.go PipeOwnerFile`); an unelevated admin can't be let in via `BA`
   because UAC filters that SID to deny-only. Any SID formatted into the SDDL is
   parsed first, and a pipe whose ACL can't be built is not served.
+- **"Something answered the pipe" is not evidence an engine did.** Any local process
+  can create a pipe under a free name, so `ipc.Dial` verifies the pipe's **owner** is
+  SYSTEM, Administrators, or this account before returning it
+  (`ipc/security_windows.go verifyServer`, `ErrUntrustedServer`); a squatter that
+  wins the race would otherwise *be* the engine to the GUI — feeding it status and
+  its own pairing code. The owner is the check because it's the part a squatter
+  can't fake (claiming a SID you don't hold needs `SeRestorePrivilege`).
 - Diagnostics bundles redact every secret, host, IP, and identity; peer IPs become
   stable sha256 pseudonyms (`app/tools.go`, leak-tested in `app/tools_test.go`).
   Anything new that exports data must pass the same no-leak test style — seeding
@@ -259,7 +266,8 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
 
 ## Reality check — implemented vs. advertised
 
-The README and the Settings/Tunnels UI **oversell**. Ground truth at 4a8b0c9:
+The README and the Settings UI **oversell**. Ground truth re-verified by the
+2026-07-17 integrity audit:
 
 | Feature (advertised in README/UI) | Actual state |
 |---|---|
@@ -270,7 +278,7 @@ The README and the Settings/Tunnels UI **oversell**. Ground truth at 4a8b0c9:
 
 Rules: don't document these as working; don't build UI atop them; trust code over the
 README everywhere. When you implement one, delete its row **in the same commit** (the
-tunnel-editor/Settings hints promising them are polish-backlog item #1).
+Settings toggles promising them are polish-backlog item #1).
 
 ## Working practice — commit as you go
 
