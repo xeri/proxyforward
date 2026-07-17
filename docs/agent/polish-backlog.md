@@ -1,6 +1,7 @@
-<!-- Companion to /CLAUDE.md ("Current phase"). Seeded from the full-repo audit @ 4a8b0c9,
-     2026-07-13. Every item cites the files as of that commit (+ uncommitted v2 frontend).
-     Remove items when fixed; add new ones with the same file:line discipline. -->
+<!-- Companion to /CLAUDE.md ("Current phase"). Seeded from the full-repo audit of
+     2026-07-13; last coherence pass 2026-07-17 (line cites drift between passes —
+     verify before acting). Remove items when fixed; add new ones with the same
+     file:line discipline. -->
 
 # Polish backlog — concrete, file-cited
 
@@ -9,14 +10,10 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
 ## Honesty (UI promises > backend truth)
 
 1. **Stub controls promise unimplemented behavior** — the top item; see CLAUDE.md
-   "Reality check" for the full inventory.
-   - Tunnel editor: "Offline MOTD" field, "Bandwidth cap (Mbps)" field, and the
-     Minecraft-aware hint's "Poll the server for MOTD, player count and version"
-     claim (`frontend/src/screens/Tunnels.tsx:268-283`) — none are wired
-     (`gateway.go handleClient`, no cap enforcement, no status poller).
-   - Settings: Prometheus toggle + address, "Minimize to tray" and "Start on login"
-     — all stored, all inert. (The Transport selector is now fully wired: auto / quic /
-     per-conn / mux are all real, and the tick reports the active transport.)
+   "Reality check" for the full inventory. Down to two after the honesty pass wired
+   Offline MOTD, the bandwidth cap, Prometheus, and the Transport selector:
+   - Settings: "Minimize to tray" and "Start on login" — both stored
+     (`config.go MinimizeToTray Autostart`), consumed by nothing.
    - Fix: either implement, or visibly mark ("not yet wired") / hide until real.
      Decide per-feature with the human (scope call — escalation trigger).
 

@@ -1,4 +1,4 @@
-<!-- Companion to /CLAUDE.md. Audit @ 4a8b0c9, 2026-07-13. Owns the architecture map
+<!-- Companion to /CLAUDE.md. Full-repo audit, 2026-07-13. Owns the architecture map
      (moved from the root file in the same-day restructure) and the deep reference for
      the subsystems the root only names. "The numbers" below is the single source for
      every tuned value — the root cites constants by name and never restates them. -->
@@ -79,11 +79,11 @@ persisted to config.
 
 | Constant | Value | Where |
 |---|---|---|
-| Protocol version | 1 | `control.go:19` |
-| Frame caps | 64 KiB post-auth / 4 KiB pre-auth | `control.go:88-91` |
-| Pre-auth prologue deadline | 10 s | `gateway.go:43` |
+| Protocol version | 1 | `control.go ProtocolVersion` |
+| Frame caps | 64 KiB post-auth / 4 KiB pre-auth | `control.go MaxFrame PreAuthMaxFrame` |
+| Pre-auth prologue deadline | 10 s | `gateway.go preAuthTimeout` |
 | Per-conn dial-back wait | 12 s (> data-conn pre-auth, so its failure surfaces first) | `perconn.go dataDialTimeout` |
-| Heartbeat / idle deadline / ctrl write | 5 s / 15 s / 10 s | `agent.go:38-43`, `gateway.go:45-53` |
+| Heartbeat / idle deadline / ctrl write | 5 s / 15 s / 10 s | `agent.go pingInterval controlIdleTimeout controlWriteTimeout`, `gateway.go pingInterval` |
 | yamux window / conn-write timeout | 1 MiB / 30 s | `transport/yamux.go` |
 | QUIC keepalive / idle / handshake | off / 30 s / 5 s (dial aborts at 2×) | `transport/quicconfig.go quicConfig` |
 | QUIC recv windows / max bidi streams / ALPN | 1→6 MiB stream, 2→12 MiB conn / 65536 / `pf-quic/1` | `transport/quicconfig.go quicConfig` |
@@ -97,28 +97,28 @@ persisted to config.
 | Auth-failure table cap | 4096 networks, LRU-evicted (hard cap, not a cleanup trigger) | `limits.go authFailNets` |
 | Pre-auth gate | `MaxConnsGlobal + 256` concurrent unauthenticated conns; slot freed at auth | `limits.go preAuthGate`, `preAuthHeadroom` |
 | Accept retry backoff | 5 ms doubling → 1 s; only a closed listener stops the loop | `gateway.go retryAccept` |
-| Loss window / ping-loss timeout | 32 heartbeats / 2×interval | `agent.go:50-51`, `linkquality.go` |
-| Gateway per-conn RTT sample | every 5 s, ≤200 entries per frame | `gateway.go:59`, `control.go:291` |
-| GUI tick | 500 ms; log poll 250 ms; UI re-render tick 1 s | `app.go:42`, `Activity.tsx:35`, `Overview.tsx:33` |
-| IPC clamps | 150 conns in status; 300 buckets/peers | `ipc.go:66-73` |
-| Query clamps | 80 players / 100 sessions / 300 points / 60 name+IP spans / 250 countries / 16 tunnels × 100 uptime events | `queries.go:14-20`, `geoquery.go:73`, `summary.go:16,294` |
-| Stats tiers | 100 ms×1200, 1 s×1800, 15 s×7200, 10 m×5760, 1 d×1100; tiers ≥2 persisted | `stats.go:117-127` |
-| Sampler | 10 Hz sample, 45 s flush, 15 s session-replay samples | `engine.go:36-44` |
-| Health score | bad: loss>5 % or jitter>100 ms; warn: loss>1 %, jitter>30 ms, or up<1 min | `engine.go:320` |
-| DB writer | batches ≤256 ops / 250 ms; queue 4096 drop-oldest (barriers never dropped) | `db.go:22-35,196` |
+| Loss window / ping-loss timeout | 32 heartbeats / 2×interval | `agent.go lossWindow lossTimeout`, `linkquality.go` |
+| Gateway per-conn RTT sample | every 5 s, ≤200 entries per frame | `gateway.go rttSampleInterval`, `control.go MaxConnStatsPerFrame` |
+| GUI tick | 500 ms; log poll 250 ms; UI re-render tick 1 s | `app.go tickInterval`, `Activity.tsx pull`, `Overview.tsx` |
+| IPC clamps | 150 conns in status; 300 buckets/peers | `ipc.go MaxStatusConns maxIPCEntries` |
+| Query clamps | 80 players / 100 sessions / 300 points / 60 name+IP spans / 250 countries / 16 tunnels × 100 uptime events | `queries.go MaxPlayersPage MaxHistoryPoints`, `geoquery.go MaxCountryRows`, `summary.go MaxUptimeEvents MaxUptimeTunnels` |
+| Stats tiers | 100 ms×1200, 1 s×1800, 15 s×7200, 10 m×5760, 1 d×1100; tiers ≥2 persisted | `stats.go tierSpecs` |
+| Sampler | 10 Hz sample, 45 s flush, 15 s session-replay samples | `engine.go sampleInterval flushInterval sessionSampleInterval` |
+| Health score | bad: loss>5 % or jitter>100 ms; warn: loss>1 %, jitter>30 ms, or up<1 min | `engine.go healthScore` |
+| DB writer | batches ≤256 ops / 250 ms; queue 4096 drop-oldest (barriers never dropped) | `db.go writeQueueCap batchMax batchDelay` |
 | Retention | sessions 180 d (config), geo cache 30 d, hourly rollups 90 d, daily forever | `retention.go` |
-| Rollup cadence | 5 min + on start + final on close | `rollup.go:22`, `db.go writer` |
-| Resolver | bulk 10 names / 2 s coalesce; 1 rps burst 3; +TTL 30 d, −TTL 24 h; profile re-check 24 h | `players/resolver.go:24-50` |
-| Avatars | sizes 16–128 (default 64), 8×8 master; Mojang spacing 60 s/player, 1 rps burst 3; miss TTL 15 min; evict 4000 files / 64 MiB / 6 h | `app/avatars.go:37-56` |
+| Rollup cadence | 5 min + on start + final on close | `rollup.go rollupEvery`, `db.go writer` |
+| Resolver | bulk 10 names / 2 s coalesce; 1 rps burst 3; +TTL 30 d, −TTL 24 h; profile re-check 24 h | `players/resolver.go batchSize defaultBatchDelay positiveTTL negativeTTL defaultProfileTTL` |
+| Avatars | sizes 16–128 (default 64), 8×8 master; Mojang spacing 60 s/player, 1 rps burst 3; miss TTL 15 min; evict 4000 files / 64 MiB / 6 h | `app/avatars.go avatarMinSize masterSize profileSpacing missTTL evictMaxFiles` |
 | Pipe | 5 s request / 2 min idle timeouts; ACL BA+SY+IU | `ipc/server_windows.go` |
-| Cert | ECDSA P-256, 20-year validity (trust = pin, not expiry) | `link/cert.go:86` |
+| Cert | ECDSA P-256, 20-year validity (trust = pin, not expiry) | `link/cert.go NotAfter` |
 | Key exchange | X25519MLKEM768 (PQ hybrid, Go default; `CurvePreferences` unset) | `link/cert.go`, `link/pq_test.go` |
 | Agent identity | Ed25519 (`agent_identity.key`, PKCS#8 PEM, `0600`); `agentID` = `agt_` + 8-char Crockford base32 of sha256(pubkey)[:5] = 40 bits | `link/cred.go LoadOrCreateIdentity fingerprint` |
 | Enrollment ticket | `tkt_` + 128-bit nonce; single-use default, reusable optional; TTL caller-set, 0 = never (UI single-use default 10 min) | `link/cred.go NewEnrollTicket`, `gateway/agentstore.go IssueEnrollment` |
 | Agent allowlist | `gateway_agents.json` (`0600`, atomic write + AV-retry): identity + scope + desired config per agent | `gateway/agentstore.go AgentStore` |
 | Pairing code | `pxf://host:port/v1/pair/<tkt>#sha256:<64hex>`, ≤ 512 B before parse | `link/pairing.go ParsePairingCode` |
 | Agent auth | Ed25519 proof-of-possession over `proxyforward-agent-auth-v1` + gateway cert FP — no bearer token in steady state | `link/cred.go AgentAuthMessage` |
-| Perf floor | ≥20 MiB/s, worst cross-stream RTT ≤500 ms (64 MiB loopback burst); per-transport twins `TestBurstThroughputPerConn` / `TestBurstThroughputQUIC` | `e2e_test.go:716,719` |
+| Perf floor | ≥20 MiB/s, worst cross-stream RTT ≤500 ms (64 MiB loopback burst); per-transport twins `TestBurstThroughputPerConn` / `TestBurstThroughputQUIC` | `e2e_test.go runBurst` |
 | Blur ladder | control 10, Signal Glass 20, card frost 30, chrome 36, island 40, float 48, pop 56 px | `tokens.css` |
 | Switch geometry | 40×22 track, 1px rim + 2px seat → 16px knob (7px radius), 18px travel; ×`--ui-scale` | `tokens.css`, `ui.tsx Switch` |
 | Control height | 2.25rem + 2px = 1px rim + 0.5rem padding + 1.25rem line, per side | `tokens.css` |

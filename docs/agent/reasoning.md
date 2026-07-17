@@ -1,4 +1,4 @@
-<!-- Companion to /CLAUDE.md (see "How to think here"). Same provenance: audit @ 4a8b0c9, 2026-07-13. -->
+<!-- Companion to /CLAUDE.md (see "How to think here"). Same provenance: full-repo audit, 2026-07-13. -->
 
 # How to reason in this codebase
 

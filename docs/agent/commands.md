@@ -1,5 +1,5 @@
 <!-- Companion to /CLAUDE.md ("Where everything lives"). All commands executed &
-     verified 2026-07-13 @ 4a8b0c9. Update trigger: a command changed — run it first,
+     verified 2026-07-13. Update trigger: a command changed — run it first,
      then edit. -->
 
 # Commands & dev iteration
