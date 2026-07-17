@@ -32,6 +32,9 @@ const (
 	// agent declined it (Message carries its reason) or the config moved while the
 	// decision was pending. A completed outcome like port-reclaimed: event log only.
 	EventProposalDeclined = "proposal-declined"
+	// EventAgentEnrolled: a new machine joined the fleet through an invite. A
+	// completed outcome: event log only, and the roster shows the newcomer.
+	EventAgentEnrolled = "agent-enrolled"
 )
 
 // GatewayEvent is one notable, user-facing thing the gateway did or noticed —

@@ -208,7 +208,7 @@ function GatewayLive({status, controlPort, onDone}: {
     setBusy(true); setCode(''); setErr('')
     const poll = (n: number) => {
       // Single-use expires in 10 min; a reusable code lives until it is revoked (ttl 0).
-      IssuePairingCode(reusable, reusable ? 0 : 600, [], []).then(c => { if (!cancelled) { setCode(c); setBusy(false) } })
+      IssuePairingCode(reusable, reusable ? 0 : 600, [], [], '').then(c => { if (!cancelled) { setCode(c); setBusy(false) } })
         .catch(e => { if (!cancelled) { if (n < 20) setTimeout(() => poll(n + 1), 250); else { setErr(String(e)); setBusy(false) } } })
     }
     poll(0)

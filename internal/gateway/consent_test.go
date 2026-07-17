@@ -132,7 +132,7 @@ func newConsentFixture(t *testing.T, caps ...string) *consentFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ticket, err := store.IssueEnrollment(false, time.Time{}, Scope{})
+	ticket, err := store.IssueEnrollment(false, time.Time{}, Scope{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

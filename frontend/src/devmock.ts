@@ -1092,13 +1092,19 @@ export function installDevMock() {
       agPendingIn = null
       return undefined
     }),
-    IssuePairingCode: (_reusable: boolean, _ttlSecs: number, _ports: number[], _tunnels: string[]) =>
+    IssuePairingCode: (_reusable: boolean, _ttlSecs: number, _ports: number[], _tunnels: string[], _label: string) =>
       gated(() => {
         // Each call mints a fresh enrollment ticket → a different token segment,
         // so "New code" and the reusable toggle visibly change the shown code.
         const tok = Array.from({length: 16}, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('')
         return `pxf://play.example.com:8474/v1/pair/${tok}#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08`
       }),
+    // Invite rows arrive with the roster UI; until then the list is empty and a
+    // revoke is a clean not-found.
+    ListInvites: () => Promise.resolve([]),
+    RevokeInvite: (_handle: string) => gated(() => {
+      throw new Error('that invite is no longer live — it may have been used up or already revoked')
+    }),
     RenameAgent: (agentId: string, nickname: string) => gated(() => {
       const o = agentOverrides.get(agentId) ?? {}
       o.nickname = nickname

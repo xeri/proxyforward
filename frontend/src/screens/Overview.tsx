@@ -624,7 +624,7 @@ function GatewayPairingStrip() {
       <div className="space-y-3 px-5 py-3.5">
         <PairingCodeRow
           label="Pairing code" hint="Single-use · enrolls one agent, expires in 10 min"
-          fetch={() => IssuePairingCode(false, 600, [], [])} reissuable />
+          fetch={() => IssuePairingCode(false, 600, [], [], '')} reissuable />
       </div>
     </Card>
   )

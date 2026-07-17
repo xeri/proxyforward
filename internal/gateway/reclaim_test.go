@@ -42,7 +42,7 @@ func newReclaimFixture(t *testing.T) *reclaimFixture {
 		t.Fatal(err)
 	}
 	for key, id := range map[byte]string{1: "agt_incumbent", 2: "agt_requester"} {
-		ticket, err := store.IssueEnrollment(false, time.Time{}, Scope{})
+		ticket, err := store.IssueEnrollment(false, time.Time{}, Scope{}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -204,7 +204,7 @@ func TestAgentDesiredConfigReturnsStoredSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ticket, err := store.IssueEnrollment(false, time.Time{}, Scope{})
+	ticket, err := store.IssueEnrollment(false, time.Time{}, Scope{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

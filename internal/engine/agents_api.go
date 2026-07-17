@@ -24,6 +24,10 @@ const (
 	OpGatewayEvents      = "gateway_events"
 	OpAgentDesiredConfig = "agent_desired_config"
 	OpReclaimPort        = "reclaim_port"
+	// Invite ops: every live pairing code is a roster row, so a standing
+	// credential is never invisible. Revoking one never touches enrolled agents.
+	OpListInvites  = "list_invites"
+	OpRevokeInvite = "revoke_invite"
 	// Consent-protocol ops (config-consent): the operator's decision on an
 	// agent-authored proposal, and the gateway-authored editor's submit.
 	OpApproveProposal    = "approve_agent_proposal"
@@ -36,7 +40,8 @@ const (
 func isAgentAdminOp(op string) bool {
 	switch op {
 	case OpListAgents, OpIssuePairing, OpRevokeAgent, OpRenameAgent, OpSetAgentScope, OpGatewayEvents,
-		OpAgentDesiredConfig, OpReclaimPort, OpApproveProposal, OpRejectProposal, OpProposeAgentConfig:
+		OpAgentDesiredConfig, OpReclaimPort, OpApproveProposal, OpRejectProposal, OpProposeAgentConfig,
+		OpListInvites, OpRevokeInvite:
 		return true
 	}
 	return false
@@ -71,6 +76,7 @@ func (e *Engine) agentAdminOp(op string, body json.RawMessage) (json.RawMessage,
 			TTLSecs  int64    `json:"ttlSecs"`
 			Ports    []int    `json:"ports"`
 			Tunnels  []string `json:"tunnels"`
+			Label    string   `json:"label"`
 		}
 		if err := decodeBody(body, &q); err != nil {
 			return nil, err
@@ -79,13 +85,23 @@ func (e *Engine) agentAdminOp(op string, body json.RawMessage) (json.RawMessage,
 		if q.TTLSecs > 0 {
 			exp = time.Now().Add(time.Duration(q.TTLSecs) * time.Second)
 		}
-		code, err := e.issuePairingCode(q.Reusable, exp, gateway.Scope{Ports: q.Ports, TunnelIDs: q.Tunnels})
+		code, err := e.issuePairingCode(q.Reusable, exp, gateway.Scope{Ports: q.Ports, TunnelIDs: q.Tunnels}, q.Label)
 		if err != nil {
 			return nil, err
 		}
 		return encodeResult(struct {
 			Code string `json:"code"`
 		}{code}, nil)
+	case OpListInvites:
+		return encodeResult(e.listInvites(), nil)
+	case OpRevokeInvite:
+		var q struct {
+			Handle string `json:"handle"`
+		}
+		if err := decodeBody(body, &q); err != nil {
+			return nil, err
+		}
+		return encodeResult(okResult{e.Gateway.RevokeInvite(q.Handle)}, nil)
 	case OpRevokeAgent:
 		var q struct {
 			AgentID string `json:"agentId"`
@@ -168,17 +184,23 @@ func (e *Engine) agentAdminOp(op string, body json.RawMessage) (json.RawMessage,
 	}
 }
 
-// issuePairingCode mints an enrollment ticket scoped as requested and returns a
-// pxf:// pairing code carrying it. reusable=false is the single-use default; a
-// zero exp never expires.
-func (e *Engine) issuePairingCode(reusable bool, exp time.Time, scope gateway.Scope) (string, error) {
+// issuePairingCode mints an enrollment ticket scoped and labeled as requested
+// and returns a pxf:// pairing code carrying it. reusable=false is the
+// single-use default; a zero exp never expires.
+func (e *Engine) issuePairingCode(reusable bool, exp time.Time, scope gateway.Scope, label string) (string, error) {
 	if e.Gateway == nil {
 		return "", fmt.Errorf("pairing codes come from the gateway role")
 	}
-	ticket, err := e.Gateway.IssuePairingTicket(reusable, exp, scope)
+	ticket, err := e.Gateway.IssuePairingTicket(reusable, exp, scope, label)
 	if err != nil {
 		return "", err
 	}
+	return e.pairingCodeFor(ticket)
+}
+
+// pairingCodeFor composes the full pxf:// code for a ticket — issuance and the
+// invite roster's copy action share this one assembly.
+func (e *Engine) pairingCodeFor(ticket string) (string, error) {
 	addr := e.Gateway.ControlAddr()
 	if addr == nil {
 		return "", fmt.Errorf("gateway is still starting")
@@ -194,4 +216,41 @@ func (e *Engine) issuePairingCode(reusable bool, exp time.Time, scope gateway.Sc
 		Fingerprint: e.Gateway.Fingerprint(),
 	}
 	return code.String(), nil
+}
+
+// InviteView is one live pairing code for the GUI roster: identity and policy
+// plus the composed pxf:// code for the copy action. The code is recomposed from
+// the stored ticket on every list — the pipe already carries freshly-issued
+// codes, and the roster's copy button is the same operator asking again.
+type InviteView struct {
+	Handle       string   `json:"handle"`
+	Label        string   `json:"label"`
+	Reusable     bool     `json:"reusable"`
+	IssuedAtMs   int64    `json:"issuedAtMs"`
+	ExpiresAtMs  int64    `json:"expiresAtMs"` // 0 = never expires
+	Uses         int      `json:"uses"`
+	ScopePorts   []int    `json:"scopePorts"`
+	ScopeTunnels []string `json:"scopeTunnels"`
+	Code         string   `json:"code"`
+}
+
+// listInvites maps the gateway's live tickets into GUI rows, newest first.
+func (e *Engine) listInvites() []InviteView {
+	invites := e.Gateway.ListInvites()
+	out := make([]InviteView, 0, len(invites))
+	for _, in := range invites {
+		v := InviteView{
+			Handle: in.Handle, Label: in.Label, Reusable: in.Reusable,
+			IssuedAtMs: in.IssuedAt.UnixMilli(), Uses: in.Uses,
+			ScopePorts: in.Scope.Ports, ScopeTunnels: in.Scope.TunnelIDs,
+		}
+		if !in.Exp.IsZero() {
+			v.ExpiresAtMs = in.Exp.UnixMilli()
+		}
+		if code, err := e.pairingCodeFor(in.Ticket); err == nil {
+			v.Code = code
+		}
+		out = append(out, v)
+	}
+	return out
 }

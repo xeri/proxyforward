@@ -27,7 +27,7 @@ func TestEnrollRejectsAgentIDCollision(t *testing.T) {
 	}
 	now := time.Now()
 	mkTicket := func() string {
-		tk, err := s.IssueEnrollment(false, time.Time{}, Scope{})
+		tk, err := s.IssueEnrollment(false, time.Time{}, Scope{}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,7 +62,7 @@ func TestAgentStoreEnrollLookupRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	ticket, err := s.IssueEnrollment(false, time.Time{}, Scope{})
+	ticket, err := s.IssueEnrollment(false, time.Time{}, Scope{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestAgentStoreEnrollLookupRevoke(t *testing.T) {
 func TestAgentStoreReusableTicket(t *testing.T) {
 	s, _ := LoadAgentStore(t.TempDir())
 	now := time.Now()
-	ticket, err := s.IssueEnrollment(true, time.Time{}, Scope{})
+	ticket, err := s.IssueEnrollment(true, time.Time{}, Scope{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestAgentStoreReusableTicket(t *testing.T) {
 func TestAgentStoreExpiredTicket(t *testing.T) {
 	s, _ := LoadAgentStore(t.TempDir())
 	now := time.Now()
-	ticket, _ := s.IssueEnrollment(false, now.Add(-time.Minute), Scope{})
+	ticket, _ := s.IssueEnrollment(false, now.Add(-time.Minute), Scope{}, "")
 	if _, err := s.Enroll(pub(1), "agt_one", ticket, now); !errors.Is(err, ErrTicketExpired) {
 		t.Fatalf("want ErrTicketExpired, got %v", err)
 	}
@@ -129,7 +129,7 @@ func TestAgentStorePersistence(t *testing.T) {
 	dir := t.TempDir()
 	s1, _ := LoadAgentStore(dir)
 	now := time.Now()
-	ticket, _ := s1.IssueEnrollment(false, time.Time{}, Scope{Ports: []int{25565}})
+	ticket, _ := s1.IssueEnrollment(false, time.Time{}, Scope{Ports: []int{25565}}, "")
 	if _, err := s1.Enroll(pub(7), "agt_seven", ticket, now); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestAgentStoreDesiredConfig(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := LoadAgentStore(dir)
 	now := time.Now()
-	ticket, _ := s.IssueEnrollment(false, time.Time{}, Scope{})
+	ticket, _ := s.IssueEnrollment(false, time.Time{}, Scope{}, "")
 	if _, err := s.Enroll(pub(3), "agt_three", ticket, now); err != nil {
 		t.Fatal(err)
 	}
@@ -209,5 +209,85 @@ func TestScopeAllows(t *testing.T) {
 	}
 	if !sc.AllowsTunnel("tnl_x") || sc.AllowsTunnel("tnl_y") {
 		t.Fatal("tunnel scope enforcement wrong")
+	}
+}
+
+// TestInvitesListAndRevoke: the invite roster shows live tickets only — a
+// consumed single-use ticket and an expired one drop out — and revoking an
+// invite deletes it, so the next redemption gets the honest "not recognized"
+// answer while agents it already enrolled are untouched. (identity)
+func TestInvitesListAndRevoke(t *testing.T) {
+	s, _ := LoadAgentStore(t.TempDir())
+	now := time.Now()
+
+	friend, err := s.IssueEnrollment(true, time.Time{}, Scope{}, "friends")
+	if err != nil {
+		t.Fatal(err)
+	}
+	single, _ := s.IssueEnrollment(false, now.Add(10*time.Minute), Scope{}, "")
+	expired, _ := s.IssueEnrollment(false, now.Add(-time.Minute), Scope{}, "old")
+	_ = expired
+
+	invites := s.ListInvites(now)
+	if len(invites) != 2 {
+		t.Fatalf("want the 2 live invites, got %d: %+v", len(invites), invites)
+	}
+
+	// Consuming the single-use ticket removes its row.
+	if _, err := s.Enroll(pub(1), "agt_one", single, now); err != nil {
+		t.Fatal(err)
+	}
+	invites = s.ListInvites(now)
+	if len(invites) != 1 || invites[0].Label != "friends" || !invites[0].Reusable {
+		t.Fatalf("want only the reusable friends invite, got %+v", invites)
+	}
+	handle := invites[0].Handle
+	if len(handle) != 8 {
+		t.Fatalf("handle %q should be 8 hex chars", handle)
+	}
+
+	// A reusable invite counts its enrollments.
+	if _, err := s.Enroll(pub(2), "agt_two", friend, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.ListInvites(now); len(got) != 1 || got[0].Uses != 1 {
+		t.Fatalf("want uses=1 on the friends invite, got %+v", got)
+	}
+
+	// Revoke deletes: redemption becomes "unknown", enrolled agents stay.
+	if !s.RevokeInvite(handle) {
+		t.Fatal("revoke should find the live invite")
+	}
+	if s.RevokeInvite(handle) {
+		t.Fatal("revoking twice should report not-found")
+	}
+	if _, err := s.Enroll(pub(3), "agt_three", friend, now); !errors.Is(err, ErrTicketUnknown) {
+		t.Fatalf("a revoked invite must redeem as unknown, got %v", err)
+	}
+	if _, ok := s.Lookup(pub(2)); !ok {
+		t.Fatal("revoking the invite must not touch the agent it enrolled")
+	}
+}
+
+// TestEnrollStampsProvenance: each record remembers which invite admitted it —
+// the label when the issuer named one, the short handle otherwise. (identity)
+func TestEnrollStampsProvenance(t *testing.T) {
+	s, _ := LoadAgentStore(t.TempDir())
+	now := time.Now()
+
+	labeled, _ := s.IssueEnrollment(true, time.Time{}, Scope{}, "friends")
+	if _, err := s.Enroll(pub(1), "agt_one", labeled, now); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ := s.Lookup(pub(1)); rec.EnrolledVia != "friends" {
+		t.Fatalf("EnrolledVia = %q, want the invite label", rec.EnrolledVia)
+	}
+
+	unlabeled, _ := s.IssueEnrollment(false, time.Time{}, Scope{}, "")
+	if _, err := s.Enroll(pub(2), "agt_two", unlabeled, now); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ := s.Lookup(pub(2)); rec.EnrolledVia != inviteHandle(unlabeled) {
+		t.Fatalf("EnrolledVia = %q, want the invite handle %q", rec.EnrolledVia, inviteHandle(unlabeled))
 	}
 }

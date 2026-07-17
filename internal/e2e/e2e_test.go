@@ -171,7 +171,7 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 	// Every harness agent authenticates by its Ed25519 identity: a single-use
 	// pairing ticket enrolls the fresh key on first hello, so the whole suite
 	// exercises the identity path end to end.
-	ticket, err := gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{})
+	ticket, err := gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -813,7 +813,7 @@ func (h *harness) addAgent(t *testing.T, agentID string, tunnels []config.Tunnel
 	cfg.Agent.Tunnels = tunnels
 	// The copied config carries the first agent's (already consumed) ticket;
 	// this agent's fresh key needs its own.
-	ticket, err := h.gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{})
+	ticket, err := h.gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1313,7 +1313,7 @@ func TestEnrollmentReportsAssignedIdentity(t *testing.T) {
 	*cfg = *h.agentCfg
 	cfg.Agent.AgentID = config.NewID()
 	cfg.Agent.Tunnels = nil
-	ticket, err := h.gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{})
+	ticket, err := h.gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1350,6 +1350,24 @@ func TestEnrollmentReportsAssignedIdentity(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("assigned id %q is not in the gateway roster", id)
+		}
+		// The join is a notable event: the gateway records it for the event log.
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			evs := h.gw.Events(0)
+			got := false
+			for _, ev := range evs {
+				if ev.Kind == gateway.EventAgentEnrolled && ev.AgentID == id {
+					got = true
+				}
+			}
+			if got {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("no %q event for %s in %+v", gateway.EventAgentEnrolled, id, evs)
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
 	case <-time.After(15 * time.Second):
 		t.Fatal("enrollment never reached the persister")

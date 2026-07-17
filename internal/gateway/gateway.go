@@ -156,7 +156,7 @@ func RunStarted(ctx context.Context, g *Gateway, cfg *config.Config, logger *slo
 		if host == "" {
 			host = "YOUR-PUBLIC-ADDRESS"
 		}
-		ticket, err := g.IssuePairingTicket(false, time.Now().Add(bootstrapTicketTTL), Scope{})
+		ticket, err := g.IssuePairingTicket(false, time.Now().Add(bootstrapTicketTTL), Scope{}, "bootstrap")
 		if err != nil {
 			logger.Error("bootstrap pairing ticket", "err", err)
 		} else {
@@ -291,12 +291,26 @@ func (g *Gateway) GatewayID() string { return g.gatewayID }
 
 // IssuePairingTicket mints a fresh enrollment ticket. reusable=false is single-use
 // (the safe default); a zero exp never expires; scope restricts what the enrolling
-// agent may bind.
-func (g *Gateway) IssuePairingTicket(reusable bool, exp time.Time, scope Scope) (string, error) {
+// agent may bind; label names the invite in the roster.
+func (g *Gateway) IssuePairingTicket(reusable bool, exp time.Time, scope Scope, label string) (string, error) {
 	if g.agents == nil {
 		return "", fmt.Errorf("gateway not started")
 	}
-	return g.agents.IssueEnrollment(reusable, exp, scope)
+	return g.agents.IssueEnrollment(reusable, exp, scope, label)
+}
+
+// ListInvites returns every live pairing ticket (nil before Start).
+func (g *Gateway) ListInvites() []Invite {
+	if g.agents == nil {
+		return nil
+	}
+	return g.agents.ListInvites(time.Now())
+}
+
+// RevokeInvite deletes a live pairing ticket by its handle. Agents it already
+// enrolled keep their identity and their session.
+func (g *Gateway) RevokeInvite(handle string) bool {
+	return g.agents != nil && g.agents.RevokeInvite(handle)
 }
 
 // ListAgents returns the per-agent identity allowlist (nil before Start).
@@ -368,17 +382,20 @@ func (g *Gateway) SetAgentScope(agentID string, scope Scope) bool {
 // still appears (Connected=false). Scope is flattened to slices so the Wails
 // binding generator can model it without a nested cross-package type.
 type AgentView struct {
-	AgentID       string   `json:"agentId"`
-	Nickname      string   `json:"nickname"`
-	Revoked       bool     `json:"revoked"`
-	ScopePorts    []int    `json:"scopePorts"`
-	ScopeTunnels  []string `json:"scopeTunnels"`
-	IssuedAtMs    int64    `json:"issuedAtMs"`
-	Connected     bool     `json:"connected"`
-	Hostname      string   `json:"hostname"`
-	RemoteIP      string   `json:"remoteIp"`
-	LinkUpSinceMs int64    `json:"linkUpSinceMs"`
-	Tunnels       int      `json:"tunnels"`
+	AgentID      string   `json:"agentId"`
+	Nickname     string   `json:"nickname"`
+	Revoked      bool     `json:"revoked"`
+	ScopePorts   []int    `json:"scopePorts"`
+	ScopeTunnels []string `json:"scopeTunnels"`
+	IssuedAtMs   int64    `json:"issuedAtMs"`
+	// EnrolledVia names the invite that admitted this agent (label or handle) —
+	// the drill-in's provenance line.
+	EnrolledVia   string `json:"enrolledVia"`
+	Connected     bool   `json:"connected"`
+	Hostname      string `json:"hostname"`
+	RemoteIP      string `json:"remoteIp"`
+	LinkUpSinceMs int64  `json:"linkUpSinceMs"`
+	Tunnels       int    `json:"tunnels"`
 	// Version and Transport come from the live session (empty when offline): the
 	// agent build's version, feeding the roster's "Update" badge, and the active
 	// data plane (quic | per-conn | mux) shown in the drill-in.
@@ -414,6 +431,7 @@ func (g *Gateway) ListAgentViews() []AgentView {
 			ScopePorts:   r.Scope.Ports,
 			ScopeTunnels: r.Scope.TunnelIDs,
 			IssuedAtMs:   r.IssuedAt.UnixMilli(),
+			EnrolledVia:  r.EnrolledVia,
 			Tunnels:      tunCount[r.AgentID],
 		}
 		if l, ok := live[r.AgentID]; ok {
@@ -1238,6 +1256,17 @@ func (g *Gateway) buildAndAdmit(ctx context.Context, conn net.Conn, hello *contr
 		return nil, nil, err
 	}
 	sess.gen = gen
+	if identity.JustEnrolled {
+		// A machine just joined the fleet — worth a line in the event log (the
+		// roster's "New" badge reads from the record's IssuedAt instead).
+		via := identity.EnrolledVia
+		g.act().do(func() {
+			g.act().recordEvent(GatewayEvent{
+				Kind: EventAgentEnrolled, AgentID: identity.AgentID,
+				Message: fmt.Sprintf("Agent %s enrolled via invite %q.", identity.AgentID, via),
+			})
+		})
+	}
 	return sess, negotiated, nil
 }
 

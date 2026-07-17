@@ -12,12 +12,14 @@ package gateway
 // data path — so the coarse lock is fine.
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -78,12 +80,16 @@ func (s Scope) AllowsTunnel(id string) bool {
 // per-agent monotonic generation bumped on every adopt so drift is detectable on
 // each reconnect. Both zero for an agent that has never synced a config.
 type AgentRecord struct {
-	AgentID        string               `json:"agentId"`
-	PubKey         []byte               `json:"pubKey"`
-	Nickname       string               `json:"nickname,omitempty"`
-	Scope          Scope                `json:"scope,omitempty"`
-	IssuedAt       time.Time            `json:"issuedAt"`
-	Revoked        bool                 `json:"revoked,omitempty"`
+	AgentID  string    `json:"agentId"`
+	PubKey   []byte    `json:"pubKey"`
+	Nickname string    `json:"nickname,omitempty"`
+	Scope    Scope     `json:"scope,omitempty"`
+	IssuedAt time.Time `json:"issuedAt"`
+	Revoked  bool      `json:"revoked,omitempty"`
+	// EnrolledVia names the invite that admitted this agent — its label when the
+	// issuer gave one, else the invite's short handle — so the roster can answer
+	// "which code let this machine in" long after the code itself is gone.
+	EnrolledVia    string               `json:"enrolledVia,omitempty"`
 	DesiredTunnels []control.TunnelSpec `json:"desiredTunnels,omitempty"`
 	ConfigGen      uint64               `json:"configGen,omitempty"`
 }
@@ -94,7 +100,43 @@ type enrollNonce struct {
 	Reusable bool      `json:"reusable,omitempty"` // false = single-use (the safe default)
 	Scope    Scope     `json:"scope,omitempty"`
 	Consumed bool      `json:"consumed,omitempty"`
+	IssuedAt time.Time `json:"issuedAt,omitempty"`
+	// Label is the issuer's name for this invite ("friends", "backup box");
+	// shown in the roster and stamped onto agents it enrolls (EnrolledVia).
+	Label string `json:"label,omitempty"`
+	// Uses counts successful enrollments through this ticket (a reusable invite
+	// admits many agents; a single-use one caps at 1).
+	Uses int `json:"uses,omitempty"`
 }
+
+// Invite is one live pairing ticket as the management surfaces see it. Handle is
+// the ticket's public name (first 8 hex chars of sha256(ticket)) — safe to show
+// and to key revocation on; Ticket is the raw credential and must not leave the
+// engine except embedded in a pairing code the operator asked to copy.
+type Invite struct {
+	Ticket   string
+	Handle   string
+	Label    string
+	Reusable bool
+	IssuedAt time.Time
+	Exp      time.Time // zero = never expires
+	Uses     int
+	Scope    Scope
+}
+
+// inviteHandle derives a ticket's public name: enough hash to be unique in any
+// real roster, none of the credential.
+func inviteHandle(ticket string) string {
+	sum := sha256.Sum256([]byte(ticket))
+	return hex.EncodeToString(sum[:4])
+}
+
+// inviteRetention bounds how long a dead (consumed or expired) single-use nonce
+// is kept before the next IssueEnrollment prunes it. Kept at all so a re-used
+// code gets its honest "already used" / "expired" answer rather than an
+// "unknown" one; pruned eventually so minting codes forever cannot grow the
+// store without bound.
+const inviteRetention = 7 * 24 * time.Hour
 
 type storeFile struct {
 	Agents []AgentRecord          `json:"agents"`
@@ -151,20 +193,67 @@ func (s *AgentStore) save() error {
 }
 
 // IssueEnrollment mints a fresh pairing ticket and records it. reusable=false is
-// single-use (the safe default); a zero exp never expires. Returns the opaque
-// ticket nonce for embedding in the pairing code.
-func (s *AgentStore) IssueEnrollment(reusable bool, exp time.Time, scope Scope) (string, error) {
+// single-use (the safe default); a zero exp never expires; label is the issuer's
+// display name for the invite (may be empty). Returns the opaque ticket nonce
+// for embedding in the pairing code.
+func (s *AgentStore) IssueEnrollment(reusable bool, exp time.Time, scope Scope, label string) (string, error) {
 	ticket, err := link.NewEnrollTicket()
 	if err != nil {
 		return "", err
 	}
+	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.nonces[ticket] = enrollNonce{Exp: exp, Reusable: reusable, Scope: scope}
+	// Prune dead nonces past their honesty window, so unbounded minting cannot
+	// grow the store forever (see inviteRetention).
+	for tk, n := range s.nonces {
+		dead := n.Consumed || (!n.Exp.IsZero() && now.After(n.Exp))
+		if dead && now.Sub(n.IssuedAt) > inviteRetention {
+			delete(s.nonces, tk)
+		}
+	}
+	s.nonces[ticket] = enrollNonce{Exp: exp, Reusable: reusable, Scope: scope, IssuedAt: now, Label: label}
 	if err := s.save(); err != nil {
 		return "", err
 	}
 	return ticket, nil
+}
+
+// ListInvites returns every live pairing ticket — unconsumed and unexpired —
+// newest first, so a standing credential is never invisible to the roster.
+func (s *AgentStore) ListInvites(now time.Time) []Invite {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Invite
+	for tk, n := range s.nonces {
+		if n.Consumed || (!n.Exp.IsZero() && now.After(n.Exp)) {
+			continue
+		}
+		out = append(out, Invite{
+			Ticket: tk, Handle: inviteHandle(tk), Label: n.Label,
+			Reusable: n.Reusable, IssuedAt: n.IssuedAt, Exp: n.Exp,
+			Uses: n.Uses, Scope: n.Scope,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].IssuedAt.After(out[j].IssuedAt) })
+	return out
+}
+
+// RevokeInvite deletes the ticket named by handle, reporting whether it existed.
+// Deletion (not marking) is deliberate: the next redemption attempt gets the
+// honest "not recognized (it may have been rotated)" answer, and agents the
+// invite already enrolled are untouched — revoking a code never disconnects them.
+func (s *AgentStore) RevokeInvite(handle string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for tk := range s.nonces {
+		if inviteHandle(tk) == handle {
+			delete(s.nonces, tk)
+			_ = s.save()
+			return true
+		}
+	}
+	return false
 }
 
 // Enroll validates ticket and binds pubKey to the allowlist under the derived
@@ -197,20 +286,26 @@ func (s *AgentStore) Enroll(pubKey []byte, agentID, ticket string, now time.Time
 			return AgentRecord{}, ErrAgentIDCollision
 		}
 	}
+	via := n.Label
+	if via == "" {
+		via = inviteHandle(ticket)
+	}
 	rec := AgentRecord{
-		AgentID:  agentID,
-		PubKey:   append([]byte(nil), pubKey...),
-		Scope:    n.Scope,
-		IssuedAt: now,
+		AgentID:     agentID,
+		PubKey:      append([]byte(nil), pubKey...),
+		Scope:       n.Scope,
+		IssuedAt:    now,
+		EnrolledVia: via,
 	}
 	if existing, ok := s.agents[key]; ok {
 		rec.Nickname = existing.Nickname // preserve a rename across re-enrollment
 	}
 	s.agents[key] = rec
+	n.Uses++
 	if !n.Reusable {
 		n.Consumed = true
-		s.nonces[ticket] = n
 	}
+	s.nonces[ticket] = n
 	if err := s.save(); err != nil {
 		return AgentRecord{}, err
 	}

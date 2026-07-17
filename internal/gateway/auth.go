@@ -16,6 +16,11 @@ type Identity struct {
 	AgentID string
 	PubKey  ed25519.PublicKey
 	Scope   Scope
+	// JustEnrolled marks the hello that consumed a ticket and admitted a new
+	// key; EnrolledVia is that invite's label/handle. Admission records the
+	// enrollment event from these.
+	JustEnrolled bool
+	EnrolledVia  string
 }
 
 // Validator authenticates a hello on both the control and data accept paths.
@@ -62,5 +67,5 @@ func (v identityValidator) Validate(hello *control.Hello, fp string) (Identity, 
 	if err != nil {
 		return Identity{}, err // ErrTicket* — surfaced with its own message
 	}
-	return Identity{AgentID: rec.AgentID, PubKey: pub, Scope: rec.Scope}, nil
+	return Identity{AgentID: rec.AgentID, PubKey: pub, Scope: rec.Scope, JustEnrolled: true, EnrolledVia: rec.EnrolledVia}, nil
 }

@@ -27,14 +27,16 @@ func (a *App) ListAgents() []gateway.AgentView {
 
 // IssuePairingCode mints a pxf:// pairing code carrying a fresh enrollment ticket.
 // reusable=false is the single-use default; ttlSecs=0 never expires; ports/tunnels
-// (empty = unrestricted) become the enrolling agent's bind scope.
-func (a *App) IssuePairingCode(reusable bool, ttlSecs int64, ports []int, tunnels []string) (string, error) {
+// (empty = unrestricted) become the enrolling agent's bind scope; label names the
+// invite in the roster (empty is fine).
+func (a *App) IssuePairingCode(reusable bool, ttlSecs int64, ports []int, tunnels []string, label string) (string, error) {
 	req := struct {
 		Reusable bool     `json:"reusable"`
 		TTLSecs  int64    `json:"ttlSecs"`
 		Ports    []int    `json:"ports"`
 		Tunnels  []string `json:"tunnels"`
-	}{reusable, ttlSecs, ports, tunnels}
+		Label    string   `json:"label"`
+	}{reusable, ttlSecs, ports, tunnels, label}
 	var resp struct {
 		Code string `json:"code"`
 	}
@@ -42,6 +44,33 @@ func (a *App) IssuePairingCode(reusable bool, ttlSecs int64, ports []int, tunnel
 		return "", err
 	}
 	return resp.Code, nil
+}
+
+// ListInvites returns every live pairing code as a roster row. Empty on any
+// error (agent role, detached, old daemon).
+func (a *App) ListInvites() []engine.InviteView {
+	var out []engine.InviteView
+	if err := a.analyticsCall(engine.OpListInvites, nil, &out); err != nil || out == nil {
+		return []engine.InviteView{}
+	}
+	return out
+}
+
+// RevokeInvite deletes a live pairing code by its handle. Agents it already
+// enrolled keep their identity and their session.
+func (a *App) RevokeInvite(handle string) error {
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	if err := a.analyticsCall(engine.OpRevokeInvite, struct {
+		Handle string `json:"handle"`
+	}{handle}, &resp); err != nil {
+		return err
+	}
+	if !resp.OK {
+		return fmt.Errorf("that invite is no longer live — it may have been used up or already revoked")
+	}
+	return nil
 }
 
 // RevokeAgent removes an agent from the allowlist and evicts its live session, so

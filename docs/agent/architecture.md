@@ -92,6 +92,7 @@ persisted to config.
 | Splice idle reap | 10 min with no bytes in **either** direction (>30× Minecraft's 30 s keepalive limit) | `relay.go DefaultIdleTimeout` |
 | Bandwidth cap unit / burst | `Mbps × 125_000` B/s / `relay.BufSize` | `bwcap.go` |
 | Backoff | 1 s → 60 s full jitter, reset after 60 s stable | `link/backoff.go` |
+| Run stop grace | 10 s — the caller's wait for a clean unwind, not the run's; force skips it, over-IPC always does | `engine.go stopGrace`, `app.go engineStopGrace` |
 | Abuse defaults | 4096 global / 32 per-network conns; 10 auth fails/min/network (token bucket: burst 10, refill 10/min) | `config.go Default` |
 | Abuse accounting unit | one IPv4 address; one IPv6 **/64** (smallest block a subscriber holds) | `limits.go sourceNet` |
 | Per-agent listener cap | 32 public listeners per agent (the one resource an agent allocates by asking) | `config.go Default`, `actor.go bindLocked` |
@@ -117,6 +118,7 @@ persisted to config.
 | Agent identity | Ed25519 (`agent_identity.key`, PKCS#8 PEM, `0600`); `agentID` = `agt_` + 16-char Crockford base32 of sha256(pubkey)[:10] = 80 bits | `link/cred.go LoadOrCreateIdentity agentFingerprintBytes` |
 | Enrollment ticket | `tkt_` + 128-bit nonce; single-use default, reusable optional; TTL caller-set, 0 = never (UI single-use default 10 min) | `link/cred.go NewEnrollTicket`, `gateway/agentstore.go IssueEnrollment` |
 | Bootstrap pairing code | headless first start, empty roster only: one single-use ticket, TTL 60 min, printed to the console | `gateway.go bootstrapTicketTTL RunStarted` |
+| Invite retention | dead (consumed/expired) tickets keep their honest error for 7 d, then prune at the next issue | `agentstore.go inviteRetention` |
 | Agent allowlist | `gateway_agents.json` (`0600`, atomic write + AV-retry): identity + scope + desired config per agent | `gateway/agentstore.go AgentStore` |
 | Pairing code | `pxf://host:port/v1/pair/<tkt>#sha256:<64hex>`, ≤ 512 B before parse | `link/pairing.go ParsePairingCode` |
 | Agent auth | Ed25519 proof-of-possession over `proxyforward-agent-auth-v1` + gateway cert FP — no bearer token in steady state | `link/cred.go AgentAuthMessage` |
@@ -382,7 +384,12 @@ equirectangular paths (`worldgeo.ts`, generated — regenerate, don't edit).
 ## devmock axes (the UI test matrix, `frontend/src/devmock.ts`)
 
 `?mock=agent|gateway|wizard` plus composable: `&link=down`, `&mode=attached`
-(gated bindings reject like the real backend), `&fatal=1`, `&fresh=1`,
+(gated bindings reject like the real backend), `&fatal=1`, `&engine=stopped`
+(the run is deliberately off: `runState` stopped, no fatal — the "am I on" axis,
+distinct from `&fatal` which is a crash and `&link=down` which is trying and
+failing; Start/Stop mutate it live), `&service=running|stopped` (the Windows
+service badge + its installed-but-stopped warning; Install/Start/Stop/Uninstall
+drive it), `&fresh=1`,
 `&analytics=off`, `&paired=0` (never paired to a gateway — the sidebar's role
 switcher cannot become the agent and must route to setup), `&geo=off|empty|error|pending`,
 `&fx=low|high`, `&fleet=multi|old` (gateway only — `multi`: a five-agent fleet with a

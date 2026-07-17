@@ -1151,6 +1151,39 @@ export namespace control {
 
 }
 
+export namespace engine {
+	
+	export class InviteView {
+	    handle: string;
+	    label: string;
+	    reusable: boolean;
+	    issuedAtMs: number;
+	    expiresAtMs: number;
+	    uses: number;
+	    scopePorts: number[];
+	    scopeTunnels: string[];
+	    code: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new InviteView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.handle = source["handle"];
+	        this.label = source["label"];
+	        this.reusable = source["reusable"];
+	        this.issuedAtMs = source["issuedAtMs"];
+	        this.expiresAtMs = source["expiresAtMs"];
+	        this.uses = source["uses"];
+	        this.scopePorts = source["scopePorts"];
+	        this.scopeTunnels = source["scopeTunnels"];
+	        this.code = source["code"];
+	    }
+	}
+
+}
+
 export namespace gateway {
 	
 	export class ProposalView {
@@ -1234,6 +1267,7 @@ export namespace gateway {
 	    scopePorts: number[];
 	    scopeTunnels: string[];
 	    issuedAtMs: number;
+	    enrolledVia: string;
 	    connected: boolean;
 	    hostname: string;
 	    remoteIp: string;
@@ -1256,6 +1290,7 @@ export namespace gateway {
 	        this.scopePorts = source["scopePorts"];
 	        this.scopeTunnels = source["scopeTunnels"];
 	        this.issuedAtMs = source["issuedAtMs"];
+	        this.enrolledVia = source["enrolledVia"];
 	        this.connected = source["connected"];
 	        this.hostname = source["hostname"];
 	        this.remoteIp = source["remoteIp"];

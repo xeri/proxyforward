@@ -7,6 +7,7 @@ import {app} from '../models';
 import {analytics} from '../models';
 import {geo} from '../models';
 import {config} from '../models';
+import {engine} from '../models';
 import {logging} from '../models';
 import {control} from '../models';
 
@@ -52,9 +53,11 @@ export function ImportSetup(arg1:string,arg2:string):Promise<void>;
 
 export function InstallService():Promise<void>;
 
-export function IssuePairingCode(arg1:boolean,arg2:number,arg3:Array<number>,arg4:Array<string>):Promise<string>;
+export function IssuePairingCode(arg1:boolean,arg2:number,arg3:Array<number>,arg4:Array<string>,arg5:string):Promise<string>;
 
 export function ListAgents():Promise<Array<gateway.AgentView>>;
+
+export function ListInvites():Promise<Array<engine.InviteView>>;
 
 export function LogsSince(arg1:number):Promise<Array<logging.Entry>>;
 
@@ -93,6 +96,8 @@ export function RenameAgent(arg1:string,arg2:string):Promise<void>;
 export function RestartEngine():Promise<void>;
 
 export function RevokeAgent(arg1:string):Promise<void>;
+
+export function RevokeInvite(arg1:string):Promise<void>;
 
 export function SaveSettings(arg1:config.Config):Promise<void>;
 

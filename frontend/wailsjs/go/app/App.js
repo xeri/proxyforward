@@ -86,12 +86,16 @@ export function InstallService() {
   return window['go']['app']['App']['InstallService']();
 }
 
-export function IssuePairingCode(arg1, arg2, arg3, arg4) {
-  return window['go']['app']['App']['IssuePairingCode'](arg1, arg2, arg3, arg4);
+export function IssuePairingCode(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['IssuePairingCode'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function ListAgents() {
   return window['go']['app']['App']['ListAgents']();
+}
+
+export function ListInvites() {
+  return window['go']['app']['App']['ListInvites']();
 }
 
 export function LogsSince(arg1) {
@@ -168,6 +172,10 @@ export function RestartEngine() {
 
 export function RevokeAgent(arg1) {
   return window['go']['app']['App']['RevokeAgent'](arg1);
+}
+
+export function RevokeInvite(arg1) {
+  return window['go']['app']['App']['RevokeInvite'](arg1);
 }
 
 export function SaveSettings(arg1) {

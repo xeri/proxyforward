@@ -43,7 +43,7 @@ func TestIdentityValidator(t *testing.T) {
 	}
 
 	// Enroll with a ticket.
-	ticket, _ := store.IssueEnrollment(false, time.Time{}, Scope{})
+	ticket, _ := store.IssueEnrollment(false, time.Time{}, Scope{}, "")
 	id, err := v.Validate(ptr(enrollHello(t, priv, pub, fp, ticket)), fp)
 	if err != nil {
 		t.Fatalf("enroll: %v", err)

@@ -380,7 +380,7 @@ function IssuePairingModal({onClose}: {onClose: () => void}) {
   const issue = async () => {
     setBusy(true); setErr(''); setCode('')
     // Single-use expires in 10 min; a reusable code lives until revoked (ttl 0).
-    try { setCode(await IssuePairingCode(reusable, reusable ? 0 : 600, parsePorts(ports), parseTuns(tuns))) }
+    try { setCode(await IssuePairingCode(reusable, reusable ? 0 : 600, parsePorts(ports), parseTuns(tuns), '')) }
     catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
