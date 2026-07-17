@@ -57,11 +57,6 @@ export const IconClose = (p: IconProps) => (
 )
 
 /* --- Power ---------------------------------------------------------------- */
-/** The universal power symbol: a broken ring with a top stem. The one glyph
- * everyone reads as on/off, so it fronts Start and Stop. */
-export const IconPower = (p: IconProps) => (
-  <Base {...p}><path d="M12 3.5v7"/><path d="M7 6.3a7 7 0 1 0 10 0"/></Base>
-)
 /** A filled square: the transport-control "stop". Filled, not stroked, so it
  * reads as a button state rather than an outline. */
 export const IconStop = (p: IconProps) => (

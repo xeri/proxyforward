@@ -29,6 +29,16 @@ function normalize(s: string): string {
   return s.toLowerCase().replace(/[-_ ]/g, '')
 }
 
+/** serviceRunning is useServiceRunning's answer for a non-React caller (the
+ * command palette): one query, no subscription. */
+export async function serviceRunning(): Promise<boolean> {
+  try {
+    return normalize(await ServiceStatus()) === 'running'
+  } catch {
+    return false
+  }
+}
+
 export function powerStart(svcRunning: boolean): Promise<void> {
   return svcRunning ? StartService() : StartEngine()
 }

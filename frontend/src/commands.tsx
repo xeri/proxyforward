@@ -1,11 +1,12 @@
 import {ReactNode} from 'react'
 import {
-  ExportDiagnostics, OpenConfigDir, RestartEngine, StartEngine, StopEngine,
+  ExportDiagnostics, OpenConfigDir, RestartEngine,
 } from '../wailsjs/go/app/App'
 import {
   IconCopy, IconExternal, IconFolder, IconKey, IconMonitor, IconMoon, IconPlay, IconRefresh,
   IconStop, IconSun,
 } from './components/icons'
+import {powerStart, powerStop, serviceRunning} from './power'
 import {copyText} from './components/ui'
 import {navFor, NavId} from './nav'
 import {runStateOf, UIStatus} from './state'
@@ -72,19 +73,21 @@ export const COMMANDS: Command[] = [
     run: () => RestartEngine().catch(() => {}),
   },
   {
+    // Through power.ts, same as Overview's controls, so both target the same
+    // layer — the service when one owns the run, else the run itself.
     id: 'start-engine', title: 'Start engine', hint: 'Bring the tunnel back up', icon: <IconPlay size={15} />, section: 'Actions',
     when: ctx => runStateOf(ctx.status) === 'stopped',
-    run: () => StartEngine().catch(() => {}),
+    run: () => serviceRunning().then(powerStart).catch(() => {}),
   },
   {
     // The palette closes on run and cannot host a confirm dialog, so a stop
     // that would drop players hands off to Overview, where the count-naming
-    // confirm lives. An empty tunnel stops here directly.
+    // confirm lives. An empty tunnel stops here directly — service-aware.
     id: 'stop-engine', title: 'Stop engine', hint: 'Cut the tunnel', icon: <IconStop size={15} />, section: 'Actions',
     when: ctx => runStateOf(ctx.status) === 'running',
     run: ctx => {
       if ((ctx.status.connections ?? []).length > 0) { ctx.go('overview'); return }
-      StopEngine(false).catch(() => {})
+      serviceRunning().then(r => powerStop(r, false)).catch(() => {})
     },
   },
   {

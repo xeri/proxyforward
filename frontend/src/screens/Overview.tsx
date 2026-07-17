@@ -201,7 +201,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
         )}
         {status.mode === 'attached' && (
           <div className="mb-4">
-            <Banner tone="info">Running as a Windows service — this window is a viewer.</Banner>
+            <Banner tone="info">The engine runs as a Windows service — this window controls it over the pipe.</Banner>
           </div>
         )}
         {consent.view?.incoming && (
@@ -614,10 +614,13 @@ function PlayerAddressStrip({status, onNavigate}: {status: UIStatus; onNavigate:
   )
 }
 
-/** GatewayPairingStrip: enrollment front and centre. The code is a single-use
- * enrollment ticket (IssuePairingCode) enrolling one agent's Ed25519 identity. It
- * rests masked (screen-share safe) with an eye toggle; copy works without
- * revealing. */
+/** GatewayPairingStrip: enrollment front and centre. The primary code is a
+ * single-use enrollment ticket (IssuePairingCode) enrolling one agent's Ed25519
+ * identity; below it, one click mints a reusable "friend code" for the
+ * two-people-who-know-each-other case. Both rest masked (screen-share safe);
+ * copy works without revealing. Nothing standing is created until the click —
+ * and the minted code immediately appears as a roster row under Agents, where
+ * it can be revoked. */
 function GatewayPairingStrip() {
   return (
     <Card pad={false}>
@@ -625,8 +628,58 @@ function GatewayPairingStrip() {
         <PairingCodeRow
           label="Pairing code" hint="Single-use · enrolls one agent, expires in 10 min"
           fetch={() => IssuePairingCode(false, 600, [], [], '')} reissuable />
+        <FriendCodeRow />
       </div>
     </Card>
+  )
+}
+
+/** FriendCodeRow: the one-click standing invite. Until clicked it is only an
+ * offer (nothing is minted, nothing stands); after, the reusable never-expiring
+ * code shows masked with copy, plus the honest pointer to where it lives on
+ * from now: the Agents roster, as a revocable invite row. */
+function FriendCodeRow() {
+  const [code, setCode] = useState('')
+  const [shown, setShown] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const mint = () => {
+    setBusy(true); setErr('')
+    IssuePairingCode(true, 0, [], [], 'friend')
+      .then(setCode)
+      .catch(e => setErr(String(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[var(--border)] pt-3">
+      <div className="w-44 shrink-0">
+        <Overline>Friend code</Overline>
+        <div className="mt-0.5 text-[11px] text-[var(--text-3)]">
+          {code ? 'Reusable · manage or revoke it under Agents' : 'Reusable · never expires · for people you trust'}
+        </div>
+      </div>
+      <div className="min-w-56 flex-1">
+        {code ? (
+          <div className="pf-fade">
+            <Codebox
+              text={shown ? code : '•'.repeat(28)} selectable={shown}
+              action={
+                <div className="flex items-center gap-1.5">
+                  <IconButton title={shown ? 'Hide friend code' : 'Reveal friend code'} onClick={() => setShown(s => !s)}>
+                    {shown ? <IconEyeOff size={16} /> : <IconEye size={16} />}
+                  </IconButton>
+                  <CopyButton text={code} label="Copy" />
+                </div>
+              }
+            />
+          </div>
+        ) : err ? (
+          <ErrorBanner message={err} onDismiss={() => setErr('')} />
+        ) : (
+          <Button size="sm" variant="ghost" disabled={busy} onClick={mint}>{busy ? 'Minting…' : 'Mint friend code'}</Button>
+        )}
+      </div>
+    </div>
   )
 }
 
