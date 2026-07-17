@@ -3,7 +3,6 @@
 import {stats} from '../models';
 import {agent} from '../models';
 import {gateway} from '../models';
-import {http} from '../models';
 import {app} from '../models';
 import {analytics} from '../models';
 import {geo} from '../models';
@@ -20,8 +19,6 @@ export function AgentDesiredConfig(arg1:string):Promise<gateway.AgentConfigView>
 export function ApproveAgentProposal(arg1:string,arg2:string):Promise<void>;
 
 export function ApproveGatewayProposal(arg1:string):Promise<void>;
-
-export function AvatarHandler():Promise<http.Handler>;
 
 export function BandwidthHistory(arg1:number,arg2:number):Promise<stats.HistoryResult>;
 

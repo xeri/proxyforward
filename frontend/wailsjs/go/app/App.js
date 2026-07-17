@@ -22,10 +22,6 @@ export function ApproveGatewayProposal(arg1) {
   return window['go']['app']['App']['ApproveGatewayProposal'](arg1);
 }
 
-export function AvatarHandler() {
-  return window['go']['app']['App']['AvatarHandler']();
-}
-
 export function BandwidthHistory(arg1, arg2) {
   return window['go']['app']['App']['BandwidthHistory'](arg1, arg2);
 }

@@ -117,8 +117,10 @@ func newAvatarCache(dir string, logger *slog.Logger) *avatarCache {
 
 // AvatarHandler serves player heads for the frontend. It is mounted as the
 // Wails asset-server fallback handler, so it must 404 anything that is not an
-// avatar path.
-func (a *App) AvatarHandler() http.Handler { return a.avatars }
+// avatar path. A package-level function rather than an App method on purpose:
+// Wails binds every exported method, and an http.Handler has no JS shape — as
+// a binding it generated an import of a nonexistent "http" namespace.
+func AvatarHandler(a *App) http.Handler { return a.avatars }
 
 // ServeHTTP never blocks on the network: anything not servable from disk (or
 // pure CPU) answers with the procedural placeholder immediately while a

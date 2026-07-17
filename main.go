@@ -478,7 +478,7 @@ func runGUI(deepLink string) error {
 		Frameless: true,
 		// The avatar handler serves /pf/avatar/ for paths the bundled assets
 		// don't cover (player heads are fetched and cached at runtime).
-		AssetServer:      &assetserver.Options{Assets: assets, Handler: a.AvatarHandler()},
+		AssetServer:      &assetserver.Options{Assets: assets, Handler: app.AvatarHandler(a)},
 		BackgroundColour: startupBackground(cfg.UI.Theme),
 		Windows: &wailswin.Options{
 			Theme: wailswin.SystemDefault,
