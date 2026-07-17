@@ -118,10 +118,6 @@ export function OpenExternal(arg1) {
   return window['go']['app']['App']['OpenExternal'](arg1);
 }
 
-export function PairingCode() {
-  return window['go']['app']['App']['PairingCode']();
-}
-
 export function PeakMatrix(arg1) {
   return window['go']['app']['App']['PeakMatrix'](arg1);
 }
@@ -152,10 +148,6 @@ export function ProposeAgentConfig(arg1, arg2) {
 
 export function ReclaimPort(arg1, arg2, arg3) {
   return window['go']['app']['App']['ReclaimPort'](arg1, arg2, arg3);
-}
-
-export function RegenerateToken() {
-  return window['go']['app']['App']['RegenerateToken']();
 }
 
 export function RejectAgentProposal(arg1, arg2, arg3) {

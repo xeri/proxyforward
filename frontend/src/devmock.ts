@@ -9,7 +9,7 @@
 // Extra axes compose with any scenario:
 //   &link=down       — the tunnel link is down (reconnecting / waiting)
 //   &mode=attached   — a service owns the engine; gated actions reject
-//   &fatal=1         — terminal engine error (bad token) surfaces
+//   &fatal=1         — terminal engine error (bad credentials) surfaces
 //   &engine=stopped  — the tunnel run is deliberately off (runState stopped, no
 //                      fatal): the "am I on" axis. Distinct from &fatal (a crash)
 //                      and &link=down (trying, failing): here nothing is trying.
@@ -546,11 +546,11 @@ export function installDevMock() {
   }
   const config = {
     Role: state.role,
-    Agent: {AgentID: 'agt_5w7d2k9rq3v8xj4m', GatewayHost: 'play.example.com', GatewayPort: 8474, Token: 'tok', CertFingerprint: 'sha256:ab', Transport: 'auto',
+    Agent: {AgentID: 'agt_5w7d2k9rq3v8xj4m', GatewayHost: 'play.example.com', GatewayPort: 8474, CertFingerprint: 'sha256:ab', Transport: 'auto',
       Tunnels: [{ID: tunnelID, Name: 'Minecraft', Type: 'tcp', LocalAddr: '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
         Options: {MinecraftAware: true, ProxyProtocolV2: false, OfflineMOTD: 'Server is offline — back soon', BandwidthLimitMbps: 40, BandwidthLimitScope: 'per-direction'}}]},
-    Gateway: {BindAddr: '0.0.0.0', ControlPort: 8474, Token: 'tok', PublicHost: 'play.example.com', PortAllowlist: [],
-      MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10, MaxTunnelsPerAgent: 32, AcceptSharedToken: true},
+    Gateway: {BindAddr: '0.0.0.0', ControlPort: 8474, PublicHost: 'play.example.com', PortAllowlist: [],
+      MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10, MaxTunnelsPerAgent: 32},
     Metrics: {PrometheusEnabled: false, PrometheusAddr: '127.0.0.1:9464'},
     Logging: {Level: 'info', FileEnabled: true},
     UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: true, Autostart: false},
@@ -560,7 +560,6 @@ export function installDevMock() {
   // gateway half of the config is complete, the agent half is empty. This is
   // the one state where the role switcher cannot simply flip.
   if (axisUnpaired) {
-    config.Agent.Token = ''
     config.Agent.GatewayHost = ''
     config.Agent.CertFingerprint = ''
   }
@@ -658,7 +657,7 @@ export function installDevMock() {
     linkSessions: 14,
     historyUnsupported: false,
     analyticsUnsupported: axisAnalyticsOff,
-    engineFatal: axisFatal ? 'authentication failed: the gateway rejected this agent\'s token (it may have been rotated) — re-pair with a fresh code' : '',
+    engineFatal: axisFatal ? 'authentication failed: the gateway rejected this agent\'s credentials (it may have been revoked) — re-pair with a fresh code' : '',
     runState: isWizard ? 'running' : state.runState,
     }
   }
@@ -1036,7 +1035,6 @@ export function installDevMock() {
     // field + status badge can be exercised.
     BrowseMMDB: (title: string) => ok(/asn/i.test(title) ? 'C:\\maxmind\\GeoLite2-ASN.mmdb' : 'C:\\maxmind\\GeoLite2-City.mmdb'),
     GetConfig: () => ok(config),
-    PairingCode: () => gated(() => 'pxf://play.example.com:8474/v1/pair/3f8a1c9e2b7d4056a1b2c3d4e5f60718#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'),
     // Phase 8 agent management: the roster (ListAgents) + the gateway event ring
     // (GatewayEvents) are reads (ok); the write bindings are gated and mutate the
     // mock world (agentOverrides) so the UI updates on the next poll, mirroring
@@ -1139,11 +1137,11 @@ export function installDevMock() {
     SetupAgent: () => gated(() => { becomeRole('agent'); return undefined }),
     SaveTunnels: (t: any) => { config.Agent.Tunnels = t; return ok(undefined) },
     SaveSettings: (c: any) => {
-      // The real SaveSettings validates before it writes: an agent with no
-      // pairing token is refused and nothing is persisted (config.go
-      // validateAgent). Mirror that, or the switcher's error path can't be seen.
-      if (c?.Role === 'agent' && !(config.Agent.Token && config.Agent.GatewayHost)) {
-        return Promise.reject(new Error('agent.token: required (pair with a gateway first)'))
+      // The real SaveSettings validates before it writes: an unpaired agent is
+      // refused and nothing is persisted (config.go validateAgent). Mirror that,
+      // or the switcher's error path can't be seen.
+      if (c?.Role === 'agent' && !(config.Agent.CertFingerprint && config.Agent.GatewayHost)) {
+        return Promise.reject(new Error('agent.cert_fingerprint: required (pair with a gateway first)'))
       }
       if (c?.Role) becomeRole(c.Role)
       if (c?.Logging) config.Logging = c.Logging
@@ -1167,7 +1165,6 @@ export function installDevMock() {
       state.agentConnected = baseUp
       return ok(undefined)
     },
-    RegenerateToken: () => gated(() => undefined),
     OpenConfigDir: () => ok(undefined),
     OpenExternal: (u: string) => { window.open(u, '_blank'); return ok(undefined) },
     ExportDiagnostics: () => ok('C\\\\Users\\\\you\\\\Downloads\\\\proxyforward-diagnostics.zip'),

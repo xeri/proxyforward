@@ -169,9 +169,8 @@ func (e *Engine) agentAdminOp(op string, body json.RawMessage) (json.RawMessage,
 }
 
 // issuePairingCode mints an enrollment ticket scoped as requested and returns a
-// pxf:// pairing code carrying it — the enrollment analogue of PairingCode (which
-// embeds the legacy shared token). reusable=false is the single-use default; a zero
-// exp never expires.
+// pxf:// pairing code carrying it. reusable=false is the single-use default; a
+// zero exp never expires.
 func (e *Engine) issuePairingCode(reusable bool, exp time.Time, scope gateway.Scope) (string, error) {
 	if e.Gateway == nil {
 		return "", fmt.Errorf("pairing codes come from the gateway role")

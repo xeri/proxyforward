@@ -33,7 +33,6 @@ import (
 	"proxyforward/internal/gateway"
 	"proxyforward/internal/geo"
 	"proxyforward/internal/ipc"
-	"proxyforward/internal/link"
 	"proxyforward/internal/netid"
 	"proxyforward/internal/players"
 	"proxyforward/internal/stats"
@@ -661,29 +660,4 @@ func setStatusConns(st *ipc.Status, snaps []conntrack.Snapshot) {
 		st.ConnectionsTruncated = true
 	}
 	st.Connections = snaps
-}
-
-// PairingCode builds the gateway's pairing code. Empty host falls back to
-// the configured public host, then a placeholder.
-func (e *Engine) PairingCode(host string) (string, error) {
-	if e.Gateway == nil {
-		return "", fmt.Errorf("pairing codes come from the gateway role")
-	}
-	if host == "" {
-		host = e.cfg.Gateway.PublicHost
-	}
-	if host == "" {
-		host = "YOUR-PUBLIC-ADDRESS"
-	}
-	addr := e.Gateway.ControlAddr()
-	if addr == nil {
-		return "", fmt.Errorf("gateway is still starting")
-	}
-	code := link.PairingCode{
-		Host:        host,
-		Port:        addr.(*net.TCPAddr).Port,
-		Token:       e.cfg.Gateway.Token,
-		Fingerprint: e.Gateway.Fingerprint(),
-	}
-	return code.String(), nil
 }

@@ -18,7 +18,6 @@ func agentConfig() *config.Config {
 	cfg.Agent.AgentID = config.NewID()
 	cfg.Agent.GatewayHost = "gw.example.com"
 	cfg.Agent.GatewayPort = 8474
-	cfg.Agent.Token = config.NewToken()
 	cfg.Agent.CertFingerprint = "sha256:" + strings.Repeat("ab", 32)
 	cfg.Agent.Tunnels = []config.Tunnel{{
 		ID: config.NewID(), Name: "mc", Type: config.TunnelTCP,
@@ -30,7 +29,7 @@ func agentConfig() *config.Config {
 func gatewayConfig() *config.Config {
 	cfg := config.Default()
 	cfg.Role = config.RoleGateway
-	cfg.Gateway.Token = config.NewToken()
+	cfg.Gateway.PublicHost = "gw.example.com"
 	return cfg
 }
 
@@ -108,11 +107,11 @@ func TestRoundTrip(t *testing.T) {
 				t.Fatalf("imported role: got %q want %q", loaded.Role, tc.cfg.Role)
 			}
 			if tc.cfg.Role == config.RoleAgent {
-				if loaded.Agent.AgentID != tc.cfg.Agent.AgentID || loaded.Agent.Token != tc.cfg.Agent.Token {
+				if loaded.Agent.AgentID != tc.cfg.Agent.AgentID || loaded.Agent.CertFingerprint != tc.cfg.Agent.CertFingerprint {
 					t.Fatal("agent identity did not survive the round trip")
 				}
-			} else if loaded.Gateway.Token != tc.cfg.Gateway.Token {
-				t.Fatal("gateway token did not survive the round trip")
+			} else if loaded.Gateway.PublicHost != tc.cfg.Gateway.PublicHost {
+				t.Fatal("gateway config did not survive the round trip")
 			}
 			// Source files land byte-identical.
 			for _, name := range tc.wantFiles {

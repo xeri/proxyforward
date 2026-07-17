@@ -116,6 +116,7 @@ persisted to config.
 | Key exchange | X25519MLKEM768 (PQ hybrid, Go default; `CurvePreferences` unset) | `link/cert.go`, `link/pq_test.go` |
 | Agent identity | Ed25519 (`agent_identity.key`, PKCS#8 PEM, `0600`); `agentID` = `agt_` + 16-char Crockford base32 of sha256(pubkey)[:10] = 80 bits | `link/cred.go LoadOrCreateIdentity agentFingerprintBytes` |
 | Enrollment ticket | `tkt_` + 128-bit nonce; single-use default, reusable optional; TTL caller-set, 0 = never (UI single-use default 10 min) | `link/cred.go NewEnrollTicket`, `gateway/agentstore.go IssueEnrollment` |
+| Bootstrap pairing code | headless first start, empty roster only: one single-use ticket, TTL 60 min, printed to the console | `gateway.go bootstrapTicketTTL RunStarted` |
 | Agent allowlist | `gateway_agents.json` (`0600`, atomic write + AV-retry): identity + scope + desired config per agent | `gateway/agentstore.go AgentStore` |
 | Pairing code | `pxf://host:port/v1/pair/<tkt>#sha256:<64hex>`, ≤ 512 B before parse | `link/pairing.go ParsePairingCode` |
 | Agent auth | Ed25519 proof-of-possession over `proxyforward-agent-auth-v1` + gateway cert FP — no bearer token in steady state | `link/cred.go AgentAuthMessage` |

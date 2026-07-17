@@ -1,11 +1,14 @@
 import {ReactNode} from 'react'
-import {ExportDiagnostics, OpenConfigDir, PairingCode, RestartEngine} from '../wailsjs/go/app/App'
 import {
-  IconCopy, IconExternal, IconFolder, IconKey, IconMonitor, IconMoon, IconRefresh, IconSun,
+  ExportDiagnostics, OpenConfigDir, RestartEngine, StartEngine, StopEngine,
+} from '../wailsjs/go/app/App'
+import {
+  IconCopy, IconExternal, IconFolder, IconKey, IconMonitor, IconMoon, IconPlay, IconRefresh,
+  IconStop, IconSun,
 } from './components/icons'
 import {copyText} from './components/ui'
 import {navFor, NavId} from './nav'
-import {UIStatus} from './state'
+import {runStateOf, UIStatus} from './state'
 import {setThemePref} from './theme'
 
 export type CommandCtx = {
@@ -54,11 +57,6 @@ export const COMMANDS: Command[] = [
     run: () => setThemePref('system'),
   },
   {
-    id: 'copy-pairing', title: 'Copy shared-token code', hint: 'Legacy — prefer per-agent enrollment', icon: <IconKey size={15} />, section: 'Actions',
-    when: ctx => ctx.status.role === 'gateway' && ctx.status.mode === 'engine',
-    run: () => PairingCode().then(copyText).catch(() => {}),
-  },
-  {
     id: 'copy-public-ip', title: 'Copy public address', icon: <IconCopy size={15} />, section: 'Actions',
     when: ctx => !!ctx.status.publicIp,
     run: ctx => copyText(ctx.status.publicIp),
@@ -72,6 +70,22 @@ export const COMMANDS: Command[] = [
     id: 'restart-engine', title: 'Restart engine', hint: 'Reconnects with current settings', icon: <IconRefresh size={15} />, section: 'Actions',
     when: ctx => ctx.status.mode === 'engine',
     run: () => RestartEngine().catch(() => {}),
+  },
+  {
+    id: 'start-engine', title: 'Start engine', hint: 'Bring the tunnel back up', icon: <IconPlay size={15} />, section: 'Actions',
+    when: ctx => runStateOf(ctx.status) === 'stopped',
+    run: () => StartEngine().catch(() => {}),
+  },
+  {
+    // The palette closes on run and cannot host a confirm dialog, so a stop
+    // that would drop players hands off to Overview, where the count-naming
+    // confirm lives. An empty tunnel stops here directly.
+    id: 'stop-engine', title: 'Stop engine', hint: 'Cut the tunnel', icon: <IconStop size={15} />, section: 'Actions',
+    when: ctx => runStateOf(ctx.status) === 'running',
+    run: ctx => {
+      if ((ctx.status.connections ?? []).length > 0) { ctx.go('overview'); return }
+      StopEngine(false).catch(() => {})
+    },
   },
   {
     id: 'export-diagnostics', title: 'Export diagnostics', hint: 'Redacted support bundle', icon: <IconExternal size={15} />, section: 'Actions',

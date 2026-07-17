@@ -134,29 +134,51 @@ func Run(ctx context.Context, cfg *config.Config, dir string, logger *slog.Logge
 	return RunStarted(ctx, New(cfg, dir, logger), cfg, logger)
 }
 
-// RunStarted runs an already-constructed Gateway to completion: start, print
-// the pairing code, wait for ctx, shut down. Callers that need the instance
-// (status surfaces) construct it themselves and pass it in.
+// bootstrapTicketTTL bounds the single-use pairing code RunStarted prints on a
+// first (empty-roster) start. Long enough to walk to the other machine and paste
+// it; short enough that a forgotten console line is not a standing credential.
+const bootstrapTicketTTL = 60 * time.Minute
+
+// RunStarted runs an already-constructed Gateway to completion: start, print a
+// bootstrap pairing code when the roster is empty, wait for ctx, shut down.
+// Callers that need the instance (status surfaces) construct it themselves and
+// pass it in.
 func RunStarted(ctx context.Context, g *Gateway, cfg *config.Config, logger *slog.Logger) error {
 	if err := g.Start(ctx); err != nil {
 		return err
 	}
-	code := link.PairingCode{
-		Host:        "YOUR-PUBLIC-ADDRESS",
-		Port:        g.ControlAddr().(*net.TCPAddr).Port,
-		Token:       cfg.Gateway.Token,
-		Fingerprint: g.Fingerprint(),
+	// First start only: with no agent enrolled, nothing can connect and a headless
+	// operator has no GUI to mint a code with — so mint one single-use bootstrap
+	// ticket. A non-empty roster prints nothing: codes are minted on demand, and
+	// nothing stands that nobody asked for.
+	if len(g.ListAgents()) == 0 {
+		host := cfg.Gateway.PublicHost
+		if host == "" {
+			host = "YOUR-PUBLIC-ADDRESS"
+		}
+		ticket, err := g.IssuePairingTicket(false, time.Now().Add(bootstrapTicketTTL), Scope{})
+		if err != nil {
+			logger.Error("bootstrap pairing ticket", "err", err)
+		} else {
+			code := link.PairingCode{
+				Host:        host,
+				Port:        g.ControlAddr().(*net.TCPAddr).Port,
+				Token:       ticket,
+				Fingerprint: g.Fingerprint(),
+			}
+			// The pairing code is a live credential, so it goes to the console and
+			// nowhere else. slog would fan it out to three places that outlive the
+			// moment: the rotating log file, the GUI ring, and — because app/tools.go
+			// ships both verbatim — every diagnostics bundle. Bundles are built to be
+			// handed to someone else, and redacting the config there is worth nothing
+			// while the same credential rides along in cleartext inside a logged
+			// pairing code. stdout is transient and unshipped; the GUI never needed
+			// this line (it mints codes over IPC), and the CLI operator reads it off
+			// the console they're standing at.
+			logger.Info("gateway ready — bootstrap pairing code printed on the console")
+			fmt.Printf("\npair your first agent with this single-use code (replace YOUR-PUBLIC-ADDRESS with this machine's public hostname or IP):\n\n    %s\n\n", code.String())
+		}
 	}
-	// The pairing code embeds the shared gateway token, so it goes to the console and
-	// nowhere else. slog would fan it out to three places that outlive the moment: the
-	// rotating log file, the GUI ring, and — because app/tools.go ships both verbatim
-	// — every diagnostics bundle. Bundles are built to be handed to someone else, and
-	// redactConfig masking Gateway.Token there is worth nothing while the same token
-	// rides along in cleartext inside a logged pairing code. stdout is transient and
-	// unshipped; the GUI never needed this line (it mints codes over IPC — app.go
-	// PairingCode), and the CLI operator reads it off the console they're standing at.
-	logger.Info("gateway ready — pairing code printed on the console")
-	fmt.Printf("\npair agents with this code (replace YOUR-PUBLIC-ADDRESS with this machine's public hostname or IP):\n\n    %s\n\n", code.String())
 	<-ctx.Done()
 	g.Shutdown()
 	return nil

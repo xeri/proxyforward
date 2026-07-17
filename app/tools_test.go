@@ -17,12 +17,10 @@ func sampleConfig() *config.Config {
 	cfg := config.Default()
 	cfg.Role = config.RoleAgent
 	cfg.Agent.AgentID = "AGENTIDSECRET"
-	cfg.Agent.Token = "AGENTTOKENSECRET"
 	cfg.Agent.GatewayHost = "gw.secret.example.com"
 	cfg.Agent.CertFingerprint = "sha256:deadbeefsecret"
 	cfg.Agent.EnrollTicket = "tkt_ENROLLTICKETSECRET"
 	cfg.Agent.Tunnels = []config.Tunnel{{ID: "t1", Name: "mc", LocalAddr: "10.9.8.7:25565"}}
-	cfg.Gateway.Token = "GWTOKENSECRET"
 	cfg.Gateway.PublicHost = "public.secret.example.com"
 	cfg.Gateway.BindAddr = "192.168.50.1"
 	cfg.Metrics.PrometheusAddr = "127.0.0.99:9464"
@@ -35,14 +33,14 @@ func TestRedactConfigMasksEverySecret(t *testing.T) {
 	r := redactConfig(cfg)
 
 	secrets := []string{
-		"AGENTIDSECRET", "AGENTTOKENSECRET", "gw.secret.example.com",
-		"deadbeefsecret", "10.9.8.7", "GWTOKENSECRET",
+		"AGENTIDSECRET", "gw.secret.example.com",
+		"deadbeefsecret", "10.9.8.7",
 		"public.secret.example.com", "192.168.50.1", "127.0.0.99",
 		"ENROLLTICKETSECRET",
 	}
-	blob := r.Agent.AgentID + r.Agent.Token + r.Agent.GatewayHost + r.Agent.CertFingerprint +
+	blob := r.Agent.AgentID + r.Agent.GatewayHost + r.Agent.CertFingerprint +
 		r.Agent.EnrollTicket +
-		r.Gateway.Token + r.Gateway.PublicHost + r.Gateway.BindAddr + r.Metrics.PrometheusAddr
+		r.Gateway.PublicHost + r.Gateway.BindAddr + r.Metrics.PrometheusAddr
 	for _, t2 := range r.Agent.Tunnels {
 		blob += t2.LocalAddr
 	}
@@ -160,10 +158,10 @@ func TestDiagnosticsHealthPseudonymisesHostnames(t *testing.T) {
 // bundle is only as shareable as its leakiest file. It previously passed ring=nil
 // into an empty dir, so the two *unredacted* channels — the GUI ring and the on-disk
 // log files — were never populated and the secret sweep below ran over an empty set.
-// That blind spot is how a logged pairing code (which embeds Gateway.Token verbatim)
-// shipped in cleartext while config.redacted.toml sat right beside it masking the
-// same token. The logger here is the real production fan-out, so the ring and the
-// rotating file are filled the way they are in a live process.
+// That blind spot is how a logged pairing code (which embeds a live enrollment
+// ticket verbatim) shipped in cleartext while config.redacted.toml sat right beside
+// it masking the same credential. The logger here is the real production fan-out, so
+// the ring and the rotating file are filled the way they are in a live process.
 func TestWriteDiagnosticsNoLeaks(t *testing.T) {
 	dir := t.TempDir()
 	// Seed a stats.json with a client IP that must not leak.
@@ -183,7 +181,7 @@ func TestWriteDiagnosticsNoLeaks(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger.Info("pairing code", "code",
-		"pxf://"+cfg.Gateway.PublicHost+":8474/v1/pair/"+cfg.Gateway.Token+"#"+cfg.Agent.CertFingerprint)
+		"pxf://"+cfg.Gateway.PublicHost+":8474/v1/pair/"+cfg.Agent.EnrollTicket+"#"+cfg.Agent.CertFingerprint)
 	logger.Info("agent connected", "agentId", cfg.Agent.AgentID, "gateway", cfg.Agent.GatewayHost)
 	logger.Warn("dial failed", "local", cfg.Agent.Tunnels[0].LocalAddr, "bind", cfg.Gateway.BindAddr)
 	if err := closeLog(); err != nil {
@@ -195,8 +193,8 @@ func TestWriteDiagnosticsNoLeaks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(onDisk), cfg.Gateway.Token) {
-		t.Fatal("setup bug: the seeded log does not contain the token, so this test would pass vacuously")
+	if !strings.Contains(string(onDisk), cfg.Agent.EnrollTicket) {
+		t.Fatal("setup bug: the seeded log does not contain the ticket, so this test would pass vacuously")
 	}
 
 	// health.txt used to be handed in ready-made — the test passed the literal

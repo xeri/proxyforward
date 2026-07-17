@@ -148,8 +148,13 @@ func newPairCmd() *cobra.Command {
 			}
 			cfg.Agent.GatewayHost = code.Host
 			cfg.Agent.GatewayPort = code.Port
-			cfg.Agent.Token = code.Token
 			cfg.Agent.CertFingerprint = code.Fingerprint
+			// Identity enrollment is the only auth path: the code must carry a
+			// tkt_ enrollment ticket, not a legacy shared token.
+			if !link.IsEnrollTicket(code.Token) {
+				return fmt.Errorf("this pairing code is from an old gateway build — generate a fresh code on the gateway and pair with that")
+			}
+			cfg.Agent.EnrollTicket = code.Token
 			if len(cfg.Agent.Tunnels) == 0 {
 				cfg.Agent.Tunnels = []config.Tunnel{{
 					// The only tunnel, so nothing is taken yet — a typed tnl_ id
@@ -207,13 +212,9 @@ func newRoleCmd(role config.Role, short string) *cobra.Command {
 			if cfg.Role != role {
 				return fmt.Errorf("config %s has role %q; refusing to run as %q (pass --config or fix the config)", configPath, cfg.Role, role)
 			}
-			// First-run bootstrap: identities and tokens are generated once
-			// and must persist before validation demands them.
+			// First-run bootstrap: identities are generated once and must
+			// persist before validation demands them.
 			changed := false
-			if role == config.RoleGateway && cfg.Gateway.Token == "" {
-				cfg.Gateway.Token = config.NewToken()
-				changed = true
-			}
 			if role == config.RoleAgent && cfg.Agent.AgentID == "" {
 				cfg.Agent.AgentID = config.NewID()
 				changed = true

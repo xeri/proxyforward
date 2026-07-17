@@ -53,8 +53,8 @@ export function RoleSwitcher({status, onPair}: {status: UIStatus; onPair: () => 
   }, [status.role])
 
   // "Paired" is exactly what validateAgent demands before it will let the role
-  // be saved (config.go): a gateway host and a token.
-  const paired = !!(cfg?.Agent?.Token && cfg?.Agent?.GatewayHost)
+  // be saved (config.go): a gateway host and the pinned cert fingerprint.
+  const paired = !!(cfg?.Agent?.CertFingerprint && cfg?.Agent?.GatewayHost)
 
   // Hovering a role previews its whole world: [data-role] remaps the accent
   // ramp and the registered --accent property (tokens.css) cross-fades every

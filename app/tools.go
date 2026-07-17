@@ -112,8 +112,8 @@ func writeDiagnostics(path string, cfg *config.Config, configDir string, status 
 	}
 
 	// Logs ship with the config's own secrets masked. Without this the redaction
-	// above is theatre: config.redacted.toml hides Gateway.Token while a log line
-	// three files over spells it out.
+	// above is theatre: config.redacted.toml hides Agent.EnrollTicket while a log
+	// line three files over spells it out.
 	scrub := newLogScrubber(cfg)
 
 	// logs-recent.txt — the GUI ring (what the user was just looking at).
@@ -171,9 +171,8 @@ func newLogScrubber(cfg *config.Config) *logScrubber {
 	}
 	// Mirrors redactConfig field for field: whatever is a secret in the config is a
 	// secret in the logs. If a field is added there, add it here.
-	add(cfg.Gateway.Token, secret)
-	add(cfg.Agent.Token, secret)
 	add(cfg.Agent.AgentID, secret)
+	add(cfg.Agent.EnrollTicket, secret)
 	add(cfg.Agent.CertFingerprint, secret)
 	add(cfg.Gateway.PublicHost, host)
 	add(cfg.Gateway.BindAddr, host)
@@ -227,17 +226,11 @@ func redactConfig(cfg *config.Config) config.Config {
 	const secret = "[redacted]"
 	const host = "[redacted-host]"
 	r := *cfg
-	if r.Gateway.Token != "" {
-		r.Gateway.Token = secret
-	}
 	if r.Gateway.PublicHost != "" {
 		r.Gateway.PublicHost = host
 	}
 	if r.Gateway.BindAddr != "" {
 		r.Gateway.BindAddr = host
-	}
-	if r.Agent.Token != "" {
-		r.Agent.Token = secret
 	}
 	if r.Agent.AgentID != "" {
 		r.Agent.AgentID = secret

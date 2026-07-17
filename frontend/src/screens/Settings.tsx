@@ -1,7 +1,7 @@
 import {ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react'
 import {
   BrowseMMDB, CreatorAvatar, CreatorInfo, FirewallRepair, FirewallStatus, GeoStatus, GetConfig,
-  InstallService, OpenConfigDir, OpenCreatorURL, OpenExternal, PairingCode, RegenerateToken,
+  InstallService, OpenConfigDir, OpenCreatorURL, OpenExternal,
   RestartEngine, SaveSettings, ServiceStatus, UninstallService,
 } from '../../wailsjs/go/app/App'
 import {config, geo} from '../../wailsjs/go/models'
@@ -195,17 +195,7 @@ export function Settings({status}: {status: UIStatus}) {
           )}
 
           {!isAgent && (
-            <Section id="security" title="Security" subtitle="Pairing and abuse limits, enforced at the gateway.">
-              <FormRow
-                label="Shared token (legacy)"
-                hint="The one standing code every shared-token agent uses. Prefer per-agent enrollment codes (Overview or the Agents screen). Anyone who has this code can connect an agent — never share it publicly; rotating it disconnects shared-token agents until they re-pair."
-              >
-                <div className="flex items-center gap-2">
-                  <CopyPairingCode attached={attached} />
-                  <TokenRotate attached={attached} onDone={reload} />
-                </div>
-              </FormRow>
-              <Divider />
+            <Section id="security" title="Security" subtitle="Abuse limits, enforced at the gateway. Pairing codes live on Overview and the Agents screen.">
               <div className="pt-1 text-sm font-medium text-[var(--text)]">Abuse limits</div>
               <div className="mt-2 grid grid-cols-3 gap-3">
                 <Field label="Max connections"><TextInput mono value={numStr(cfg.Gateway.MaxConnsGlobal)} placeholder={String(DEF.maxConnsGlobal)}
@@ -492,47 +482,6 @@ function FxRow() {
       label="Reduce glass effects"
       hint="Turns off card blur and moving reflections. Helps on low-end GPUs."
     />
-  )
-}
-
-/** CopyPairingCode: copies the full pairing code (the string an agent pairs
- * with — it embeds the token) without having to reveal it on screen. Engine
- * mode only: attached, the service owns the config and the code isn't
- * readable from here. */
-function CopyPairingCode({attached}: {attached: boolean}) {
-  const [code, setCode] = useState('')
-  useEffect(() => {
-    if (attached) return
-    let cancelled = false
-    PairingCode().then(c => { if (!cancelled) setCode(c) }).catch(() => {})
-    return () => { cancelled = true }
-  }, [attached])
-  if (attached || !code) return null
-  return <CopyButton text={code} size="sm" label="Copy code" />
-}
-
-function TokenRotate({attached, onDone}: {attached: boolean; onDone: () => void}) {
-  const [busy, setBusy] = useState(false)
-  const [confirm, setConfirm] = useState(false)
-  const [err, setErr] = useState('')
-  const rotate = async () => {
-    setBusy(true); setErr('')
-    try { await RegenerateToken(); setConfirm(false); onDone() }
-    catch (e) { setErr(String(e)) }
-    finally { setBusy(false) }
-  }
-  if (attached) return <span className="text-xs text-[var(--text-3)]">Rotate from the service's own config</span>
-  return (
-    <div className="flex flex-col items-end gap-1">
-      {confirm
-        ? <div className="pf-fade flex items-center gap-2">
-            <span className="text-xs text-[var(--warn)]">Disconnect agents?</span>
-            <Button variant="ghost" size="sm" onClick={() => setConfirm(false)}>No</Button>
-            <Button variant="danger" size="sm" onClick={rotate} disabled={busy}>{busy ? '…' : 'Rotate'}</Button>
-          </div>
-        : <Button variant="ghost" size="sm" onClick={() => setConfirm(true)}><IconRefresh size={14} /> Rotate</Button>}
-      {err && <span className="text-xs text-[var(--bad)]">{err}</span>}
-    </div>
   )
 }
 

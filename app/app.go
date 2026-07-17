@@ -608,9 +608,6 @@ func (a *App) SetupGateway(publicHost string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cfg.Role = config.RoleGateway
-	if a.cfg.Gateway.Token == "" {
-		a.cfg.Gateway.Token = config.NewToken()
-	}
 	a.cfg.Gateway.PublicHost = publicHost
 	if err := a.cfg.Save(a.configPath); err != nil {
 		return err
@@ -643,17 +640,14 @@ func (a *App) SetupAgent(pairingCode, localAddr string, publicPort int) error {
 	a.cfg.Agent.GatewayHost = code.Host
 	a.cfg.Agent.GatewayPort = code.Port
 	a.cfg.Agent.CertFingerprint = code.Fingerprint
-	// The code's token is self-describing: a tkt_ ticket enrolls a per-agent
-	// identity (the default), a bare-hex token is legacy shared-token auth. Route it
-	// to exactly one field — the composite validator treats a failed enrollment as
-	// definitive (no shared-token fallback), so the two must never both be set.
-	if link.IsEnrollTicket(code.Token) {
-		a.cfg.Agent.EnrollTicket = code.Token
-		a.cfg.Agent.Token = ""
-	} else {
-		a.cfg.Agent.Token = code.Token
-		a.cfg.Agent.EnrollTicket = ""
+	// Identity enrollment is the only auth path: the code must carry a tkt_
+	// enrollment ticket. A bare-hex payload is a legacy shared-token code from an
+	// old gateway build, and pairing with it would only fail at the hello — say
+	// so now, with the fix.
+	if !link.IsEnrollTicket(code.Token) {
+		return fmt.Errorf("this pairing code is from an old gateway build — generate a fresh code on the gateway (Overview, or the Agents screen) and pair with that")
 	}
+	a.cfg.Agent.EnrollTicket = code.Token
 	if localAddr == "" {
 		localAddr = "127.0.0.1:25565"
 	}
@@ -677,16 +671,6 @@ func (a *App) SetupAgent(pairingCode, localAddr string, publicPort int) error {
 	}
 	a.startEngineLocked()
 	return nil
-}
-
-// PairingCode returns the gateway's pairing code (engine mode, gateway role).
-func (a *App) PairingCode() (string, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.eng == nil {
-		return "", fmt.Errorf("engine is not running in this process")
-	}
-	return a.eng.PairingCode("")
 }
 
 // ---- Config ----
@@ -910,37 +894,6 @@ func (a *App) RestartEngine() error {
 		return nil
 	}
 	if err := a.cfg.Validate(); err != nil {
-		return err
-	}
-	a.startEngineLocked()
-	return nil
-}
-
-// RegenerateToken issues a fresh gateway auth token (gateway role only) and
-// restarts the engine so it takes effect immediately. Existing agents must
-// re-pair with the new pairing code — that is the point of rotating it.
-func (a *App) RegenerateToken() error {
-	a.engMu.Lock()
-	defer a.engMu.Unlock()
-	if err := a.refuseIfAttached("the engine runs in another process (service or headless run); rotate the token there"); err != nil {
-		return err
-	}
-	// Both guards precede the stop: refusing after it would leave the engine
-	// down for a verb that never ran.
-	a.mu.Lock()
-	role := a.cfg.Role
-	a.mu.Unlock()
-	if role != config.RoleGateway {
-		return fmt.Errorf("only the gateway issues pairing tokens")
-	}
-	if err := a.stopEngine(); err != nil {
-		return err
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.cfg.Gateway.Token = config.NewToken()
-	if err := a.cfg.Save(a.configPath); err != nil {
 		return err
 	}
 	a.startEngineLocked()

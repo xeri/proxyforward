@@ -68,8 +68,6 @@ export function OpenCreatorURL():Promise<void>;
 
 export function OpenExternal(arg1:string):Promise<void>;
 
-export function PairingCode():Promise<string>;
-
 export function PeakMatrix(arg1:number):Promise<analytics.PeakMatrix>;
 
 export function PeerStats():Promise<Array<stats.PeerStat>>;
@@ -85,8 +83,6 @@ export function Players(arg1:analytics.PlayersQuery):Promise<analytics.PlayersPa
 export function ProposeAgentConfig(arg1:string,arg2:Array<control.TunnelSpec>):Promise<void>;
 
 export function ReclaimPort(arg1:string,arg2:string,arg3:number):Promise<void>;
-
-export function RegenerateToken():Promise<void>;
 
 export function RejectAgentProposal(arg1:string,arg2:string,arg3:string):Promise<void>;
 

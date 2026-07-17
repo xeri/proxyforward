@@ -17,8 +17,8 @@ P-256 cert, pinned by SHA-256 fingerprint carried out-of-band in the pairing cod
 `pxf://host:port/v1/pair/<token>#sha256:<hex>` (`link/pairing.go`,
 `cert.go GatewayTLSConfig`/`AgentTLSConfig`). `pxf` doubles as the OS deep-link
 scheme; `/v1/pair/` is a format-version + role marker so a wrong-kind link fails
-loudly rather than half-working. Token and fingerprint compare in constant time
-(`crypto/subtle` — `gateway.go handleControlConn`, `cert.go`).
+loudly rather than half-working. The pinned fingerprint compares in constant time
+(`crypto/subtle` — `cert.go fingerprintEqual`).
 
 **Per-agent identity is the trust model.** Each agent proves possession of a
 long-term Ed25519 key the gateway allowlists. Its derived `agentID` (`agt_…`) is
@@ -157,9 +157,9 @@ standard non-admin one and every RDP session. It used to grant exactly that, und
 a comment claiming it admitted "the interactive user".
 
 The pipe is not a status feed: `OpIssuePairing`, `OpRevokeAgent` and
-`OpSetAgentScope` ride the same envelope, and a pairing code carries the gateway
-token. So on any machine with a second account, that account could mint a pairing
-code, enroll its own agent, or revoke the real one — and against a service-mode
+`OpSetAgentScope` ride the same envelope, and a pairing code carries a live
+enrollment ticket. So on any machine with a second account, that account could
+mint a pairing code, enroll its own agent, or revoke the real one — and against a service-mode
 daemon (LocalSystem) that is a local privilege escalation to a SYSTEM service's
 security policy. A wider ACL here is a hole straight through the one `secureio`
 installs (`TestPipeDeniesOtherInteractiveUsers`).
@@ -215,6 +215,6 @@ them safe to share. `writeDiagnostics` now renders everything it redacts.
 of the config's own secrets (`tools.go logScrubber`).
 
 **Never log a secret.** The scrubber is a net, not a licence — it only knows the
-values config holds. The pairing code embeds the gateway token, so it goes to the
-console, never through `slog`: slog fans out to the rotating file, the GUI ring, and
-every bundle (`gateway.go RunStarted`).
+values config holds. The pairing code embeds a live enrollment ticket, so it goes
+to the console, never through `slog`: slog fans out to the rotating file, the GUI
+ring, and every bundle (`gateway.go RunStarted`).

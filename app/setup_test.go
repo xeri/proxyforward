@@ -35,7 +35,7 @@ func testAgentConfig() *config.Config {
 	cfg.Agent.AgentID = config.NewID()
 	cfg.Agent.GatewayHost = "127.0.0.1"
 	cfg.Agent.GatewayPort = 1 // nothing listens; the agent just retries
-	cfg.Agent.Token = config.NewToken()
+	cfg.Agent.CertFingerprint = "sha256:" + strings.Repeat("ab", 32)
 	return cfg
 }
 
@@ -58,7 +58,7 @@ func TestImportSetupRoundTrip(t *testing.T) {
 	if dst.cfg.Role != config.RoleAgent {
 		t.Fatalf("imported role: got %q", dst.cfg.Role)
 	}
-	if dst.cfg.Agent.AgentID != src.cfg.Agent.AgentID || dst.cfg.Agent.Token != src.cfg.Agent.Token {
+	if dst.cfg.Agent.AgentID != src.cfg.Agent.AgentID || dst.cfg.Agent.CertFingerprint != src.cfg.Agent.CertFingerprint {
 		t.Fatal("imported identity differs from the exported one")
 	}
 	if _, err := os.Stat(dst.configPath); err != nil {

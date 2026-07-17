@@ -179,7 +179,6 @@ func newGatewayEngine(t *testing.T, metricsEnabled bool, metricsAddr string) *En
 	cfg.Role = config.RoleGateway
 	cfg.Gateway.BindAddr = "127.0.0.1"
 	cfg.Gateway.ControlPort = borrowPort(t)
-	cfg.Gateway.Token = "test-token"
 	cfg.Metrics.PrometheusEnabled = metricsEnabled
 	cfg.Metrics.PrometheusAddr = metricsAddr
 	if err := cfg.Validate(); err != nil {

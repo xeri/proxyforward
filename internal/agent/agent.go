@@ -63,7 +63,10 @@ const (
 // Fatal configuration errors: retrying cannot fix these, so Run returns
 // instead of hammering the gateway.
 var (
-	ErrBadToken = errors.New("gateway rejected our token — re-pair with the gateway's current pairing code")
+	ErrBadToken = errors.New("gateway rejected our credentials — re-pair with the gateway's current pairing code")
+	// ErrNoIdentity: the Ed25519 identity key can't be loaded or created, and it
+	// is the only authenticator — nothing to fall back to, so retrying is futile.
+	ErrNoIdentity = errors.New("agent identity key unavailable — check the config directory and agent_identity.key permissions")
 	// ErrAgentConflict is retained for back-compat: a current gateway admits
 	// several agents and never sends agent_conflict, but a legacy single-agent
 	// gateway still can, and the agent must treat it as fatal rather than retry.
@@ -197,15 +200,14 @@ func (a *Agent) identity() (ed25519.PrivateKey, ed25519.PublicKey, error) {
 
 // authFields returns the per-agent identity fields for a hello: the public key, a
 // proof-of-possession signature bound to the gateway's pinned fingerprint, and any
-// pending enrollment ticket. All empty if the identity can't be loaded, so the
-// hello falls back to shared-token auth.
-func (a *Agent) authFields() (pub, sig []byte, ticket string) {
+// pending enrollment ticket. The identity is the only authenticator, so a load
+// failure is ErrNoIdentity — fatal, not a degraded retry.
+func (a *Agent) authFields() (pub, sig []byte, ticket string, err error) {
 	priv, pubKey, err := a.identity()
 	if err != nil {
-		a.logger.Warn("agent identity unavailable; using shared token", "err", err)
-		return nil, nil, ""
+		return nil, nil, "", fmt.Errorf("%w: %v", ErrNoIdentity, err)
 	}
-	return pubKey, link.SignAgentAuth(priv, a.cfg.Agent.CertFingerprint), a.cfg.Agent.EnrollTicket
+	return pubKey, link.SignAgentAuth(priv, a.cfg.Agent.CertFingerprint), a.cfg.Agent.EnrollTicket, nil
 }
 
 // SetCapabilityOffer overrides the capabilities offered in the hello
@@ -218,10 +220,7 @@ func (a *Agent) SetCapabilityOffer(caps []string) { a.offerCaps = caps }
 // + config-consent) plus per-conn-data only for the per-conn transport —
 // deliberately NOT control.SupportedCapabilities, which would offer per-conn
 // regardless and force it on every agent. QUIC and mux offer no per-conn-data (QUIC
-// rides the mux data plane; the auto ladder computes this per rung). gateway-config
-// and config-consent are offered by every agent but the gateway negotiates them away
-// unless the agent is enrolled (both are keyed to a durable identity), so a
-// shared-token agent falls back to tunnel-sync.
+// rides the mux data plane; the auto ladder computes this per rung).
 func offerFor(transport string) []string {
 	caps := []string{control.CapTunnelSync, control.CapConnStats, control.CapGatewayConfig, control.CapConfigConsent}
 	if transport == config.TransportPerConn {
@@ -358,7 +357,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if errors.Is(err, ErrBadToken) || errors.Is(err, ErrAgentConflict) || errors.Is(err, ErrVersion) || errors.Is(err, ErrRevoked) {
+		if isFatal(err) {
 			a.logger.Error("giving up: configuration problem", "err", err)
 			return err
 		}
@@ -558,7 +557,7 @@ func (a *Agent) ActiveTransport() string {
 
 // isFatal reports whether an error means retrying (on any transport) is futile.
 func isFatal(err error) bool {
-	return errors.Is(err, ErrBadToken) || errors.Is(err, ErrAgentConflict) || errors.Is(err, ErrVersion) || errors.Is(err, ErrRevoked)
+	return errors.Is(err, ErrBadToken) || errors.Is(err, ErrAgentConflict) || errors.Is(err, ErrVersion) || errors.Is(err, ErrRevoked) || errors.Is(err, ErrNoIdentity)
 }
 
 // connectMux dials the gateway over TCP+TLS, performs the pre-mux hello exchange
@@ -639,7 +638,10 @@ type helloConn interface {
 func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (control.CapSet, error) {
 	rw.SetDeadline(time.Now().Add(helloTimeout))
 	hn, _ := os.Hostname()
-	pub, sig, ticket := a.authFields()
+	pub, sig, ticket, err := a.authFields()
+	if err != nil {
+		return nil, err
+	}
 	// Report our gateway-config view only when offering the capability, so an agent
 	// that doesn't participate sends a hello byte-identical to a legacy peer.
 	var cfgHash string
@@ -650,8 +652,6 @@ func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (
 	if err := control.WriteMsg(rw, control.TypeHello, control.Hello{
 		ProtocolVersion:  control.ProtocolVersion,
 		Kind:             control.KindControl,
-		AgentID:          a.cfg.Agent.AgentID,
-		Token:            a.cfg.Agent.Token,
 		AppVersion:       version.String(),
 		Capabilities:     offer,
 		Hostname:         hn,
@@ -1150,12 +1150,17 @@ func (s *session) dialBackData(connID string) {
 		return
 	}
 	conn.SetDeadline(time.Now().Add(helloTimeout))
-	pub, sig, _ := s.agent.authFields()
+	pub, sig, _, err := s.agent.authFields()
+	if err != nil {
+		// The control conn authenticates with the same identity, so a load failure
+		// has already killed the session fatally; this dial-back just gives up.
+		s.agent.logger.Debug("per-conn dial-back has no identity", "conn_id", connID, "err", err)
+		conn.Close()
+		return
+	}
 	err = control.WriteMsg(conn, control.TypeHello, control.Hello{
 		ProtocolVersion: control.ProtocolVersion,
 		Kind:            control.KindData,
-		AgentID:         s.agent.cfg.Agent.AgentID,
-		Token:           s.agent.cfg.Agent.Token,
 		ConnID:          connID,
 		AgentPubKey:     pub,
 		AgentSig:        sig,

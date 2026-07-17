@@ -75,13 +75,12 @@ type Config struct {
 }
 
 type AgentConfig struct {
-	// AgentID is a persistent random identity; reconnects with the same ID
-	// supersede the previous session, a different ID on the same token is
-	// rejected while one is connected.
+	// AgentID is this agent's identity label; reconnects with the same ID
+	// supersede the previous session. The gateway derives the authoritative
+	// agt_ id from the agent's Ed25519 key at enrollment.
 	AgentID         string   `toml:"agent_id"`
 	GatewayHost     string   `toml:"gateway_host"`
 	GatewayPort     int      `toml:"gateway_port"`
-	Token           string   `toml:"token"`
 	CertFingerprint string   `toml:"cert_fingerprint"` // "sha256:<hex>" of the gateway's pinned cert
 	Transport       string   `toml:"transport"`        // "auto" | "quic" | "per-conn" | "mux"
 	Tunnels         []Tunnel `toml:"tunnels"`
@@ -123,7 +122,6 @@ type TunnelOptions struct {
 type GatewayConfig struct {
 	BindAddr    string `toml:"bind_addr"`
 	ControlPort int    `toml:"control_port"`
-	Token       string `toml:"token"`
 	// PublicHost is the address players and agents reach this gateway at
 	// (ideally a stable DNS name); it is embedded in pairing codes. Optional —
 	// codes fall back to a placeholder the user replaces.
@@ -146,11 +144,6 @@ type GatewayConfig struct {
 	// Default on; a missing key inherits that (Load overlays onto Default). Set
 	// false to serve TCP transports only.
 	QUICEnabled bool `toml:"quic_enabled"`
-	// AcceptSharedToken keeps the legacy one-token-for-all authenticator enabled
-	// alongside per-agent identity, so an existing fleet can migrate gradually.
-	// Default on (Load overlays onto Default); set false once every agent has
-	// enrolled to fully close the shared-token supersede/port-squat risk.
-	AcceptSharedToken bool `toml:"accept_shared_token"`
 }
 
 // EngineConfig holds the tunnel run's persisted lifecycle. It is a section of
@@ -216,7 +209,6 @@ func Default() *Config {
 			AuthAttemptsPerMin: 10,
 			MaxTunnelsPerAgent: 32,
 			QUICEnabled:        true,
-			AcceptSharedToken:  true,
 		},
 		Metrics: MetricsConfig{
 			PrometheusAddr: "127.0.0.1:9464",
@@ -239,15 +231,6 @@ func Default() *Config {
 // NewID returns a 16-byte random hex identifier (agent IDs, tunnel IDs).
 func NewID() string {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic(fmt.Sprintf("crypto/rand unavailable: %v", err))
-	}
-	return hex.EncodeToString(b[:])
-}
-
-// NewToken returns a 32-byte random hex token for gateway auth.
-func NewToken() string {
-	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		panic(fmt.Sprintf("crypto/rand unavailable: %v", err))
 	}
@@ -287,8 +270,8 @@ func (c *Config) Save(path string) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 	dir := filepath.Dir(path)
-	// The config holds the gateway/agent tokens and the enrollment ticket, and the
-	// temp+rename below inherits the directory's ACL rather than any mode of its own.
+	// The config can hold a live enrollment ticket, and the temp+rename below
+	// inherits the directory's ACL rather than any mode of its own.
 	if err := secureio.MkdirAll(dir); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
@@ -372,10 +355,9 @@ func (c *Config) validateAgent() []error {
 	if err := validPort(a.GatewayPort); err != nil {
 		errs = append(errs, fmt.Errorf("agent.gateway_port: %w", err))
 	}
-	if a.Token == "" {
-		errs = append(errs, errors.New("agent.token: required (pair with a gateway first)"))
-	}
-	if a.CertFingerprint != "" && !strings.HasPrefix(a.CertFingerprint, "sha256:") {
+	if a.CertFingerprint == "" {
+		errs = append(errs, errors.New("agent.cert_fingerprint: required (pair with a gateway first)"))
+	} else if !strings.HasPrefix(a.CertFingerprint, "sha256:") {
 		errs = append(errs, fmt.Errorf("agent.cert_fingerprint: must start with \"sha256:\", got %q", a.CertFingerprint))
 	}
 	switch a.Transport {
@@ -454,9 +436,6 @@ func (c *Config) validateGateway() []error {
 	}
 	if g.BindAddr != "" && net.ParseIP(g.BindAddr) == nil {
 		errs = append(errs, fmt.Errorf("gateway.bind_addr: not an IP address: %q", g.BindAddr))
-	}
-	if g.Token == "" {
-		errs = append(errs, errors.New("gateway.token: required (generated on first gateway start)"))
 	}
 	for _, p := range g.PortAllowlist {
 		if err := validPort(p); err != nil {

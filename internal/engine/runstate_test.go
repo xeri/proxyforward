@@ -58,7 +58,6 @@ func newTestEngine(t *testing.T, roleRun func(context.Context) error) *Engine {
 	cfg.Role = config.RoleGateway
 	cfg.Gateway.BindAddr = "127.0.0.1"
 	cfg.Gateway.ControlPort = port
-	cfg.Gateway.Token = "test-token"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("config: %v", err)
 	}

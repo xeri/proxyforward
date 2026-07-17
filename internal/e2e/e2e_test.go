@@ -135,7 +135,6 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 
 	gwCfg := config.Default()
 	gwCfg.Role = config.RoleGateway
-	gwCfg.Gateway.Token = config.NewToken()
 	gwCfg.Gateway.BindAddr = "127.0.0.1"
 	gwCfg.Gateway.ControlPort = 0 // ephemeral
 	if opts.tweakGateway != nil {

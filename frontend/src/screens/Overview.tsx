@@ -1,6 +1,6 @@
 import {ReactNode, useEffect, useRef, useState} from 'react'
 import {
-  ApproveGatewayProposal, GetConfig, IssuePairingCode, MeasureLatency, PairingCode,
+  ApproveGatewayProposal, IssuePairingCode, MeasureLatency,
   RejectGatewayProposal, RestartEngine,
 } from '../../wailsjs/go/app/App'
 import {prefersReduced} from '../motion'
@@ -9,7 +9,7 @@ import {proposalAge, ProposalDiff, specsOf, useAgentConsent} from '../consent'
 import {BandwidthPanel} from '../components/BandwidthChart'
 import {NumberTicker} from '../components/NumberTicker'
 import {
-  Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, Disclosure, ErrorBanner,
+  Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, ErrorBanner,
   IconButton, Overline, PageHeader, RoleWord, SignalCard, StatTile, StatusDot, TextInput,
 } from '../components/ui'
 import {Emblem} from '../components/Emblem'
@@ -566,32 +566,17 @@ function PlayerAddressStrip({status, onNavigate}: {status: UIStatus; onNavigate:
   )
 }
 
-/** GatewayPairingStrip: enrollment front and centre. The primary code is a
- * single-use enrollment ticket (IssuePairingCode) — the modern per-agent identity
- * path — and the deprecated shared token moves behind an Advanced disclosure, shown
- * only while the gateway still accepts it (config.AcceptSharedToken). Both codes rest
- * masked (screen-share safe) with an eye toggle; copy works without revealing. */
+/** GatewayPairingStrip: enrollment front and centre. The code is a single-use
+ * enrollment ticket (IssuePairingCode) enrolling one agent's Ed25519 identity. It
+ * rests masked (screen-share safe) with an eye toggle; copy works without
+ * revealing. */
 function GatewayPairingStrip() {
-  const [acceptShared, setAcceptShared] = useState(false)
-  useEffect(() => {
-    let cancelled = false
-    GetConfig().then(c => { if (!cancelled) setAcceptShared(!!c.Gateway?.AcceptSharedToken) }).catch(() => {})
-    return () => { cancelled = true }
-  }, [])
   return (
     <Card pad={false}>
       <div className="space-y-3 px-5 py-3.5">
         <PairingCodeRow
           label="Pairing code" hint="Single-use · enrolls one agent, expires in 10 min"
           fetch={() => IssuePairingCode(false, 600, [], [])} reissuable />
-        {acceptShared && (
-          <Disclosure label="Advanced · legacy shared token"
-            hint="One standing code shared by every agent — weaker than per-agent enrollment. Prefer the code above.">
-            <PairingCodeRow
-              label="Shared token" hint="Rotate it in Settings if it leaks — one leak re-pairs every shared-token agent."
-              fetch={() => PairingCode()} stacked />
-          </Disclosure>
-        )}
       </div>
     </Card>
   )

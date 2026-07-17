@@ -927,7 +927,6 @@ export namespace config {
 	    AgentID: string;
 	    GatewayHost: string;
 	    GatewayPort: number;
-	    Token: string;
 	    CertFingerprint: string;
 	    Transport: string;
 	    Tunnels: Tunnel[];
@@ -942,7 +941,6 @@ export namespace config {
 	        this.AgentID = source["AgentID"];
 	        this.GatewayHost = source["GatewayHost"];
 	        this.GatewayPort = source["GatewayPort"];
-	        this.Token = source["Token"];
 	        this.CertFingerprint = source["CertFingerprint"];
 	        this.Transport = source["Transport"];
 	        this.Tunnels = this.convertValues(source["Tunnels"], Tunnel);
@@ -1044,7 +1042,6 @@ export namespace config {
 	export class GatewayConfig {
 	    BindAddr: string;
 	    ControlPort: number;
-	    Token: string;
 	    PublicHost: string;
 	    PortAllowlist: number[];
 	    MaxConnsGlobal: number;
@@ -1052,7 +1049,6 @@ export namespace config {
 	    AuthAttemptsPerMin: number;
 	    MaxTunnelsPerAgent: number;
 	    QUICEnabled: boolean;
-	    AcceptSharedToken: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GatewayConfig(source);
@@ -1062,7 +1058,6 @@ export namespace config {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.BindAddr = source["BindAddr"];
 	        this.ControlPort = source["ControlPort"];
-	        this.Token = source["Token"];
 	        this.PublicHost = source["PublicHost"];
 	        this.PortAllowlist = source["PortAllowlist"];
 	        this.MaxConnsGlobal = source["MaxConnsGlobal"];
@@ -1070,7 +1065,6 @@ export namespace config {
 	        this.AuthAttemptsPerMin = source["AuthAttemptsPerMin"];
 	        this.MaxTunnelsPerAgent = source["MaxTunnelsPerAgent"];
 	        this.QUICEnabled = source["QUICEnabled"];
-	        this.AcceptSharedToken = source["AcceptSharedToken"];
 	    }
 	}
 	export class Config {

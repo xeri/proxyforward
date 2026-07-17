@@ -218,26 +218,6 @@ func TestStopEngineReportsAnUncleanStop(t *testing.T) {
 	}
 }
 
-// TestRegenerateTokenRefusesBeforeStopping: both of its guards precede the
-// stop, so a verb that cannot run does not cost the user their engine.
-func TestRegenerateTokenRefusesBeforeStopping(t *testing.T) {
-	a := newTestAppDir(t, testAgentConfig()) // agent role: cannot issue tokens
-	done := wedgeEngine(t, a)
-	defer close(done)
-
-	if err := a.RegenerateToken(); err == nil {
-		t.Fatal("RegenerateToken on an agent succeeded, want a refusal")
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.cancel == nil {
-		t.Error("the refused verb stopped the engine anyway")
-	}
-	if a.mode != ModeEngine {
-		t.Errorf("mode = %q after a refused verb, want %q", a.mode, ModeEngine)
-	}
-}
-
 // TestImportRefusesOverAnUncleanStop: the imported files must not land while
 // the old engine may still hold the store — a late stats flush would clobber
 // exactly what was just imported (Windows file locking makes it worse).

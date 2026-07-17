@@ -12,7 +12,6 @@ func validAgentConfig() *Config {
 	cfg.Role = RoleAgent
 	cfg.Agent.AgentID = NewID()
 	cfg.Agent.GatewayHost = "gw.example.com"
-	cfg.Agent.Token = NewToken()
 	cfg.Agent.CertFingerprint = "sha256:" + strings.Repeat("ab", 32)
 	cfg.Agent.Tunnels = []Tunnel{{
 		ID:         NewID(),
@@ -28,7 +27,6 @@ func validAgentConfig() *Config {
 func validGatewayConfig() *Config {
 	cfg := Default()
 	cfg.Role = RoleGateway
-	cfg.Gateway.Token = NewToken()
 	return cfg
 }
 
@@ -55,8 +53,8 @@ func TestRoundTrip(t *testing.T) {
 			if got.Role != cfg.Role {
 				t.Errorf("role: got %q want %q", got.Role, cfg.Role)
 			}
-			if got.Agent.Token != cfg.Agent.Token {
-				t.Errorf("agent token did not round-trip")
+			if got.Agent.CertFingerprint != cfg.Agent.CertFingerprint {
+				t.Errorf("agent cert fingerprint did not round-trip")
 			}
 			if len(got.Agent.Tunnels) != len(cfg.Agent.Tunnels) {
 				t.Fatalf("tunnels: got %d want %d", len(got.Agent.Tunnels), len(cfg.Agent.Tunnels))
@@ -100,7 +98,7 @@ func TestValidateCatches(t *testing.T) {
 	}{
 		"bad role":            {func(c *Config) { c.Role = "banana" }, "role:"},
 		"agent missing host":  {func(c *Config) { c.Agent.GatewayHost = "" }, "gateway_host"},
-		"agent missing token": {func(c *Config) { c.Agent.Token = "" }, "agent.token"},
+		"missing fingerprint": {func(c *Config) { c.Agent.CertFingerprint = "" }, "cert_fingerprint"},
 		"bad fingerprint":     {func(c *Config) { c.Agent.CertFingerprint = "md5:zz" }, "cert_fingerprint"},
 		"bad transport":       {func(c *Config) { c.Agent.Transport = "carrier-pigeon" }, "transport"},
 		"bad tunnel type":     {func(c *Config) { c.Agent.Tunnels[0].Type = "sctp" }, "type"},
@@ -190,7 +188,6 @@ func TestValidateGatewayCatches(t *testing.T) {
 		mutate  func(*Config)
 		wantSub string
 	}{
-		"missing token":  {func(c *Config) { c.Gateway.Token = "" }, "gateway.token"},
 		"bad bind addr":  {func(c *Config) { c.Gateway.BindAddr = "not-an-ip" }, "bind_addr"},
 		"bad allowlist":  {func(c *Config) { c.Gateway.PortAllowlist = []int{0} }, "port_allowlist"},
 		"zero conn caps": {func(c *Config) { c.Gateway.MaxConnsPerIP = 0 }, "max_conns_per_ip"},
@@ -221,8 +218,5 @@ func TestSaveRefusesInvalid(t *testing.T) {
 func TestIDsAreUnique(t *testing.T) {
 	if a, b := NewID(), NewID(); a == b {
 		t.Error("NewID returned duplicates")
-	}
-	if len(NewToken()) != 64 {
-		t.Errorf("token should be 64 hex chars, got %d", len(NewToken()))
 	}
 }
