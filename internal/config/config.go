@@ -67,6 +67,7 @@ type Config struct {
 	Role      Role            `toml:"role"`
 	Agent     AgentConfig     `toml:"agent"`
 	Gateway   GatewayConfig   `toml:"gateway"`
+	Engine    EngineConfig    `toml:"engine"`
 	Metrics   MetricsConfig   `toml:"metrics"`
 	Logging   LoggingConfig   `toml:"logging"`
 	UI        UIConfig        `toml:"ui"`
@@ -150,6 +151,17 @@ type GatewayConfig struct {
 	// Default on (Load overlays onto Default); set false once every agent has
 	// enrolled to fully close the shared-token supersede/port-squat risk.
 	AcceptSharedToken bool `toml:"accept_shared_token"`
+}
+
+// EngineConfig holds the tunnel run's persisted lifecycle. It is a section of
+// its own because it is not the agent's or the gateway's — it is the run both
+// roles share, and it survives restart and reboot so a deliberate stop is not
+// silently undone by the next launch.
+type EngineConfig struct {
+	// Stopped means the operator turned the tunnel off. The daemon still
+	// starts and serves the pipe; only the run stays down until StartEngine.
+	// Default false: a fresh install is on.
+	Stopped bool `toml:"stopped"`
 }
 
 type MetricsConfig struct {

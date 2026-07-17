@@ -275,7 +275,14 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.serveMetrics(runCtx)
 	}()
 
-	if err := e.StartRun(); err != nil {
+	// A persisted stop is honored here, at the one place both the GUI-hosted
+	// and the service/headless launch pass through: the supervisor comes up and
+	// serves the pipe, but the tunnel stays down until StartRun. So a stopped
+	// service runs and answers, it just proxies nothing — and a reboot does not
+	// quietly undo an operator's decision to be off.
+	if e.cfg.Engine.Stopped {
+		e.logger.Info("engine configured stopped; supervisor up, tunnel run held")
+	} else if err := e.StartRun(); err != nil {
 		e.logger.Error("engine run failed to start", "err", err)
 	}
 

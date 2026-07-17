@@ -2,12 +2,30 @@ package app
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
 	"proxyforward/internal/config"
 	"proxyforward/internal/engine"
 )
+
+// waitStatus polls a.Status() until pred holds, then returns that snapshot.
+func waitStatus(t *testing.T, a *App, pred func(UIStatus) bool) UIStatus {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		st := a.Status()
+		if pred(st) {
+			return st
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status never satisfied predicate (last: mode %q runState %q)", st.Mode, st.RunState)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
 
 // wedgeEngine hands a an engine that never finishes unwinding, and returns the
 // done channel that releases it. It fakes the handles rather than starting a
@@ -65,6 +83,59 @@ func TestStopEngineKeepsTheConfiguredMode(t *testing.T) {
 	}
 	if st := a.Status(); st.RunState != string(engine.RunRunning) {
 		t.Errorf("runState after start = %q, want %q", st.RunState, engine.RunRunning)
+	}
+}
+
+// TestStopPersistsAcrossRelaunch: a deliberate stop must survive restart and
+// reboot. The app writes [engine] stopped, and a fresh launch reading that
+// config brings the supervisor up but holds the run down — a stopped service
+// still answers its pipe, it just proxies nothing.
+func TestStopPersistsAcrossRelaunch(t *testing.T) {
+	cfgPath := t.TempDir() + "/config.toml"
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// First launch: configured, running, then stopped.
+	a1 := New(cfgPath, testAgentConfig(), nil, logger)
+	if err := a1.StartEngine(); err != nil {
+		t.Fatalf("StartEngine: %v", err)
+	}
+	if err := a1.StopEngine(false); err != nil {
+		t.Fatalf("StopEngine: %v", err)
+	}
+	a1.Shutdown(context.Background())
+
+	// The intent is on disk.
+	reloaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if !reloaded.Engine.Stopped {
+		t.Fatal("[engine] stopped was not persisted")
+	}
+
+	// Second launch reads it: supervisor up (mode engine), run held down.
+	a2 := New(cfgPath, reloaded, nil, logger)
+	a2.mu.Lock()
+	a2.startEngineLocked()
+	a2.mu.Unlock()
+	defer a2.Shutdown(context.Background())
+
+	st := waitStatus(t, a2, func(s UIStatus) bool { return s.RunState != "" })
+	if st.Mode != ModeEngine {
+		t.Errorf("mode = %q, want %q — a stopped daemon still owns its role", st.Mode, ModeEngine)
+	}
+	if st.RunState != string(engine.RunStopped) {
+		t.Errorf("runState = %q, want %q — the persisted stop was not honored", st.RunState, engine.RunStopped)
+	}
+
+	// And Start clears it again.
+	if err := a2.StartEngine(); err != nil {
+		t.Fatalf("StartEngine after relaunch: %v", err)
+	}
+	if reloaded2, err := config.Load(cfgPath); err != nil {
+		t.Fatalf("reload: %v", err)
+	} else if reloaded2.Engine.Stopped {
+		t.Error("StartEngine did not clear the persisted stop")
 	}
 }
 

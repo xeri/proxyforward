@@ -788,6 +788,11 @@ func (a *App) StopEngine(force bool) error {
 	a.mu.Lock()
 	eng := a.eng
 	a.mu.Unlock()
+	// Persist the intent before the stop, not after: a crash mid-drain must
+	// still relaunch stopped, because the operator already decided. Best-effort
+	// and never a reason to skip the stop — stop always completes, and a failed
+	// write only risks the next launch disagreeing.
+	a.persistStopped(true)
 	if eng == nil {
 		return nil // nothing configured, or already down
 	}
@@ -814,6 +819,9 @@ func (a *App) StartEngine() error {
 		// ErrRunStopping especially, where a fresh daemon would race the old
 		// run for the ports it has not released yet.
 		if !errors.Is(err, engine.ErrNoSupervisor) {
+			if err == nil {
+				a.persistStopped(false)
+			}
 			return err
 		}
 	}
@@ -829,8 +837,28 @@ func (a *App) StartEngine() error {
 	if err := a.cfg.Validate(); err != nil {
 		return err
 	}
+	// Clear the persisted stop before the rebuild: startEngineLocked runs the
+	// supervisor, which reads this flag and would otherwise hold the run down
+	// exactly when the operator asked for it up.
+	a.cfg.Engine.Stopped = false
+	if err := a.cfg.Save(a.configPath); err != nil {
+		return fmt.Errorf("persist started state: %w", err)
+	}
 	a.startEngineLocked()
 	return nil
+}
+
+// persistStopped records the run's on/off intent so it survives restart and
+// reboot. It takes a.mu itself; callers must not hold it. A failed write is
+// logged, not fatal — the run is already in the asked-for state, and the worst
+// case is the next launch disagreeing, which the operator can redo.
+func (a *App) persistStopped(stopped bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfg.Engine.Stopped = stopped
+	if err := a.cfg.Save(a.configPath); err != nil {
+		a.logger.Error("persist engine stopped state", "stopped", stopped, "err", err)
+	}
 }
 
 // RestartEngine bounces the in-process engine to pick up settings changes.
