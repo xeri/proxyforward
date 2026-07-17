@@ -218,12 +218,20 @@ export function StartEngine() {
   return window['go']['app']['App']['StartEngine']();
 }
 
+export function StartService() {
+  return window['go']['app']['App']['StartService']();
+}
+
 export function Status() {
   return window['go']['app']['App']['Status']();
 }
 
 export function StopEngine(arg1) {
   return window['go']['app']['App']['StopEngine'](arg1);
+}
+
+export function StopService() {
+  return window['go']['app']['App']['StopService']();
 }
 
 export function Summary(arg1) {

@@ -365,6 +365,10 @@ func newElevatedTaskCmd() *cobra.Command {
 				return svc.InstallService(args[1:])
 			case svc.TaskUninstallService:
 				return svc.UninstallService()
+			case svc.TaskStartService:
+				return svc.StartService()
+			case svc.TaskStopService:
+				return svc.StopService()
 			default:
 				return fmt.Errorf("unknown elevated task %q", args[0])
 			}

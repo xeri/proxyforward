@@ -118,9 +118,13 @@ export function SetupGateway(arg1:string):Promise<void>;
 
 export function StartEngine():Promise<void>;
 
+export function StartService():Promise<void>;
+
 export function Status():Promise<app.UIStatus>;
 
 export function StopEngine(arg1:boolean):Promise<void>;
+
+export function StopService():Promise<void>;
 
 export function Summary(arg1:number):Promise<analytics.Summary>;
 

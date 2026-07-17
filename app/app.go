@@ -1055,6 +1055,26 @@ func (a *App) UninstallService() error {
 	return svc.RunElevatedTask(svc.TaskUninstallService)
 }
 
+// StartService starts the installed Windows service via the elevation helper.
+// SCM control needs admin even to start a service someone else installed, so
+// this takes the same elevated path as install/uninstall.
+func (a *App) StartService() error {
+	if svc.IsElevated() {
+		return svc.StartService()
+	}
+	return svc.RunElevatedTask(svc.TaskStartService)
+}
+
+// StopService stops the running Windows service via the elevation helper. In
+// service mode this is what the GUI's Stop reaches for — the run belongs to the
+// service, and stopping the service is how you turn it off.
+func (a *App) StopService() error {
+	if svc.IsElevated() {
+		return svc.StopService()
+	}
+	return svc.RunElevatedTask(svc.TaskStopService)
+}
+
 // ---- Tools ----
 
 // TestReachability checks the full public path of a tunnel: dial the

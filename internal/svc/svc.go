@@ -21,4 +21,6 @@ const (
 	TaskRemoveFirewall   = "remove-firewall"
 	TaskInstallService   = "install-service"
 	TaskUninstallService = "uninstall-service"
+	TaskStartService     = "start-service"
+	TaskStopService      = "stop-service"
 )
