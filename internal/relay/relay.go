@@ -6,6 +6,8 @@
 //     before close still arrives intact instead of becoming a raw reset.
 //   - Every write refreshes a progress deadline, so a peer that stops
 //     draining can never park the splice goroutines forever.
+//   - A splice that moves no bytes in *either* direction for IdleTimeout is
+//     reaped, so neither can a peer that simply never speaks.
 //   - Copies use pooled 128 KiB buffers (io.Copy's default 32 KiB throttles
 //     chunk-load bursts on fat pipes).
 package relay
@@ -15,6 +17,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -31,6 +34,29 @@ const BufSize = 128 * 1024
 // the splice declares the peer dead. Generous: a healthy but slow client
 // drains something well within this.
 const WriteStallTimeout = 2 * time.Minute
+
+// DefaultIdleTimeout is how long a splice may move no bytes in *either*
+// direction before it is reaped. It bounds what a peer that connects and then
+// says nothing can hold: without it such a peer is free, permanent, and
+// amplified — the agent dials the local server on open_conn, before any client
+// byte, so one silent socket costs a Minecraft connection slot too.
+//
+// Calibrated for Minecraft, which this tunnel exists to carry: an in-game
+// connection exchanges a KeepAlive every ~15 s (the client is kicked at 30 s of
+// silence), so this is over 30× the longest silence the protocol permits, and
+// still far more generous than a typical reverse proxy's read timeout. A tunnel
+// carrying some other protocol that idles for hours by design (an open RCON or
+// SSH session) would be cut; SpliceOpts.IdleTimeout is the per-splice override,
+// and no caller sets it today.
+//
+// It is not a slowloris cure on its own — a peer dribbling one byte per window
+// stays alive — it makes holding a connection cost something. The per-network
+// conn cap (gateway `limits.go connGate`) is what bounds how many they get.
+const DefaultIdleTimeout = 10 * time.Minute
+
+// ErrIdle is what a reaped splice reports, so the log names the cause instead of
+// showing a bare i/o timeout that reads like a network fault.
+var ErrIdle = errors.New("relay: no bytes in either direction within the idle timeout")
 
 var bufPool = sync.Pool{
 	New: func() any {
@@ -70,6 +96,21 @@ type SpliceOpts struct {
 	Ctx       context.Context
 	LimitAToB Limiter
 	LimitBToA Limiter
+	// IdleTimeout overrides DefaultIdleTimeout for this splice. Zero means the
+	// default — never "no timeout", because a caller that forgets the field must
+	// end up protected, not exposed.
+	IdleTimeout time.Duration
+}
+
+// splice is the state the two directions share. progress is the whole design:
+// idleness is a property of the *connection*, not of a direction. A client
+// downloading a modpack sends nothing for the length of the transfer, so a
+// per-direction read deadline would cut off every large download; one clock that
+// either direction refreshes keeps that connection alive and still reaps one
+// where nothing at all is happening.
+type splice struct {
+	idle     time.Duration
+	progress atomic.Int64 // UnixNano of the last byte moved in either direction
 }
 
 // Splice pumps bytes both ways until both directions have finished, then
@@ -103,17 +144,23 @@ func Splice(a, b Conn, counters *Counters, opts SpliceOpts) error {
 		defer cancel()
 	}
 
+	sp := &splice{idle: opts.IdleTimeout}
+	if sp.idle <= 0 {
+		sp.idle = DefaultIdleTimeout
+	}
+	sp.progress.Store(time.Now().UnixNano())
+
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		errA = copyHalf(b, a, cA, ctx, opts.LimitAToB) // a -> b
+		errA = sp.copyHalf(b, a, cA, ctx, opts.LimitAToB) // a -> b
 		if errA != nil {
 			cancel()
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		errB = copyHalf(a, b, cB, ctx, opts.LimitBToA) // b -> a
+		errB = sp.copyHalf(a, b, cB, ctx, opts.LimitBToA) // b -> a
 		if errB != nil {
 			cancel()
 		}
@@ -135,14 +182,21 @@ func Splice(a, b Conn, counters *Counters, opts SpliceOpts) error {
 // sees EOF while the opposite direction keeps flowing. When lim is non-nil it
 // waits for n tokens before each write; a cancelled wait (teardown) tears the
 // half down like a write error.
-func copyHalf(dst, src Conn, count *atomic.Int64, ctx context.Context, lim Limiter) error {
+func (s *splice) copyHalf(dst, src Conn, count *atomic.Int64, ctx context.Context, lim Limiter) error {
 	bufp := bufPool.Get().(*[]byte)
 	defer bufPool.Put(bufp)
 	buf := *bufp
 
+	// Armed once, not before every Read. The deadline is absolute, so a busy
+	// direction never trips it (its Reads return long first) and a quiet one
+	// trips it at most once per idle window and re-arms in stillLive. That keeps
+	// the read loop free of per-iteration deadline churn on the hot path.
+	src.SetReadDeadline(time.Now().Add(s.idle))
+
 	for {
 		n, rerr := src.Read(buf)
 		if n > 0 {
+			s.progress.Store(time.Now().UnixNano())
 			if lim != nil {
 				// Throttle before writing. n ≤ BufSize = the limiter's burst, so
 				// WaitN only blocks for the rate delay, never errors on burst.
@@ -172,12 +226,49 @@ func copyHalf(dst, src Conn, count *atomic.Int64, ctx context.Context, lim Limit
 				dst.SetWriteDeadline(time.Time{})
 				return dst.CloseWrite()
 			}
+			if live, rearmed := s.stillLive(src, rerr); rearmed {
+				continue // quiet in this direction only; the splice is working
+			} else if !live {
+				dst.CloseWrite()
+				return ErrIdle
+			}
 			// Read error: tear down the write side of dst too — there is
 			// nothing more to forward and the conn is likely dead.
 			dst.CloseWrite()
 			return rerr
 		}
 	}
+}
+
+// stillLive interprets a read error against the shared progress clock.
+//
+// rearmed: the error was our own idle deadline, but the opposite direction has
+// moved bytes inside the window, so this direction is merely quiet. The deadline
+// is pushed to one window past the last byte and the caller reads on. Both halves
+// re-arm off the same clock, so when traffic does stop they converge and reap
+// together.
+//
+// live=false: our idle deadline fired and nothing moved either way for the whole
+// window. Nothing is coming; reap.
+//
+// Anything else is a real read error and is not ours to interpret.
+func (s *splice) stillLive(src Conn, rerr error) (live, rearmed bool) {
+	var ne net.Error
+	// Every transport under this reports a read deadline as a net.Error with
+	// Timeout() true: the stdlib's os.ErrDeadlineExceeded, yamux's *NetError,
+	// quic-go's *deadlineError. Misreading one as a hard error would kill healthy
+	// connections every window, so accept the interface, not a concrete type.
+	if !errors.As(rerr, &ne) || !ne.Timeout() {
+		if !errors.Is(rerr, os.ErrDeadlineExceeded) {
+			return true, false
+		}
+	}
+	last := time.Unix(0, s.progress.Load())
+	if time.Since(last) >= s.idle {
+		return false, false
+	}
+	src.SetReadDeadline(last.Add(s.idle))
+	return true, true
 }
 
 // isExpectedCloseErr filters the errors a normal teardown produces: EOFs,

@@ -174,6 +174,16 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   other direction drains — a disconnect message written just before close arrives
   intact (`relay_test.go`, e2e `TestFinalBytesThroughTunnel`). Every write refreshes
   a progress deadline so a parked peer can't leak a goroutine.
+- **Idleness is a property of the splice, never of a direction.** A splice moving no
+  bytes *either* way for `DefaultIdleTimeout` is reaped (`ErrIdle`); both halves share
+  one progress clock, because a client downloading says nothing for the whole transfer
+  and a per-direction read deadline would cut every large download
+  (`TestSpliceIdleReaperSparesAOneWayTransfer`). A peer that connects and never speaks
+  is not free: the agent dials the local server on `open_conn`, before any client byte,
+  so it costs a Minecraft slot too (`TestSpliceReapsAConnectionThatNeverSpeaks`). The
+  deadline is armed once and re-armed only when it fires, so the read loop stays clean.
+  Read deadlines are recognised via `net.Error.Timeout()`, never a concrete type — every
+  transport spells it differently and misreading one kills healthy connections hourly.
 - No Nagle anywhere: Go's default `TCP_NODELAY` end-to-end, set explicitly on the
   agent's dials (`SetNoDelay` in `agent.go dialGateway` — control conn and every
   per-conn data conn — and `handleDataStream` for the local dial); the yamux

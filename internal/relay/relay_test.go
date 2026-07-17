@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -34,6 +35,83 @@ func tcpPair(t *testing.T) (*net.TCPConn, *net.TCPConn) {
 	}
 	server := <-ch
 	return c.(*net.TCPConn), server
+}
+
+// TestSpliceReapsAConnectionThatNeverSpeaks is the slowloris test. A peer that
+// connects and says nothing used to park both copy goroutines on Read forever:
+// there was a deadline on every Write but none on any Read, so "a peer that
+// stops draining can never park the splice" was only half true, and the missing
+// half was the one an attacker controls.
+//
+// What one silent connection pinned: two goroutines and two pooled 128 KiB
+// buffers on each side, the gateway's conn-gate slot — and, because the agent
+// dials the local server the moment open_conn lands and before any player byte,
+// a real connection to the Minecraft server. So the cost was a socket for the
+// attacker and a Minecraft slot plus half a megabyte for the victim, held until
+// the process restarted. Nothing else reclaimed it: TCP keepalive only detects a
+// peer that has *gone*, not one that is deliberately quiet.
+func TestSpliceReapsAConnectionThatNeverSpeaks(t *testing.T) {
+	clientSide, a := tcpPair(t)
+	b, serverSide := tcpPair(t)
+	defer clientSide.Close()
+	defer serverSide.Close()
+
+	done := make(chan error, 1)
+	go func() { done <- Splice(a, b, nil, SpliceOpts{IdleTimeout: 150 * time.Millisecond}) }()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrIdle) {
+			t.Errorf("reaped with %v, want ErrIdle so the log says why", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a splice that moved no bytes in either direction was never reaped")
+	}
+}
+
+// TestSpliceIdleReaperSparesAOneWayTransfer pins the reaper's unit: the splice,
+// not the direction. Silence in one direction is not idleness — a client
+// downloading a 200 MiB modpack says nothing for the whole transfer, and a
+// per-direction read deadline would cut it off mid-stream every idle window.
+// Both halves share one progress clock, so a byte either way keeps both alive.
+func TestSpliceIdleReaperSparesAOneWayTransfer(t *testing.T) {
+	clientSide, a := tcpPair(t)
+	b, serverSide := tcpPair(t)
+	defer clientSide.Close()
+
+	const idle = 200 * time.Millisecond
+	done := make(chan error, 1)
+	go func() { done <- Splice(a, b, nil, SpliceOpts{IdleTimeout: idle}) }()
+
+	// The server dribbles downstream for 3× the idle window. The client never
+	// says a word — which is exactly what a big download looks like.
+	const beats = 12
+	go func() {
+		for range beats {
+			if _, err := serverSide.Write([]byte("x")); err != nil {
+				return
+			}
+			time.Sleep(idle / 4)
+		}
+	}()
+
+	got := make([]byte, beats)
+	clientSide.SetReadDeadline(time.Now().Add(15 * time.Second))
+	if _, err := io.ReadFull(clientSide, got); err != nil {
+		t.Fatalf("the transfer died though bytes were flowing the whole time: %v", err)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("splice returned mid-transfer: %v", err)
+	default:
+	}
+
+	// Both peers hang up: an ordinary end, and the reaper must not colour it.
+	serverSide.Close()
+	clientSide.Close()
+	if err := <-done; err != nil {
+		t.Errorf("clean shutdown after a one-way transfer reported %v", err)
+	}
 }
 
 // TestSpliceFinalBytesSurviveHalfClose is the disconnect-message test: one
