@@ -77,7 +77,7 @@ func newReclaimFixture(t *testing.T, requesterEnrolled, incumbentEnrolled bool) 
 		if _, ok := store.AdoptConfig(sess.agentID, []control.TunnelSpec{spec}); !ok {
 			t.Fatalf("seed config for %s", sess.agentID)
 		}
-		if _, err := a.bindTunnel(sess, spec, "127.0.0.1", nil, func(*publicListener, net.Conn) {}); err != nil {
+		if _, err := a.bindTunnel(sess, spec, bindPolicy{bindAddr: "127.0.0.1"}, func(*publicListener, net.Conn) {}); err != nil {
 			t.Fatalf("bind %s: %v", tunnelID, err)
 		}
 	}

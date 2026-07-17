@@ -91,7 +91,7 @@ func TestBindLockedReassignsBusyPort(t *testing.T) {
 		t.Fatalf("admit: %v", err)
 	}
 	spec := control.TunnelSpec{ID: "tnl_smp", Name: "smp", Type: config.TunnelTCP, PublicPort: busy}
-	got, err := a.bindTunnel(sess, spec, "127.0.0.1", nil, func(*publicListener, net.Conn) {})
+	got, err := a.bindTunnel(sess, spec, bindPolicy{bindAddr: "127.0.0.1"}, func(*publicListener, net.Conn) {})
 	if err != nil {
 		t.Fatalf("bindTunnel on busy port should reassign, got err: %v", err)
 	}

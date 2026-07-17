@@ -169,7 +169,7 @@ func newConsentFixture(t *testing.T, caps ...string) *consentFixture {
 		t.Fatal("seed AdoptConfig")
 	}
 	sess.agentConfigGen.Store(gen)
-	if _, err := a.bindTunnel(sess, seed, "127.0.0.1", nil, func(*publicListener, net.Conn) {}); err != nil {
+	if _, err := a.bindTunnel(sess, seed, bindPolicy{bindAddr: "127.0.0.1"}, func(*publicListener, net.Conn) {}); err != nil {
 		t.Fatal(err)
 	}
 	return &consentFixture{g: g, a: a, store: store, sess: sess, ctrl: ctrl, gen: gen}

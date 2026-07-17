@@ -1036,6 +1036,7 @@ export namespace config {
 	    MaxConnsGlobal: number;
 	    MaxConnsPerIP: number;
 	    AuthAttemptsPerMin: number;
+	    MaxTunnelsPerAgent: number;
 	    QUICEnabled: boolean;
 	    AcceptSharedToken: boolean;
 	
@@ -1053,6 +1054,7 @@ export namespace config {
 	        this.MaxConnsGlobal = source["MaxConnsGlobal"];
 	        this.MaxConnsPerIP = source["MaxConnsPerIP"];
 	        this.AuthAttemptsPerMin = source["AuthAttemptsPerMin"];
+	        this.MaxTunnelsPerAgent = source["MaxTunnelsPerAgent"];
 	        this.QUICEnabled = source["QUICEnabled"];
 	        this.AcceptSharedToken = source["AcceptSharedToken"];
 	    }

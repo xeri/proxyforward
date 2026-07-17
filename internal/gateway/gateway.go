@@ -1589,15 +1589,37 @@ func (g *Gateway) validateSpec(spec control.TunnelSpec, scope Scope) *bindError 
 	return nil
 }
 
+// policy reads the gateway's bind-time configuration in one place, so every bind
+// path is governed by the same three answers rather than by whichever ones its
+// call site remembered to pass.
+func (g *Gateway) policy() bindPolicy {
+	return bindPolicy{
+		bindAddr:   g.cfg.Gateway.BindAddr,
+		allowlist:  g.cfg.Gateway.PortAllowlist,
+		maxTunnels: g.cfg.Gateway.MaxTunnelsPerAgent,
+	}
+}
+
+// bindErrCode buckets an actor bind failure into a wire error code. The codes are
+// a coarse, display-only vocabulary (the agent logs code and message, switching on
+// neither), so this exists for one reason: to stop "port_in_use" — which sends an
+// operator hunting for a process that isn't there — standing in for every refusal.
+func bindErrCode(err error) string {
+	if errors.Is(err, errTooManyListeners) {
+		return control.ErrCodePortNotAllowed
+	}
+	return control.ErrCodePortInUse
+}
+
 // bindTunnel validates a spec and asks the actor to bind its public
 // listener; accepted client conns are spliced onto fresh streams.
 func (g *Gateway) bindTunnel(sess *agentSession, spec control.TunnelSpec) (int, *bindError) {
 	if berr := g.validateSpec(spec, sess.scope); berr != nil {
 		return 0, berr
 	}
-	port, err := g.act().bindTunnel(sess, spec, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
+	port, err := g.act().bindTunnel(sess, spec, g.policy(), g.handleClient)
 	if err != nil {
-		return 0, &bindError{control.ErrCodePortInUse, err.Error()}
+		return 0, &bindError{bindErrCode(err), err.Error()}
 	}
 	return port, nil
 }
@@ -1616,7 +1638,7 @@ func (g *Gateway) syncTunnels(sess *agentSession, sync *control.SyncTunnels) con
 		}
 		valid = append(valid, spec)
 	}
-	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
+	outcomes, ran := g.act().reconcile(sess, valid, g.policy(), g.handleClient)
 	if !ran {
 		for _, spec := range valid {
 			results = append(results, control.SyncTunnelResult{TunnelID: spec.ID, Code: control.ErrCodePortInUse, Message: "gateway is shutting down"})
@@ -1626,7 +1648,7 @@ func (g *Gateway) syncTunnels(sess *agentSession, sync *control.SyncTunnels) con
 	for _, o := range outcomes {
 		if o.Err != nil {
 			sess.logger.Warn("tunnel sync bind failed", "tunnel_id", o.ID, "err", o.Err)
-			results = append(results, control.SyncTunnelResult{TunnelID: o.ID, Code: control.ErrCodePortInUse, Message: o.Err.Error()})
+			results = append(results, control.SyncTunnelResult{TunnelID: o.ID, Code: bindErrCode(o.Err), Message: o.Err.Error()})
 			continue
 		}
 		results = append(results, control.SyncTunnelResult{TunnelID: o.ID, OK: true, PublicPort: o.Port})
@@ -1685,7 +1707,7 @@ func (g *Gateway) pushConfigOnConnect(sess *agentSession) {
 	// with no listener behind it. In the common (unchanged-scope) case valid==stored,
 	// so the hash and payload are identical and nothing changes.
 	valid := g.validSpecs(sess, stored)
-	g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
+	g.act().reconcile(sess, valid, g.policy(), g.handleClient)
 	hash := control.HashTunnels(valid)
 	if sess.reportedConfigHash == hash && sess.agentConfigGen.Load() == gen {
 		return // agent is already in sync; listeners are (re)bound, nothing to push
@@ -1707,7 +1729,7 @@ func (g *Gateway) pushConfigOnConnect(sess *agentSession) {
 // shutting down or the agent left the store — nothing was adopted.
 func (g *Gateway) adoptAndPush(sess *agentSession, specs []control.TunnelSpec) (gen uint64, hash string, ok bool) {
 	valid := g.validSpecs(sess, specs)
-	outcomes, ran := g.act().reconcile(sess, valid, g.cfg.Gateway.BindAddr, g.cfg.Gateway.PortAllowlist, g.handleClient)
+	outcomes, ran := g.act().reconcile(sess, valid, g.policy(), g.handleClient)
 	if !ran {
 		return 0, "", false
 	}

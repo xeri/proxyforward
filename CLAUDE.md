@@ -132,6 +132,14 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   it did — let a scoped agent bind a public listener on a port nobody allowed, once
   per invented tunnel id (`TestEphemeralRequestStaysInsideScope`). Any new
   port-granting path uses `allowedPorts` or it is not constrained.
+- **An authenticated agent is bounded too, in every dimension it can grow.** Conns
+  (`connGate`), unauthenticated sockets (`preAuthGate`) and bandwidth (`bwcap`) are
+  capped; **listeners** — the only resource an agent allocates by *asking* — were
+  capped only by its scope, and the default scope is empty. So the default agent
+  could hold a port per invented tunnel id until the host's ephemeral range was gone,
+  taking every other agent with it (`MaxTunnelsPerAgent`, enforced in `actor.go
+  bindLocked`; `TestListenerCapBoundsAnUnscopedAgent`). Count growth, never
+  rebinding, or the cap bricks reconfiguration instead of bounding it.
 - "Unforgeable" above is a claim about **width**, and therefore a security parameter, not
   a display choice: `agentID` is the label the gateway keys supersede, scope, revocation,
   and config on, so it must stay wide enough that no second key answering to a victim's

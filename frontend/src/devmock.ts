@@ -539,7 +539,7 @@ export function installDevMock() {
       Tunnels: [{ID: tunnelID, Name: 'Minecraft', Type: 'tcp', LocalAddr: '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
         Options: {MinecraftAware: true, ProxyProtocolV2: false, OfflineMOTD: 'Server is offline — back soon', BandwidthLimitMbps: 40, BandwidthLimitScope: 'per-direction'}}]},
     Gateway: {BindAddr: '0.0.0.0', ControlPort: 8474, Token: 'tok', PublicHost: 'play.example.com', PortAllowlist: [],
-      MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10, AcceptSharedToken: true},
+      MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10, MaxTunnelsPerAgent: 32, AcceptSharedToken: true},
     Metrics: {PrometheusEnabled: false, PrometheusAddr: '127.0.0.1:9464'},
     Logging: {Level: 'info', FileEnabled: true},
     UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: true, Autostart: false},

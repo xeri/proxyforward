@@ -134,6 +134,12 @@ type GatewayConfig struct {
 	MaxConnsGlobal     int `toml:"max_conns_global"`
 	MaxConnsPerIP      int `toml:"max_conns_per_ip"`
 	AuthAttemptsPerMin int `toml:"auth_attempts_per_min"`
+	// MaxTunnelsPerAgent bounds how many public listeners one agent may hold at
+	// once. Unlike the caps above it limits an *authenticated* peer: listeners are
+	// the only gateway resource an agent allocates by asking, and a scope of ports
+	// is the only thing that bounded them — which the default (empty = any) does
+	// not. Enforced at the bind, in gateway/actor.go bindLocked.
+	MaxTunnelsPerAgent int `toml:"max_tunnels_per_agent"`
 	// QUICEnabled binds a UDP QUIC control listener alongside the TCP one, on the
 	// same port, so agents configured transport="quic" (or "auto") can dial it.
 	// Default on; a missing key inherits that (Load overlays onto Default). Set
@@ -196,6 +202,7 @@ func Default() *Config {
 			MaxConnsGlobal:     4096,
 			MaxConnsPerIP:      32,
 			AuthAttemptsPerMin: 10,
+			MaxTunnelsPerAgent: 32,
 			QUICEnabled:        true,
 			AcceptSharedToken:  true,
 		},
@@ -452,6 +459,9 @@ func (c *Config) validateGateway() []error {
 	}
 	if g.AuthAttemptsPerMin < 1 {
 		errs = append(errs, errors.New("gateway.auth_attempts_per_min: must be >= 1"))
+	}
+	if g.MaxTunnelsPerAgent < 1 {
+		errs = append(errs, errors.New("gateway.max_tunnels_per_agent: must be >= 1"))
 	}
 	return errs
 }

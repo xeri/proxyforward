@@ -175,6 +175,25 @@ func (a *agentSession) closeAll() {
 	})
 }
 
+// bindPolicy is everything the gateway's configuration says about opening a
+// public listener: where to bind, which ports policy permits, and how many
+// listeners one agent may hold. They travel together because every bind decision
+// needs all three, and three loose parameters is how one of them ends up
+// forgotten at a call site — which for a limit means it silently isn't one.
+type bindPolicy struct {
+	bindAddr  string
+	allowlist []int
+	// maxTunnels is the per-agent listener cap; 0 disables it (tests that predate
+	// the cap, never a served config — config.Validate floors it at 1).
+	maxTunnels int
+}
+
+// errTooManyListeners is the per-agent listener cap refusing a bind. A sentinel
+// because the wire's error codes are a coarse vocabulary and the caller has to
+// tell this apart from a genuine port clash: reporting "port_in_use" here would
+// send an operator hunting for a process that does not exist.
+var errTooManyListeners = fmt.Errorf("this agent already holds the most public listeners one agent may have")
+
 // publicListener is one bound public port serving one tunnel of one session.
 type publicListener struct {
 	spec  control.TunnelSpec
@@ -424,12 +443,24 @@ func (a *actor) evict(sess *agentSession, reason string) {
 // across agents (or with an outside process) is caught by net.Listen (global
 // FCFS); rather than fail the tunnel, bindLocked reassigns it to a policy-valid
 // free port and records the clash so the GUI can offer to reclaim the port.
-func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr string, allowlist []int, handle func(*publicListener, net.Conn)) (int, error) {
+func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, pol bindPolicy, handle func(*publicListener, net.Conn)) (int, error) {
 	subtree := a.listeners[sess.agentID]
 	if old, ok := subtree[spec.ID]; ok {
 		old.ln.Close()
 		<-old.done
 		delete(subtree, spec.ID)
+	}
+	// The agent's footprint on the gateway is bounded in every dimension it can
+	// grow — conns globally and per source network, unauthenticated slots,
+	// bandwidth — except the one it allocates by asking. A scope of ports caps
+	// listeners implicitly (allowedPorts is finite, listenFirstFree runs out), but
+	// the default scope is empty, so the default agent could open an ephemeral
+	// listener per invented tunnel id until the machine's ephemeral range was
+	// gone, taking every other agent's tunnels and the host's own outbound
+	// connections with it. Counted after the same-ID replacement above: re-binding
+	// a tunnel that already exists is not growth, and must still work at the cap.
+	if pol.maxTunnels > 0 && len(subtree) >= pol.maxTunnels {
+		return 0, fmt.Errorf("tunnel %q: %w (%d; gateway.max_tunnels_per_agent)", spec.Name, errTooManyListeners, pol.maxTunnels)
 	}
 	var ln net.Listener
 	if spec.PublicPort == 0 {
@@ -438,13 +469,13 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr
 		// never from the OS's ephemeral range. Binding :0 here was the scope escape
 		// — an agent scoped to one port got a public listener on a port nobody
 		// allowed just by asking for 0, and could repeat it per invented tunnel id.
-		ln = listenFirstFree(bindAddr, allowedPorts(sess.scope, allowlist))
+		ln = listenFirstFree(pol.bindAddr, allowedPorts(sess.scope, pol.allowlist))
 		if ln == nil {
 			return 0, fmt.Errorf("tunnel %q: no public port this agent is allowed to bind is free", spec.Name)
 		}
 	} else {
 		var err error
-		ln, err = net.Listen("tcp", net.JoinHostPort(bindAddr, strconv.Itoa(spec.PublicPort)))
+		ln, err = net.Listen("tcp", net.JoinHostPort(pol.bindAddr, strconv.Itoa(spec.PublicPort)))
 		if err != nil {
 			if !portowner.IsAddrInUse(err) {
 				return 0, portowner.DecorateBindError(spec.PublicPort, err)
@@ -453,7 +484,7 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr
 			// failing, so the tunnel comes up; the listener keeps the *requested* spec
 			// so a later reconcile of the same spec is a no-op (sameListener) and the
 			// reassigned port stays put rather than re-contending on every sync.
-			reln := listenFirstFree(bindAddr, reassignCandidates(spec.PublicPort, sess.scope, allowlist))
+			reln := listenFirstFree(pol.bindAddr, reassignCandidates(spec.PublicPort, sess.scope, pol.allowlist))
 			if reln == nil {
 				return 0, portowner.DecorateBindError(spec.PublicPort, err)
 			}
@@ -530,7 +561,7 @@ func (a *actor) unbindLocked(sess *agentSession, tunnelID string) {
 
 // bindTunnel opens the public listener for a tunnel spec. Runs net.Listen on
 // the actor goroutine — binds are rare and this keeps port state serialized.
-func (a *actor) bindTunnel(sess *agentSession, spec control.TunnelSpec, bindAddr string, allowlist []int, handle func(*publicListener, net.Conn)) (int, error) {
+func (a *actor) bindTunnel(sess *agentSession, spec control.TunnelSpec, pol bindPolicy, handle func(*publicListener, net.Conn)) (int, error) {
 	var (
 		port   int
 		outErr error
@@ -540,7 +571,7 @@ func (a *actor) bindTunnel(sess *agentSession, spec control.TunnelSpec, bindAddr
 			outErr = fmt.Errorf("session is no longer active")
 			return
 		}
-		port, outErr = a.bindLocked(sess, spec, bindAddr, allowlist, handle)
+		port, outErr = a.bindLocked(sess, spec, pol, handle)
 	})
 	if !ran {
 		return 0, fmt.Errorf("gateway is shutting down")
@@ -582,7 +613,7 @@ type reconcileOutcome struct {
 // the *requested* spec, so PublicPort-0 ephemeral tunnels stay stable) is
 // left untouched: live client connections survive re-syncs of identical
 // state. The bool result is false when the gateway is shutting down.
-func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, bindAddr string, allowlist []int, handle func(*publicListener, net.Conn)) ([]reconcileOutcome, bool) {
+func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, pol bindPolicy, handle func(*publicListener, net.Conn)) ([]reconcileOutcome, bool) {
 	outcomes := make([]reconcileOutcome, 0, len(desired))
 	ran := a.do(func() {
 		if a.agents[sess.agentID] != sess || sess.evicted.Load() {
@@ -625,7 +656,7 @@ func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, bind
 				outcomes = append(outcomes, reconcileOutcome{ID: spec.ID, Port: pl.ln.Addr().(*net.TCPAddr).Port})
 				continue
 			}
-			port, err := a.bindLocked(sess, spec, bindAddr, allowlist, handle)
+			port, err := a.bindLocked(sess, spec, pol, handle)
 			outcomes = append(outcomes, reconcileOutcome{ID: spec.ID, Port: port, Err: err})
 		}
 	})

@@ -86,7 +86,7 @@ func TestEphemeralRequestStaysInsideScope(t *testing.T) {
 	}
 
 	spec := control.TunnelSpec{ID: "tnl_x", Name: "x", Type: config.TunnelTCP, PublicPort: 0}
-	got, err := a.bindTunnel(sess, spec, "127.0.0.1", nil, func(*publicListener, net.Conn) {})
+	got, err := a.bindTunnel(sess, spec, bindPolicy{bindAddr: "127.0.0.1"}, func(*publicListener, net.Conn) {})
 	if err != nil {
 		t.Fatalf("an ephemeral request inside a scope with free ports must bind one: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestEphemeralRequestRespectsTheGatewayAllowlist(t *testing.T) {
 	allowlist := []int{25565, 25566}
 
 	spec := control.TunnelSpec{ID: "tnl_y", Name: "y", Type: config.TunnelTCP, PublicPort: 0}
-	got, err := a.bindTunnel(sess, spec, "127.0.0.1", allowlist, func(*publicListener, net.Conn) {})
+	got, err := a.bindTunnel(sess, spec, bindPolicy{bindAddr: "127.0.0.1", allowlist: allowlist}, func(*publicListener, net.Conn) {})
 	if err != nil {
 		t.Fatalf("an ephemeral request with free allowlisted ports must bind one: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestEphemeralRequestStaysUnconstrainedByDefault(t *testing.T) {
 		t.Fatalf("admit: %v", err)
 	}
 	spec := control.TunnelSpec{ID: "tnl_z", Name: "z", Type: config.TunnelTCP, PublicPort: 0}
-	got, err := a.bindTunnel(sess, spec, "127.0.0.1", nil, func(*publicListener, net.Conn) {})
+	got, err := a.bindTunnel(sess, spec, bindPolicy{bindAddr: "127.0.0.1"}, func(*publicListener, net.Conn) {})
 	if err != nil {
 		t.Fatalf("an unconstrained ephemeral bind failed: %v", err)
 	}

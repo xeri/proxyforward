@@ -94,6 +94,7 @@ persisted to config.
 | Backoff | 1 s → 60 s full jitter, reset after 60 s stable | `link/backoff.go` |
 | Abuse defaults | 4096 global / 32 per-network conns; 10 auth fails/min/network (token bucket: burst 10, refill 10/min) | `config.go Default` |
 | Abuse accounting unit | one IPv4 address; one IPv6 **/64** (smallest block a subscriber holds) | `limits.go sourceNet` |
+| Per-agent listener cap | 32 public listeners per agent (the one resource an agent allocates by asking) | `config.go Default`, `actor.go bindLocked` |
 | Auth-failure table cap | 4096 networks, LRU-evicted (hard cap, not a cleanup trigger) | `limits.go authFailNets` |
 | Pre-auth gate | `MaxConnsGlobal + 256` concurrent unauthenticated conns; slot freed at auth | `limits.go preAuthGate`, `preAuthHeadroom` |
 | Accept retry backoff | 5 ms doubling → 1 s; only a closed listener stops the loop | `gateway.go retryAccept` |

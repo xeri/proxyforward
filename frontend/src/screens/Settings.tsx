@@ -28,6 +28,7 @@ const DEF = {
   maxConnsGlobal: 4096,
   maxConnsPerIP: 32,
   authAttemptsPerMin: 10,
+  maxTunnelsPerAgent: 32,
   retentionDays: 180,
   prometheusAddr: '127.0.0.1:9464',
 } as const
@@ -106,6 +107,7 @@ export function Settings({status}: {status: UIStatus}) {
       out.Gateway.MaxConnsGlobal = out.Gateway.MaxConnsGlobal || DEF.maxConnsGlobal
       out.Gateway.MaxConnsPerIP = out.Gateway.MaxConnsPerIP || DEF.maxConnsPerIP
       out.Gateway.AuthAttemptsPerMin = out.Gateway.AuthAttemptsPerMin || DEF.authAttemptsPerMin
+      out.Gateway.MaxTunnelsPerAgent = out.Gateway.MaxTunnelsPerAgent || DEF.maxTunnelsPerAgent
       out.Analytics.RetentionDays = out.Analytics.RetentionDays || DEF.retentionDays
       if (out.Metrics.PrometheusEnabled && !out.Metrics.PrometheusAddr.trim()) {
         out.Metrics.PrometheusAddr = DEF.prometheusAddr
@@ -213,6 +215,12 @@ export function Settings({status}: {status: UIStatus}) {
                 <Field label="Auth attempts / min"><TextInput mono value={numStr(cfg.Gateway.AuthAttemptsPerMin)} placeholder={String(DEF.authAttemptsPerMin)}
                   onChange={v => patch(c => { c.Gateway.AuthAttemptsPerMin = parseInt(v, 10) || 0 })} /></Field>
               </div>
+              <Field label="Max tunnels per agent" hint="How many public ports one agent may hold open at once. The three above bound the public internet; this one bounds an agent you've already paired.">
+                <div className="w-40">
+                  <TextInput mono value={numStr(cfg.Gateway.MaxTunnelsPerAgent)} placeholder={String(DEF.maxTunnelsPerAgent)}
+                    onChange={v => patch(c => { c.Gateway.MaxTunnelsPerAgent = parseInt(v, 10) || 0 })} />
+                </div>
+              </Field>
             </Section>
           )}
 
