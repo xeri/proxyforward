@@ -2,16 +2,17 @@ import {ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react'
 import {
   BrowseMMDB, CreatorAvatar, CreatorInfo, FirewallRepair, FirewallStatus, GeoStatus, GetConfig,
   InstallService, OpenConfigDir, OpenCreatorURL, OpenExternal,
-  RestartEngine, SaveSettings, ServiceStatus, UninstallService,
+  RestartEngine, SaveSettings, ServiceStatus, StartService, StopService, UninstallService,
 } from '../../wailsjs/go/app/App'
 import {config, geo} from '../../wailsjs/go/models'
 import {
-  Badge, Banner, Button, Card, CopyButton, ErrorBanner, Field, FormRow, PageHeader,
-  SegmentedControl, Select, Skeleton, Switch, TextInput, Toggle, WarnWash,
+  Badge, Banner, Button, Card, CopyButton, Disclosure, ErrorBanner, Field, FormRow, Modal,
+  PageHeader, SegmentedControl, Select, Skeleton, Switch, TextInput, Toggle, WarnWash,
 } from '../components/ui'
 import {ExportSetupRow, ImportSetupFlow} from '../components/SetupBackup'
 import {IconExternal, IconMonitor, IconMoon, IconRefresh, IconSun} from '../components/icons'
-import {TRANSPORT_LABEL, UIStatus} from '../state'
+import {isEngineOff, runStateOf, TRANSPORT_LABEL, UIStatus} from '../state'
+import {StopEngine} from '../../wailsjs/go/app/App'
 import {ThemePref, useTheme} from '../theme'
 import {fxPref, setFxPref} from '../fx'
 import {MotionPref, useMotion} from '../motion'
@@ -485,6 +486,49 @@ function FxRow() {
   )
 }
 
+/** ForceStopRow: the escape hatch for a stop that will not land. A normal Stop
+ * waits for the link to close cleanly; force skips that wait, cutting the run
+ * where it stands. Kept behind Advanced because it is only ever the answer when
+ * the graceful Stop is stuck — and it still names the players it drops. Hidden
+ * while the run is already off; nothing to force then. */
+function ForceStopRow({status}: {status: UIStatus}) {
+  const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState(false)
+  const players = (status.connections ?? []).length
+
+  if (runStateOf(status) === 'stopped') return null
+
+  const force = () => {
+    setBusy(true)
+    StopEngine(true).catch(() => {}).finally(() => setBusy(false))
+  }
+  const onClick = () => { if (players > 0) { setConfirm(true); return } force() }
+
+  return (
+    <>
+      <FormRow label="Force stop" hint="Cut the run immediately instead of waiting for a clean shutdown.">
+        <Button variant="danger" size="sm" onClick={onClick} disabled={busy}>Force stop</Button>
+      </FormRow>
+      {confirm && (
+        <Modal
+          title={`Disconnect ${players} ${players === 1 ? 'player' : 'players'}?`}
+          onClose={() => setConfirm(false)}
+          footer={
+            <>
+              <Button variant="ghost" size="sm" onClick={() => setConfirm(false)}>Cancel</Button>
+              <Button variant="danger" size="sm" onClick={() => { setConfirm(false); force() }}>Force stop</Button>
+            </>
+          }
+        >
+          <p className="text-sm text-[var(--text-2)]">
+            {players === 1 ? 'One player is' : `${players} players are`} connected. Force stop cuts the tunnel now, without waiting for the link to close cleanly.
+          </p>
+        </Modal>
+      )}
+    </>
+  )
+}
+
 /** SystemSection: Windows integration + the config file + build identity. */
 function SystemSection({status}: {status: UIStatus}) {
   const [fw, setFw] = useState<boolean | null>(null)
@@ -520,12 +564,31 @@ function SystemSection({status}: {status: UIStatus}) {
         <FormRow label="Windows service" hint="Run headless in the background; the app attaches as a viewer.">
           <div className="flex items-center gap-2">
             <Badge tone={s.tone}>{s.label}</Badge>
-            {s.installed
-              ? <Button variant="danger" size="sm" onClick={wrap('svc', UninstallService)} disabled={busy === 'svc'}>{busy === 'svc' ? '…' : 'Uninstall'}</Button>
-              : <Button variant="ghost" size="sm" onClick={wrap('svc', InstallService)} disabled={busy === 'svc'}>{busy === 'svc' ? '…' : 'Install'}</Button>}
+            {s.installed ? (
+              <>
+                {/* Start/Stop control the running service; each needs an elevated
+                    prompt (SCM control is admin-only), which the binding raises. */}
+                {s.label === 'Running'
+                  ? <Button variant="ghost" size="sm" onClick={wrap('svc-run', StopService)} disabled={busy === 'svc-run'}>{busy === 'svc-run' ? '…' : 'Stop'}</Button>
+                  : <Button variant="ghost" size="sm" onClick={wrap('svc-run', StartService)} disabled={busy === 'svc-run'}>{busy === 'svc-run' ? '…' : 'Start'}</Button>}
+                <Button variant="danger" size="sm" onClick={wrap('svc', UninstallService)} disabled={busy === 'svc'}>{busy === 'svc' ? '…' : 'Uninstall'}</Button>
+              </>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={wrap('svc', InstallService)} disabled={busy === 'svc'}>{busy === 'svc' ? '…' : 'Install'}</Button>
+            )}
           </div>
         </FormRow>
       </WarnWash>
+      {/* A stopped service is a broken promise: it exists to run without a
+          window open, so nobody may be watching to notice players can't
+          connect. Louder than the badge, quieter than the crash banner. */}
+      {s.installed && s.label === 'Stopped' && (
+        <div className="mt-2">
+          <Banner tone="warn">
+            The Windows service is installed but stopped — it should be running so the tunnel stays up without this window open. Start it above.
+          </Banner>
+        </div>
+      )}
       <Divider />
       {/* Stacked, not a FormRow: FormRow's control side is shrink-0 and this
           <code> was capped at 24rem inside a 44rem column, so a real Windows
@@ -540,6 +603,17 @@ function SystemSection({status}: {status: UIStatus}) {
           <Button variant="ghost" size="sm" onClick={() => OpenConfigDir()}><IconExternal size={14} /> Open</Button>
         </div>
       </div>
+      {/* Advanced: the sharp controls, folded away so the common path stays
+          calm. Only shown when this process owns the engine — an attached
+          viewer forces nothing (and force stop is hidden anyway while off). */}
+      {status.mode !== 'attached' && !isEngineOff(status) && (
+        <>
+          <Divider />
+          <Disclosure label="Advanced">
+            <ForceStopRow status={status} />
+          </Disclosure>
+        </>
+      )}
       {err && <div className="mt-2"><ErrorBanner message={err} onDismiss={() => setErr('')} /></div>}
     </Section>
   )
