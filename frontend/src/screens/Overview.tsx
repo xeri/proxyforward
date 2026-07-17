@@ -15,7 +15,7 @@ import {
 import {Emblem} from '../components/Emblem'
 import {IconActivity, IconEye, IconEyeOff, IconGlobe, IconLink, IconRefresh, IconServer} from '../components/icons'
 import {NavId} from '../nav'
-import {fmtBytes, fmtUptime, UIStatus} from '../state'
+import {fmtBytes, fmtRtt, fmtUptime, hasRtt, UIStatus} from '../state'
 
 type Seg = 'good' | 'warn' | 'bad' | 'unknown'
 
@@ -212,7 +212,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
               ? (status.linkUp ? 'Connected' : 'Reconnecting…')
               : (status.agentConnected ? 'Active' : 'Idle')}
             detail={isAgent
-              ? (status.linkUp ? `${status.rttMillis} ms round trip` : 'Retrying with backoff')
+              ? (status.linkUp ? (hasRtt(status.rttMillis) ? `${fmtRtt(status.rttMillis)} round trip` : 'Measuring round trip…') : 'Retrying with backoff')
               : (status.agentConnected ? 'Relaying player traffic' : 'Listening for the agent')}
             extra={status.peerAddr ? (
               <span className="inline-flex max-w-full items-center gap-1 text-[11px] text-[var(--text-3)]">
@@ -254,7 +254,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
           <HealthPanel status={status} />
           <div className="grid grid-cols-2 gap-x-[var(--grid-gap)] gap-y-6 pt-2">
             <StatTile label="Link uptime" value={linkUptime} sub={uptimeSub || undefined} />
-            <StatTile label="Round trip" value={(isAgent ? status.linkUp : status.agentConnected) ? `${status.rttMillis} ms` : '—'} />
+            <StatTile label="Round trip" value={(isAgent ? status.linkUp : status.agentConnected) && hasRtt(status.rttMillis) ? fmtRtt(status.rttMillis) : '—'} />
             <StatTile
               label="Live sessions" accent={conns.length > 0}
               value={<NumberTicker value={conns.length} format={n => String(Math.round(n))} />}
@@ -350,7 +350,7 @@ function HealthPanel({status}: {status: UIStatus}) {
           <div className="grid min-w-0 flex-1 grid-cols-3 gap-3">
             <HealthMetric label="Jitter" value={fmtMs(status.jitterMillis)} tone={status.jitterMillis < 0 ? 'unknown' : status.jitterMillis > 100 ? 'bad' : status.jitterMillis > 30 ? 'warn' : 'good'} />
             <HealthMetric label="Packet loss" value={fmtPct(status.packetLossPct)} tone={status.packetLossPct < 0 ? 'unknown' : status.packetLossPct > 5 ? 'bad' : status.packetLossPct > 1 ? 'warn' : 'good'} />
-            <HealthMetric label="Round trip" value={linked ? `${status.rttMillis} ms` : '—'} tone="neutral" />
+            <HealthMetric label="Round trip" value={linked && hasRtt(status.rttMillis) ? fmtRtt(status.rttMillis) : '—'} tone="neutral" />
           </div>
         </div>
         <LatencyProbe linked={linked} peer={isAgent ? 'gateway' : 'agent'} />

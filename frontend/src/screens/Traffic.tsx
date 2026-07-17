@@ -234,7 +234,7 @@ function LinkStrip({status}: {status: UIStatus}) {
       <div className="grid min-w-0 shrink-0 grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
         <StatTile label="Link uptime" value={status.linkUpSinceMs ? fmtElapsed(Date.now() - status.linkUpSinceMs) : '—'} />
         {isAgent
-          ? <StatTile label="Round trip" value={up ? `${status.rttMillis} ms` : '—'} />
+          ? <StatTile label="Round trip" value={up && hasRtt(status.rttMillis) ? fmtRtt(status.rttMillis) : '—'} />
           : <StatTile label="Sessions" value={String(status.linkSessions || 0)} />}
         {/* Link counters are read/write on the conn. "Download" is the
             server→player direction: the agent WRITES it to the gateway

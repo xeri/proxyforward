@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react'
-import {fmtUptime, useTickStale, UIStatus, worstHealth} from '../state'
+import {fmtRtt, fmtUptime, hasRtt, useTickStale, UIStatus, worstHealth} from '../state'
 import {RoleWord, Spinner} from './ui'
 
 /**
@@ -65,7 +65,7 @@ export function ConnectionPill({status}: {status: UIStatus}) {
         />
         <span className="font-medium text-[var(--text-2)]">{label}</span>
       </span>
-      {showTail && <span className="tabular-nums text-[var(--text-3)]">· {status.rttMillis} ms</span>}
+      {showTail && hasRtt(status.rttMillis) && <span className="tabular-nums text-[var(--text-3)]">· {fmtRtt(status.rttMillis)}</span>}
       {showLoss && (
         <span className="tabular-nums text-[var(--warn)]">
           · {status.packetLossPct.toFixed(status.packetLossPct < 10 ? 1 : 0)}% loss

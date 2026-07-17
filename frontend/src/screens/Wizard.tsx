@@ -4,7 +4,7 @@ import {Button, Codebox, CopyButton, Disclosure, ErrorBanner, Field, Spinner, Te
 import {Emblem} from '../components/Emblem'
 import {ImportSetupFlow} from '../components/SetupBackup'
 import {IconCheck, IconGlobe, IconRefresh, IconServer, IconShield, IconSpark} from '../components/icons'
-import {UIStatus} from '../state'
+import {fmtRtt, hasRtt, UIStatus} from '../state'
 
 const DEFAULT_CONTROL_PORT = 8474
 
@@ -316,7 +316,7 @@ function AgentLive({status, onDone, onBack}: {
           {fatal
             ? fatal
             : up
-              ? `Connected to ${status?.peerHostname || 'the gateway'} in ${status?.rttMillis ?? '—'} ms. Opening your console…`
+              ? `Connected to ${status?.peerHostname || 'the gateway'}${status && hasRtt(status.rttMillis) ? ` in ${fmtRtt(status.rttMillis)}` : ''}. Opening your console…`
               : 'Establishing the tunnel link. Reconnects retry automatically with backoff.'}
         </div>
       </div>
