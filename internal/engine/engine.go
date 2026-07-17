@@ -274,9 +274,16 @@ func (e *Engine) Run(ctx context.Context) error {
 	var err error
 	select {
 	case err = <-pipeErr:
+		// The pipe failed on its own, so it is already released.
+		cancel()
 	case <-ctx.Done():
+		cancel()
+		// Wait for the pipe to be released before returning. A fresh Engine —
+		// the GUI swapping roles — serves the same name, and would race this
+		// listener for it. ipc.Serve reports a cancelled listen as nil, so an
+		// orderly shutdown still returns nil without having to mask anything.
+		err = <-pipeErr
 	}
-	cancel()
 
 	// Wait for the run the supervisor's cancel just killed: its final stats
 	// flush and its stop event both need the store this teardown closes.
