@@ -11,6 +11,12 @@ one line, scope, what it depends on, the skill to open before starting, a size, 
 the check that proves it done. Delete a WP in the same commit that ships it (the same
 discipline as CLAUDE.md's reality-check rows).
 
+WP ids exist only inside this file. Commit messages, branch names, code comments, and
+docs never carry them: no "WP-A2", no "part b", no phase/step numbering of any kind.
+A commit says what actually changed ("gateway: rotate the cert under a live agent"),
+in the repo's usual style, and must read correctly to someone who has never seen this
+roadmap. The ids are for pointing at work while planning it, nothing more.
+
 Sizes: **S** under a day, **M** one to three days, **L** one to two weeks,
 **XL** bigger than that (decompose into its own plan before starting).
 
