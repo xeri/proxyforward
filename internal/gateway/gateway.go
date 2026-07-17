@@ -942,7 +942,15 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 		sess.Close()
 		return
 	}
-	ctrl.SetReadDeadline(time.Now().Add(preAuthTimeout))
+	// Both directions, like the TCP path's conn.SetDeadline — the prologue's
+	// deadline is on the prologue, not on its reads. Every branch below answers an
+	// unauthenticated peer with a hello error, and a QUIC stream's Write blocks
+	// until the peer grants flow-control credit: a peer that opens the control
+	// stream, sends a rejectable hello and then advertises a zero window parks the
+	// gateway in WriteMsg forever, so sess.Close() below is never reached and the
+	// pre-auth slot never comes back. That is the pre-auth gate defeated with a
+	// handful of cheap connections, using its own accounting to do it.
+	ctrl.SetDeadline(time.Now().Add(preAuthTimeout))
 	env, err := control.ReadMsg(ctrl, control.PreAuthMaxFrame)
 	if err != nil {
 		logger.Debug("pre-auth read failed", "err", err)
@@ -1027,7 +1035,7 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 		logger.Debug("hello_ok write failed", "err", err)
 		return
 	}
-	ctrl.SetReadDeadline(time.Time{}) // pre-auth over; liveness moves to the control stream
+	ctrl.SetDeadline(time.Time{}) // pre-auth over; liveness moves to the control stream
 
 	g.serveAdmitted(ctx, admitted, ctrl, hello, negotiated)
 }
