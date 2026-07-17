@@ -228,7 +228,9 @@ gitleaks, dependency-review, npm audit (gosec/zizmor/Scorecard are advisory → 
 tab). `.github/workflows/fuzz.yml` fuzzes the parsers nightly;
 `.github/workflows/release.yml` builds a tag into a **draft** release.
 Must-never-happen at edit time → hook (`.claude/settings.json`: `frontend/wailsjs`
-write-block, per-edit gofmt check). Doc accuracy → the `internal/doccheck` citation
+write-block, per-edit gofmt check, and a `git commit` whose message embeds a claude.ai
+session URL is denied — attribution.sessionUrl is off besides, so the harness never
+appends the trailer). Doc accuracy → the `internal/doccheck` citation
 test, which asserts every file, symbol, and test name cited by CLAUDE.md,
 `docs/agent/`, `.claude/rules/`, and `.claude/skills/` exists. Needs judgment → this
 file and `docs/agent/reasoning.md`. Before adding a rule here, ask which of those four
