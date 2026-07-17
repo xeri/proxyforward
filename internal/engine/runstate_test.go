@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,11 +24,27 @@ func init() {
 	ipc.PipeName = fmt.Sprintf(`\\.\pipe\proxyforward-enginetest-%d`, os.Getpid())
 }
 
+// pipeSeq names each test's pipe apart from its neighbours'. See newTestEngine.
+var pipeSeq atomic.Int64
+
 // newTestEngine builds a gateway engine on a free port with its role run
 // replaced by roleRun. The real Gateway is constructed and never started —
 // these tests are about the supervisor/run split, not about proxying.
 func newTestEngine(t *testing.T, roleRun func(context.Context) error) *Engine {
 	t.Helper()
+	// A private pipe per test. These tests hand one supervisor's name to the
+	// next with nothing in between, and winio.ListenPipe takes a name with
+	// FIRST_PIPE_INSTANCE — so a listener that has not finished releasing
+	// refuses the next one, which the engine then reports as a daemon
+	// conflict. On an idle machine the release always wins; under a loaded
+	// `go test ./...` it is a coin flip, and the whole package fails downstream
+	// of whichever toss lost. Give each test its own name instead of racing.
+	old := ipc.PipeName
+	ipc.PipeName = fmt.Sprintf(`\\.\pipe\proxyforward-enginetest-%d-%d`, os.Getpid(), pipeSeq.Add(1))
+	// Registered before the supervisor's cleanup, so it runs after it (LIFO):
+	// the name is restored only once nothing is serving it.
+	t.Cleanup(func() { ipc.PipeName = old })
+
 	dir := t.TempDir()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
