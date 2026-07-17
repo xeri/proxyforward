@@ -29,6 +29,12 @@ const ProtocolVersion = 1
 //   - Unknown capability strings MUST be ignored, never treated as an error.
 //   - A missing or empty capabilities field means a legacy peer: no
 //     capabilities.
+//   - Two gating shapes exist, both deliberate. Symmetric caps (tunnel-sync,
+//     gateway-config, config-consent) are checked by both sides before acting.
+//     Sender-gated caps (conn-stats, per-conn-data) are advertised by the side
+//     that can consume the frames and checked only by the sender; the receiver
+//     handles the message types unconditionally, because an unsolicited frame
+//     is harmless there and the default arm ignores unknown types anyway.
 const (
 	// CapTunnelSync: the peer understands TypeSyncTunnels/TypeSyncResult —
 	// full-set desired-state tunnel sync instead of per-tunnel

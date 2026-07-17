@@ -667,6 +667,9 @@ func (a *actor) sessions() []*agentSession {
 }
 
 // TunnelSnapshot is one registered tunnel's live state, for status surfaces.
+// The engine's status tick copies it field-by-field into ipc.TunnelStatus
+// (engine.go Status) — deliberately decoupled, so a field added here is
+// invisible to the GUI until that copy and ipc.TunnelStatus learn it too.
 type TunnelSnapshot struct {
 	AgentID    string // the agent that registered this tunnel
 	ID         string

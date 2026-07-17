@@ -188,7 +188,10 @@ type AgentStatus struct {
 	Players       int      `json:"players"` // count of identified players
 }
 
-// TunnelStatus is one tunnel's live state.
+// TunnelStatus is one tunnel's live state. The engine's status tick fills it
+// from gateway.TunnelSnapshot (gateway role) or the agent's tunnel specs (agent
+// role) — field-by-field in both cases, so a new field lands here, in that copy,
+// and in its source together or not at all.
 type TunnelStatus struct {
 	AgentID    string `json:"agentId,omitempty"` // owning agent (gateway role)
 	ID         string `json:"id"`
