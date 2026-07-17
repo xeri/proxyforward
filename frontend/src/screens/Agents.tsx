@@ -46,6 +46,7 @@ const EVENT_BADGE: Record<string, {label: string; tone: 'warn' | 'bad' | 'good'}
   'port-reassigned': {label: 'reassign', tone: 'warn'},
   'clone-suspected': {label: 'clone', tone: 'bad'},
   'port-reclaimed': {label: 'reclaim', tone: 'good'},
+  'proposal-declined': {label: 'declined', tone: 'warn'},
 }
 
 const jitterTone = (v: number): Seg => (v < 0 ? 'unknown' : v > 100 ? 'bad' : v > 30 ? 'warn' : 'good')
@@ -467,18 +468,27 @@ function FleetSummary({rows}: {rows: Row[]}) {
 /** StatusMark: one agent's connectivity verdict — health dot when connected, a
  * quiet "Offline" dot when enrolled-but-away, a Revoked badge when cut off. An
  * `update` flag (a connected agent behind the gateway's build) adds a warn-tone
- * "Update" badge alongside — color IS the signal, so it's a status tone, not accent. */
+ * "Update" badge alongside — color IS the signal, so it's a status tone, not accent.
+ *
+ * A pending config proposal rides here too, because the roster is where an operator
+ * is looking: a proposal awaiting *them* is a call to act ("Review"), while one
+ * awaiting the agent is a quiet state ("Proposed"). Without this a waiting agent is
+ * indistinguishable from an idle one until you drill into it — which is exactly the
+ * fleet case consent exists for. Both are false for an offline agent (pending state
+ * is session-scoped), so neither can go stale. */
 function StatusMark({view, h, update}: {view: AgentView; h: Seg; update?: boolean}) {
   const mark = view.revoked
     ? <Badge tone="bad">Revoked</Badge>
     : isConnected(view)
       ? <StatusDot state={h} label={HEALTH_LABEL[h]} pulse />
       : <StatusDot state="unknown" label="Offline" />
-  if (!update) return mark
+  if (!update && !view.pendingInbound && !view.pendingOutbound) return mark
   return (
     <span className="inline-flex items-center gap-2">
       {mark}
-      <Badge tone="warn">Update</Badge>
+      {view.pendingInbound && <Badge tone="warn">Review</Badge>}
+      {view.pendingOutbound && !view.pendingInbound && <Badge>Proposed</Badge>}
+      {update && <Badge tone="warn">Update</Badge>}
     </span>
   )
 }
@@ -1047,9 +1057,11 @@ function AgentConfigPanel({view}: {view: AgentView}) {
     setDraft(server.map(t => ({...t} as control.TunnelSpec)))
   }, [serverKey, dirty, server])
 
-  // Editing needs a live consent session and no proposal already in flight — a
-  // second one would silently supersede the first.
-  const editable = !!cfg?.enrolled && !!cfg.consentActive && !pendingOut
+  // Editing needs a live consent session and nothing already in flight — in either
+  // direction. Ours would silently supersede itself; and countering the agent's
+  // still-pending proposal just races it, since approving either one moves the
+  // generation and the loser is dropped as stale. Decide theirs first.
+  const editable = !!cfg?.enrolled && !!cfg.consentActive && !pendingOut && !pendingIn
   const edit = (id: string, port: number) => {
     setDirty(true)
     setDraft(d => d.map(t => (t.id === id ? {...t, publicPort: port} as control.TunnelSpec : t)))
@@ -1151,6 +1163,19 @@ function AgentConfigPanel({view}: {view: AgentView}) {
                 <span className="text-[12px] text-[var(--text-3)]">The agent must accept before anything moves.</span>
               </div>
               {saveErr && <div className="text-[12px] text-[var(--bad)]">{saveErr}</div>}
+            </div>
+          )}
+          {/* Something arrived (or the session went) while this edit was open. The
+              draft is still on screen, so say why it can't be sent rather than let
+              the submit quietly vanish. */}
+          {!editable && dirty && (
+            <div className="flex items-center gap-2 border-t border-[var(--border)] px-5 py-3">
+              <span className="flex-1 text-[12px] text-[var(--text-3)]">
+                {pendingIn ? 'Your edit can’t be sent while this agent’s proposal is waiting — decide that first.'
+                  : pendingOut ? 'Your edit can’t be sent while a proposal is already awaiting the agent.'
+                    : 'Your edit can’t be sent — the agent’s session ended.'}
+              </span>
+              <Button size="sm" variant="ghost" onClick={reset}>Discard edit</Button>
             </div>
           )}
         </>

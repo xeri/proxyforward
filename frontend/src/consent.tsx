@@ -104,11 +104,8 @@ export function proposalAge(atMs: number): string {
 }
 
 export type ConsentState = {
+  /** null until the first answer: no surface should guess before then. */
   view: agent.PendingView | null
-  /** loading is true only before the first answer — never on a refresh. */
-  loading: boolean
-  /** err marks a daemon that cannot answer at all (old build, or the gateway role). */
-  err: boolean
   refresh: () => void
 }
 
@@ -116,30 +113,33 @@ export type ConsentState = {
  * useAgentConsent polls this machine's consent state (agent role): what the gateway
  * has proposed, what we have proposed, and why our last edit was declined.
  *
- * It is a bespoke hook rather than usePolled because usePolled swallows errors, and
- * the difference between "nothing pending" and "this daemon cannot tell you" is
- * exactly what the surfaces must say honestly. Polled, not pushed: the tick stays
- * the single coalesced Go→JS event.
+ * There is deliberately no error state. App.AgentConsent collapses every failure —
+ * wrong role, detached, a daemon too old to know the op — to a zero view, and that
+ * zero view IS the honest answer: consentActive false means "edits apply the old
+ * way", which is what such a daemon does. An error flag here could only produce a
+ * second way to say the same thing, or a promise of an approval that never comes.
+ *
+ * Bespoke rather than usePolled for the refresh(): a decision has to re-read at once
+ * rather than wait out the interval. Polled, not pushed — the tick stays the single
+ * coalesced Go→JS event.
  */
 export function useAgentConsent(enabled: boolean, pollMs = 2000): ConsentState {
   const [view, setView] = useState<agent.PendingView | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState(false)
   const [nonce, setNonce] = useState(0)
   const refresh = useCallback(() => setNonce(n => n + 1), [])
 
   useEffect(() => {
-    if (!enabled) { setLoading(false); return }
+    if (!enabled) return
     let alive = true
     const tick = () => {
       AgentConsent()
-        .then(v => { if (!alive) return; setView(v); setErr(false); setLoading(false) })
-        .catch(() => { if (!alive) return; setErr(true); setLoading(false) })
+        .then(v => { if (alive) setView(v) })
+        .catch(() => { if (alive) setView(null) })
     }
     tick()
     const id = setInterval(tick, pollMs)
     return () => { alive = false; clearInterval(id) }
   }, [enabled, pollMs, nonce])
 
-  return {view, loading, err, refresh}
+  return {view, refresh}
 }

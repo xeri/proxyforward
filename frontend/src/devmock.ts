@@ -343,6 +343,11 @@ export function installDevMock() {
     // version/transport come from the live session — empty for an offline agent, so
     // the roster shows no "Update" badge and the drill-in transport chip renders "—".
     version: o.version || '', transport: o.transport || '',
+    // Consent proposals are session-scoped, so only a connected agent can carry one:
+    // these drive the roster's Review / Proposed badges. Read lazily (the seeds are
+    // declared below), which is fine — listAgents() only runs on demand.
+    pendingInbound: !!o.connected && o.agentId === CONSENT_AGENT && !!gwPendingIn,
+    pendingOutbound: !!o.connected && o.agentId === CONSENT_AGENT && !!gwPendingOut,
   })
   // Enrollment metadata for the connected extras (nickname/scope/enrolled age),
   // keyed by the same agentId the live fleet and AGENT_SCALE use.
