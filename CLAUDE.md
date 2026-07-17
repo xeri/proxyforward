@@ -80,9 +80,23 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   format-version + role marker so a wrong-kind link fails loudly). No CA, ever. Token and fingerprint compare in constant time
   (`crypto/subtle` — `gateway.go handleControlConn`, `cert.go`).
 - The pre-auth prologue (accept → TLS → hello) finishes within `preAuthTimeout` or
-  dies; failed auth rate-limits per IP, fail2ban-style — successes never count
-  (`limits.go authLimiter`). Public conns gate globally and per-IP (`limits.go
+  dies; failed auth rate-limits fail2ban-style — successes never count
+  (`limits.go authLimiter`). Public conns gate globally and per-source (`limits.go
   connGate`; defaults in `config.go`).
+- **The unit of abuse accounting is the network, not the address** (`limits.go
+  sourceNet`): one IPv4 address, but one IPv6 **/64** — the smallest block a
+  subscriber is handed, so per-address limits are 2^64 wide and free to evade. Both
+  limiters reduce the address themselves; callers pass the raw IP, because
+  `remoteIP`'s other callers (GUI link card, cloned-identity warning) need it whole.
+  Any new per-source limit keys on `sourceNet` or it is decorative.
+- **A limiter's own table is attack surface**: it must be bounded by construction
+  and O(1) to update, because `allow` runs before auth on every connection and holds
+  a mutex every honest agent needs. Hence a token bucket per network (one scalar,
+  refilled on read) in an LRU with a hard cap (`authFailNets`) — never "grow, then
+  scan to clean up", which under a flood scans more the worse things get
+  (`TestAuthLimiterIsBoundedUnderSourceRotation`). Bans stay bounded too: tokens
+  floor at 0, so a burst can't ban a shared address for longer than the window
+  (`TestAuthLimiterBanIsBoundedByTheWindow`).
 - **Per-agent identity is the trust model.** Each agent proves possession of a long-term
   Ed25519 key the gateway allowlists; its derived `agentID` (`agt_…`) is unforgeable,
   individually **scoped** (ports/tunnels) and **revocable** — revocation *and* a scope

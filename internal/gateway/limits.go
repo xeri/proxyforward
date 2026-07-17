@@ -1,108 +1,210 @@
 package gateway
 
 import (
+	"container/list"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 )
 
-// authLimiter rate-limits failed authentication attempts per source IP
+// authFailNets bounds how many source networks the auth limiter remembers at
+// once. It is a hard cap, not a cleanup trigger: the table cannot outgrow it, so
+// no caller ever pays to walk it.
+const authFailNets = 4096
+
+// sourceNet reduces a source address to the unit of abuse accounting: the
+// smallest network one party cannot cheaply multiply.
+//
+// Per-address is right for IPv4, where every address costs money. It is
+// meaningless for IPv6, where the smallest block anyone is handed is a /64 (RFC
+// 6177 puts a *site* at /56 or /48): one host sources from 2^64 addresses that
+// cost nothing and share no state. Keyed per address, every limit underneath —
+// the auth failure budget, the per-IP connection cap — is bypassed by
+// incrementing the low bits, and any table keyed by them grows 2^64 wide.
+//
+// So IPv6 accounts per /64: the floor of what a single subscriber controls.
+// Aggregating further (/48) would also catch a subscriber holding many /64s, but
+// starts pooling unrelated customers of the same ISP into one budget, which turns
+// a limit into collateral damage.
+//
+// This lives inside the limiters rather than at their call sites on purpose: a
+// caller that reduced the address itself would eventually forget to (and
+// remoteIP's other callers — the GUI's link card, the cloned-identity warning —
+// legitimately want the whole address).
+func sourceNet(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip // an exotic transport's opaque address: account for it whole
+	}
+	if addr = addr.Unmap(); addr.Is4() {
+		return addr.String()
+	}
+	p, err := addr.Prefix(64)
+	if err != nil {
+		return addr.String()
+	}
+	return p.String()
+}
+
+// authLimiter rate-limits failed authentication attempts per source network
 // (fail2ban semantics: successes never count, so a legitimately flapping
 // agent reconnecting through backoff is never locked out, but a scanner
 // brute-forcing tokens is).
+//
+// Each network gets a token bucket, and the table of them is LRU-capped. Both
+// properties are load-bearing, because every honest agent's admission waits on
+// this one mutex — allow() is the first thing handleControlConn does. Holding it
+// for work proportional to the table's size hands an attacker the gateway.
+//
+// The bucket replaces a per-network []time.Time, which grew in two directions at
+// once (networks, and failures remembered per network) and whose cleanup made
+// that worse rather than better: it triggered on size (>4096 keys) but deleted
+// only *fully expired* entries, so a flood that keeps its entries fresh frees
+// nothing, grows past the cap without limit, and re-scans the entire map on every
+// insert with the lock held. A scalar that refills is O(1) to store and O(1) to
+// update; the cap makes the table's size a constant.
 type authLimiter struct {
 	mu     sync.Mutex
 	perMin int
 	window time.Duration
-	fails  map[string][]time.Time
+	maxNet int
+	lru    *list.List // *authBudget, most recently touched at the front
+	at     map[string]*list.Element
 	now    func() time.Time
+}
+
+// authBudget is one network's token bucket: it holds the failures still
+// affordable, refilling at perMin per window, so it is both the count and the
+// clock. An absent bucket is a full one, which is why honest traffic costs no
+// memory.
+type authBudget struct {
+	net      string
+	tokens   float64
+	refilled time.Time
 }
 
 func newAuthLimiter(perMin int) *authLimiter {
 	return &authLimiter{
 		perMin: perMin,
 		window: time.Minute,
-		fails:  make(map[string][]time.Time),
+		maxNet: authFailNets,
+		lru:    list.New(),
+		at:     make(map[string]*list.Element),
 		now:    time.Now,
 	}
 }
 
-// allow reports whether ip is under the failure limit.
+// allow reports whether ip's network can afford another attempt. It records
+// nothing: an address that has never failed leaves no trace, so the table only
+// ever holds abusers.
 func (l *authLimiter) allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return len(l.pruneLocked(ip)) < l.perMin
+	el, ok := l.at[sourceNet(ip)]
+	if !ok {
+		return true
+	}
+	b := el.Value.(*authBudget)
+	if l.refillLocked(b) {
+		// Recovered in full, and so indistinguishable from never having failed.
+		// Dropping it keeps the table proportional to live abuse, not to history.
+		l.dropLocked(el)
+		return true
+	}
+	l.lru.MoveToFront(el)
+	// A whole token, not any token: refill is continuous, so admitting on a
+	// fraction would end every block the instant it began.
+	return b.tokens >= 1
 }
 
-// fail records one failed attempt from ip.
+// fail charges one failed attempt to ip's network.
 func (l *authLimiter) fail(ip string) {
+	key := sourceNet(ip)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.fails[ip] = append(l.pruneLocked(ip), l.now())
-	// Keep the map bounded even under a spoofed-source flood.
-	if len(l.fails) > 4096 {
-		for k := range l.fails {
-			if len(l.pruneLocked(k)) == 0 {
-				delete(l.fails, k)
-			}
+	if el, ok := l.at[key]; ok {
+		b := el.Value.(*authBudget)
+		l.refillLocked(b)
+		// The floor bounds how long a block can last: without it a long burst
+		// buys a ban proportional to the burst, and the bystander sharing a
+		// NAT'd address with the attacker serves it.
+		if b.tokens--; b.tokens < 0 {
+			b.tokens = 0
 		}
+		l.lru.MoveToFront(el)
+		return
+	}
+	l.at[key] = l.lru.PushFront(&authBudget{net: key, tokens: float64(l.perMin) - 1, refilled: l.now()})
+	// One insert, at most one eviction. The least recently touched entry is also
+	// the most refilled, so eviction takes whichever network is closest to
+	// forgiven anyway — and rotating addresses cannot evict your own block,
+	// because hammering keeps your own entry at the front.
+	for l.lru.Len() > l.maxNet {
+		l.dropLocked(l.lru.Back())
 	}
 }
 
-// pruneLocked drops entries older than the window and returns what remains.
-func (l *authLimiter) pruneLocked(ip string) []time.Time {
-	cutoff := l.now().Add(-l.window)
-	ts := l.fails[ip]
-	keep := ts[:0]
-	for _, t := range ts {
-		if t.After(cutoff) {
-			keep = append(keep, t)
-		}
+// refillLocked credits the tokens owed since the last touch and reports whether
+// the bucket came back full (nothing left worth remembering).
+func (l *authLimiter) refillLocked(b *authBudget) (full bool) {
+	burst := float64(l.perMin)
+	now := l.now()
+	if d := now.Sub(b.refilled); d > 0 {
+		b.tokens += burst * float64(d) / float64(l.window)
+		b.refilled = now
 	}
-	if len(keep) == 0 {
-		delete(l.fails, ip)
-		return nil
+	if b.tokens >= burst {
+		b.tokens = burst
+		return true
 	}
-	l.fails[ip] = keep
-	return keep
+	return false
+}
+
+func (l *authLimiter) dropLocked(el *list.Element) {
+	delete(l.at, l.lru.Remove(el).(*authBudget).net)
 }
 
 // connGate enforces concurrent-connection caps on public listeners: a global
-// ceiling protecting the gateway and a per-IP ceiling protecting it from any
-// single client.
+// ceiling protecting the gateway and a per-network ceiling protecting it from any
+// single client. Per-network, not per-address, for the reason sourceNet gives —
+// otherwise one IPv6 subscriber takes the global cap 32 conns at a time.
 type connGate struct {
 	mu        sync.Mutex
 	maxGlobal int
 	maxPerIP  int
 	global    int
-	perIP     map[string]int
+	perNet    map[string]int
 }
 
 func newConnGate(maxGlobal, maxPerIP int) *connGate {
-	return &connGate{maxGlobal: maxGlobal, maxPerIP: maxPerIP, perIP: make(map[string]int)}
+	return &connGate{maxGlobal: maxGlobal, maxPerIP: maxPerIP, perNet: make(map[string]int)}
 }
 
 // admit reserves a slot for ip; the caller must release(ip) when the
-// connection ends iff admit returned true.
+// connection ends iff admit returned true. perNet is bounded by maxGlobal — an
+// entry exists only while a connection it counts is live.
 func (g *connGate) admit(ip string) bool {
+	key := sourceNet(ip)
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.global >= g.maxGlobal || g.perIP[ip] >= g.maxPerIP {
+	if g.global >= g.maxGlobal || g.perNet[key] >= g.maxPerIP {
 		return false
 	}
 	g.global++
-	g.perIP[ip]++
+	g.perNet[key]++
 	return true
 }
 
 func (g *connGate) release(ip string) {
+	key := sourceNet(ip)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.global--
-	if g.perIP[ip] <= 1 {
-		delete(g.perIP, ip)
+	if g.perNet[key] <= 1 {
+		delete(g.perNet, key)
 	} else {
-		g.perIP[ip]--
+		g.perNet[key]--
 	}
 }
 

@@ -365,9 +365,13 @@ the Go→JS boundary is coalesced into one `tick` event so the UI never touches 
   hello frame) must finish within **10 s**, and pre-auth frames are capped at **4 KiB**
   (vs 64 KiB post-auth), with the length checked *before* allocation — internet scanners
   get nothing to chew on.
-- **fail2ban-style auth limiter** — 10 failed attempts per minute per IP; successes never
+- **fail2ban-style auth limiter** — a 10-failures-per-minute token bucket; successes never
   count, so a legitimately flapping agent is never locked out while a brute-forcer is.
-- **Connection gates** — 4096 global / 32 per-IP, plus a public-port allowlist.
+  Its table is hard-capped and O(1) to update, so flooding it is not a way in.
+- **Connection gates** — 4096 global / 32 per source, plus a public-port allowlist.
+- **Limits are per network, not per address** — one IPv4 address, but one IPv6 **/64**.
+  A /64 is the smallest block a subscriber is handed, so a per-address limit is one an
+  IPv6 client evades for free by counting up.
 - **Locked-down IPC** — the GUI attaches to the engine over a named pipe whose ACL admits
   only Administrators, SYSTEM, and the interactive user.
 - **Redacted diagnostics** — bundles strip every secret, host, IP, and identity; peer IPs
@@ -384,7 +388,7 @@ sequenceDiagram
     participant MC as Minecraft
 
     Pl->>GW: TCP connect :25565
-    Note over GW: connGate.admit (global + per-IP)
+    Note over GW: connGate.admit (global + per source network)
     alt mux / QUIC
         GW->>Ag: open a stream over the shared conn
     else per-conn
