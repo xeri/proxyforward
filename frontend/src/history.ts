@@ -2,10 +2,14 @@
 // module-level cache so charts paint instantly on remount (tab switches) and
 // keep their data between visits.
 //
-// DIRECTION MAPPING — the single place it happens: the store/wire speak
+// DIRECTION CONVENTION — defined here, applied everywhere: the store/wire speak
 // conntrack ("in" = client → server, "out" = server → client). The UI calls
 // server → player traffic "download". Therefore: download = out/oo/oh/ol/oc,
-// upload = in/io/ih/il/ic. Nothing else in the frontend re-maps directions.
+// upload = in/io/ih/il/ic — and every consumer of raw bytesIn/bytesOut fields
+// (per-conn, per-player, analytics) reads them with this same out=download rule,
+// never its own. The one legitimate exception is Traffic.tsx's link-counter tile:
+// those counters are read/write on the shared conn, so ↓/↑ swap by role there —
+// that flip lives in exactly that one place. Never invent a third mapping.
 import {useEffect, useRef, useState} from 'react'
 import {BandwidthHistory, PeerStats} from '../wailsjs/go/app/App'
 import {stats} from '../wailsjs/go/models'

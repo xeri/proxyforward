@@ -251,9 +251,11 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   eased (`NumberTicker`, `charts/util.ts useTweenedValues`). That kill switch only
   zeroes CSS durations, so *scripted* motion must gate itself in JS — the scroll
   rubber band attaches no listener at all under it (`rubberband.ts useRubberBand`).
-- Chart series tokens `--dl/--ul/--conn/--rtt` are load-bearing names; direction
-  mapping (wire "in/out" → UI "upload/download") happens in exactly one place,
-  the `frontend/src/history.ts` header. Never re-map elsewhere.
+- Chart series tokens `--dl/--ul/--conn/--rtt` are load-bearing names; the direction
+  convention (wire "out" = server→player = UI "download") is defined once, in the
+  `frontend/src/history.ts` header, and every consumer applies it as written. The
+  sole re-map is the role-relative link-counter flip, confined to `Traffic.tsx`.
+  Never invent a third mapping.
 - The design charter is `frontend/DESIGN.md` — one identity surface per screen; every
   surface is glass but only Signal Glass *answers the pointer* (never give a card the
   caustics/streak/wake); motion communicates network state; color is signal.
