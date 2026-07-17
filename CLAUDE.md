@@ -25,6 +25,9 @@ polish. Protect what works; be honest about what doesn't exist yet (Reality chec
 - **Architecture map, subsystem deep-dives, and every tuned number** —
   `docs/agent/architecture.md`. Its "The numbers" table is the single source for
   timeouts/caps/floors; this file names constants and never restates their values.
+- **Why each security invariant exists, and the bug that proved it** —
+  `docs/agent/security-invariants.md`. The Invariants section below states the rules
+  and their symbols; that file is the reasoning behind them.
 - **Debugging procedure, symptom→suspect table, evidence standards, escalation
   triggers** — `docs/agent/reasoning.md`. Read it before chasing any bug.
 - **Known UX debt** — `docs/agent/polish-backlog.md`; pull from it before inventing
@@ -73,133 +76,65 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   `docs/agent/architecture.md`.
 
 ### Security (`internal/link/`, `internal/gateway/`)
-- TLS 1.3 only, both sides (`cert.go GatewayTLSConfig` / `AgentTLSConfig`). Trust =
-  the gateway's self-signed ECDSA P-256 cert pinned by SHA-256 fingerprint carried
-  out-of-band in the pairing code `pxf://host:port/v1/pair/<token>#sha256:<hex>`
-  (`link/pairing.go`; `pxf` doubles as the OS deep-link scheme, `/v1/pair/` is a
-  format-version + role marker so a wrong-kind link fails loudly). No CA, ever. Token and fingerprint compare in constant time
-  (`crypto/subtle` — `gateway.go handleControlConn`, `cert.go`).
-- The pre-auth prologue (accept → TLS → hello) finishes within `preAuthTimeout` or
-  dies; failed auth rate-limits fail2ban-style — successes never count
-  (`limits.go authLimiter`). Public conns gate globally and per-source (`limits.go
-  connGate`; defaults in `config.go`).
+
+The rule and its symbol are here; the **why**, and the bug that proved each one, is
+`docs/agent/security-invariants.md`. Read it before changing what a rule is about —
+all of these looked reasonable right up until they didn't.
+
+- TLS 1.3 only, both sides; trust = the gateway's self-signed cert pinned by SHA-256
+  fingerprint in the pairing code, out-of-band. **No CA, ever.** Token and
+  fingerprint compare in constant time (`link/pairing.go`, `cert.go`, `crypto/subtle`).
+- **Per-agent identity is the trust model**: an Ed25519 key the gateway allowlists,
+  its derived `agentID` scoped and revocable. Revocation *and* a scope change evict
+  the live session — a session captures its scope at admission (`gateway.go
+  SetAgentScope`). Same agentID supersedes, a distinct one joins alongside (`actor.go
+  admit`). `agentID` width is a security parameter (`cred.go agentFingerprintBytes`).
+  The shared token is a migration fallback only (`Gateway.AcceptSharedToken`); the
+  `agt_` namespace is reserved against it (`link/cred.go IsDerivedAgentID`).
 - **The unit of abuse accounting is the network, not the address** (`limits.go
-  sourceNet`): one IPv4 address, but one IPv6 **/64** — the smallest block a
-  subscriber is handed, so per-address limits are 2^64 wide and free to evade. Both
-  limiters reduce the address themselves; callers pass the raw IP, because
-  `remoteIP`'s other callers (GUI link card, cloned-identity warning) need it whole.
-  Any new per-source limit keys on `sourceNet` or it is decorative.
+  sourceNet`): IPv4 address, IPv6 **/64**. Any new per-source limit keys on it or it
+  is decorative. Callers pass the raw IP — `remoteIP`'s other callers need it whole.
+- **A limiter's own table is attack surface**: bounded by construction, O(1) to
+  update — a token bucket per network in a hard-capped LRU (`limits.go authFailNets`),
+  never grow-then-scan. Spend whole tokens; floor them at 0.
+- **The unauthenticated set is bounded by a gate, not by the rate limiter** (`limits.go
+  preAuthGate`) — the limiter can't refuse what hasn't failed yet. Release the slot the
+  instant auth succeeds, exactly once (`sync.OnceFunc`).
+- **The pre-auth prologue's deadline is on the prologue, not on its reads** — every
+  branch writes a reply to a peer who may never read it (`gateway.go
+  handleControlConn`/`handleQUICSession`, `preAuthTimeout`).
 - **An accept loop stops only when its listener is closed** (`limits.go
-  isListenerClosed`, used by `gateway.go retryAccept`). Every other Accept error is
-  transient — descriptors, buffers, a reset between SYN and accept — and returning
-  on one is a *permanent* outage wearing a healthy face: process up, GUI green,
-  players still served, no agent able to reconnect ever again
-  (`TestControlAcceptSurvivesATransientError`). Retry with capped backoff, never a
-  bare `continue` (a broken listener would spin).
-- **The unauthenticated set must be bounded by a gate, not by the rate limiter**
-  (`limits.go preAuthGate`). `authLimiter.allow` only refuses a network once its
-  failures have *landed*, and a stalled conn doesn't fail until `preAuthTimeout` —
-  so it leaves a ~10 s window of unbounded goroutines/descriptors, which is what
-  makes Accept fail in the first place. The slot is released the instant auth
-  succeeds, or a handshake cap silently becomes a session cap; the release is
-  `sync.OnceFunc` because it runs on every failure path *and* on success, and a
-  double-release raises the ceiling forever (`TestPreAuthGateBoundsUnauthenticatedConns`).
-- **A limiter's own table is attack surface**: it must be bounded by construction
-  and O(1) to update, because `allow` runs before auth on every connection and holds
-  a mutex every honest agent needs. Hence a token bucket per network (one scalar,
-  refilled on read) in an LRU with a hard cap (`authFailNets`) — never "grow, then
-  scan to clean up", which under a flood scans more the worse things get
-  (`TestAuthLimiterIsBoundedUnderSourceRotation`). Bans stay bounded too: tokens
-  floor at 0, so a burst can't ban a shared address for longer than the window
-  (`TestAuthLimiterBanIsBoundedByTheWindow`).
-- **Per-agent identity is the trust model.** Each agent proves possession of a long-term
-  Ed25519 key the gateway allowlists; its derived `agentID` (`agt_…`) is unforgeable,
-  individually **scoped** (ports/tunnels) and **revocable** — revocation *and* a scope
-  change both evict the live session, and the next connect is fatal `ErrCodeRevoked`. A
-  session captures its scope at admission, so without that eviction narrowing contains
-  nothing (`gateway.go SetAgentScope`). Agents join via a single-use enrollment ticket in
-  the pairing code (`gateway/auth.go identityValidator`, `agentstore.go`, `link/cred.go`;
-  mechanics in `docs/agent/architecture.md`). A matching agentID **supersedes**
-  (reconnect), a distinct one is admitted **alongside**; supersede is anti-flap dampened
-  so an ID collision degrades to a slow contest, not a loop (`actor.go admit`,
-  `noteSupersede`).
-- **Port 0 is not a port, it is "any port in the ephemeral range"** — so it is
-  policy-*valid* only when nothing constrains the choice. A port-0 request names
-  nothing for `validateSpec` to check; it asks the gateway to choose, so policy is
-  enforced where the choice is made, by `bindLocked` picking only from
-  `conflict.go allowedPorts` (scope narrows, allowlist filters; empty means this
-  agent may have no port at all). Waiving the check for 0 instead — which is what
-  it did — let a scoped agent bind a public listener on a port nobody allowed, once
-  per invented tunnel id (`TestEphemeralRequestStaysInsideScope`). Any new
-  port-granting path uses `allowedPorts` or it is not constrained.
-- **An authenticated agent is bounded too, in every dimension it can grow.** Conns
-  (`connGate`), unauthenticated sockets (`preAuthGate`) and bandwidth (`bwcap`) are
-  capped; **listeners** — the only resource an agent allocates by *asking* — were
-  capped only by its scope, and the default scope is empty. So the default agent
-  could hold a port per invented tunnel id until the host's ephemeral range was gone,
-  taking every other agent with it (`MaxTunnelsPerAgent`, enforced in `actor.go
-  bindLocked`; `TestListenerCapBoundsAnUnscopedAgent`). Count growth, never
-  rebinding, or the cap bricks reconfiguration instead of bounding it.
-- "Unforgeable" above is a claim about **width**, and therefore a security parameter, not
-  a display choice: `agentID` is the label the gateway keys supersede, scope, revocation,
-  and config on, so it must stay wide enough that no second key answering to a victim's
-  name can be searched for (`cred.go agentFingerprintBytes`, floored by
-  `TestAgentIDIsWideEnoughToBeUnforgeable`); `AgentStore.Enroll` refuses a colliding join
-  besides, so a found collision fails closed.
-- The legacy **shared token** survives only as a migration fallback, accepted while
-  `Gateway.AcceptSharedToken` is on (default for now). A shared-token agent self-asserts its
-  `agentID`, so the old residual risk — supersede or port-squat, recoverable only by rotating
-  the token — persists **for that path only**; enrolled agents are protected by their key and
-  by revocation *because* the key-derived `agt_` namespace is **reserved**, so a self-asserted
-  ID can never name an enrolled one (`link/cred.go IsDerivedAgentID`, `gateway/auth.go
-  sharedTokenValidator`). Disabling `AcceptSharedToken` once every agent is enrolled closes it.
-- **The gateway never decides what the agent exposes.** A disabled tunnel keeps a
-  `LocalAddr` naming a real service and ids are guessable slugs (`link.TunnelID`), so
-  a pushed spec must not enable one (`agent/hotapply.go mergeTunnels`) and a data
-  stream must not dial one (`agent/agent.go enabledTunnelByID`) — `push_config`
-  auto-applies without consent, so both halves are load-bearing
-  (`TestMergeTunnelsKeepsDisabledDraftsDisabled`, `TestEnabledTunnelByIDIgnoresDisabledTunnels`).
-- **The IPC pipe is no easier to reach than the config dir it fronts.** Same three
-  principals as `secureio`, deliberately: SYSTEM, Administrators, and the account
-  serving it (`ipc/security_windows.go pipeSecurity`) — never a *group* like `IU`
-  (INTERACTIVE = every logged-on account, which is what it used to grant under a
-  comment claiming otherwise). The pipe is not a status feed: `OpIssuePairing`,
-  `OpRevokeAgent` and `OpSetAgentScope` ride the same envelope, and a pairing code
-  carries the gateway token — so a wider ACL is a hole straight through
-  `secureio` (`TestPipeDeniesOtherInteractiveUsers`). Service mode runs as
-  LocalSystem, so the installer records its own SID for the GUI
-  (`ipc/owner.go PipeOwnerFile`); an unelevated admin can't be let in via `BA`
-  because UAC filters that SID to deny-only. Any SID formatted into the SDDL is
-  parsed first, and a pipe whose ACL can't be built is not served.
-- **"Something answered the pipe" is not evidence an engine did.** Any local process
-  can create a pipe under a free name, so `ipc.Dial` verifies the pipe's **owner** is
-  SYSTEM, Administrators, or this account before returning it
-  (`ipc/security_windows.go verifyServer`, `ErrUntrustedServer`); a squatter that
-  wins the race would otherwise *be* the engine to the GUI — feeding it status and
-  its own pairing code. The owner is the check because it's the part a squatter
-  can't fake (claiming a SID you don't hold needs `SeRestorePrivilege`).
-- Diagnostics bundles redact every secret, host, IP, and identity; peer IPs *and
-  hostnames* become pseudonyms that are stable **within one bundle** and meaningless
-  outside it (`app/tools.go pseudonymiser`, leak-tested in `app/tools_test.go`). The
-  salt is the property, not the hash: IPv4 is 2^32 wide, so an *unsalted* digest is a
-  table lookup and a "pseudonym" anyone can invert
-  (`TestIPPseudonymIsNotJustAnEncoding`); a hostname is a dictionary away besides
-  (`TestDiagnosticsHealthPseudonymisesHostnames`). Minting it is the one part of a
-  bundle that isn't best-effort — the fallback isn't a weaker salt, it's shipping the
-  addresses.
-  Anything new that exports data must pass the same no-leak test style — seeding
-  *every* channel it ships, since a leak test that leaves one empty passes vacuously
-  (health.txt was handed in pre-rendered, so it went unswept and shipped both
-  hostnames in cleartext; `writeDiagnostics` now renders everything it redacts).
-  Bundles **ship logs**, so redacting only the config is theatre: log text is scrubbed
-  of the config's own secrets (`tools.go logScrubber`).
-- Never log a secret; the scrubber is a net, not a licence (it only knows what config
-  holds). The pairing code embeds the gateway token, so it goes to the console, never
-  through `slog` — slog fans out to the rotating file, the GUI ring, and every bundle
+  isListenerClosed`, `gateway.go retryAccept`) — every other Accept error is transient,
+  and returning on one is a permanent outage wearing a healthy face. Capped backoff,
+  never a bare `continue`.
+- **Port 0 is not a port, it is "any port in the ephemeral range"** — policy-valid only
+  when nothing constrains the choice, so it is enforced where the choice is made
+  (`bindLocked` via `conflict.go allowedPorts`). Any new port-granting path uses
+  `allowedPorts` or it is not constrained.
+- **An authenticated agent is bounded in every dimension it can grow**: conns
+  (`connGate`), unauthenticated sockets (`preAuthGate`), bandwidth (`bwcap`), and
+  listeners — the one it allocates by asking (`MaxTunnelsPerAgent`, `actor.go
+  bindLocked`). Count growth, never rebinding.
+- **The gateway never decides what the agent exposes**: a pushed spec must not enable a
+  disabled tunnel (`agent/hotapply.go mergeTunnels`) and a data stream must not dial one
+  (`agent/agent.go enabledTunnelByID`). `push_config` auto-applies, so both are load-bearing.
+- **The IPC pipe is no easier to reach than the config dir it fronts**: SYSTEM,
+  Administrators, and the account serving it — never a *group* like `IU`
+  (`ipc/security_windows.go pipeSecurity`). It carries `OpIssuePairing`. Service mode
+  records its own SID (`ipc/owner.go PipeOwnerFile`); an ACL that can't be built is not
+  served.
+- **"Something answered the pipe" is not evidence an engine did** — `ipc.Dial` verifies
+  the pipe's **owner** (`ipc/security_windows.go verifyServer`), the one part a squatter
+  can't fake.
+- **A bundle is made to be handed to strangers**: every secret, host, IP, and identity
+  redacted; IPs and hostnames pseudonymised under a per-bundle salt (`app/tools.go
+  pseudonymiser`). The salt is the property, not the hash. Anything new that exports
+  data seeds *every* channel in its leak test — one left empty passes vacuously.
+- **Never log a secret**; the scrubber (`tools.go logScrubber`) is a net, not a licence —
+  it only knows what config holds. The pairing code goes to the console, never `slog`
   (`gateway.go RunStarted`).
 - Fatal auth errors (`bad_token`, `agent_conflict`, `version`, `revoked`) stop the agent
-  instead of retry-hammering the gateway (fatal classification in `agent.go isFatal`), and
-  surface in the UI via `EngineFatal` on the tick.
+  instead of retry-hammering the gateway (`agent.go isFatal`); the UI shows `EngineFatal`.
 
 ### Liveness & lifecycle
 - **One liveness owner**: app-level ping in **both** directions (`pingInterval`) with
