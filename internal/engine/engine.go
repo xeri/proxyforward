@@ -68,6 +68,17 @@ const (
 	RunStopped  RunState = "stopped"
 )
 
+var (
+	// ErrNoSupervisor means there is no live Run to host a tunnel run — it was
+	// never called, or it has returned. Only a fresh Engine fixes it, which is
+	// what tells it apart from ErrRunStopping.
+	ErrNoSupervisor = errors.New("the daemon is not running")
+	// ErrRunStopping means a previous run is still unwinding. Rebuilding is
+	// exactly the wrong answer: the ports a new run would bind are still held
+	// by the old one. Wait, then start again.
+	ErrRunStopping = errors.New("the engine is still stopping; wait for it to finish, then start it again")
+)
+
 type Engine struct {
 	cfg        *config.Config
 	configDir  string
@@ -312,14 +323,12 @@ func (e *Engine) StartRun() error {
 	e.runMu.Lock()
 	defer e.runMu.Unlock()
 	switch {
-	case e.supCtx == nil:
-		return errors.New("engine is not running: start the daemon first")
-	case e.supCtx.Err() != nil:
-		return errors.New("engine is shutting down")
+	case e.supCtx == nil || e.supCtx.Err() != nil:
+		return ErrNoSupervisor
 	case e.runState == RunRunning:
 		return nil
 	case e.runState == RunStopping:
-		return errors.New("engine is still stopping: wait for it to finish, then start it again")
+		return ErrRunStopping
 	}
 
 	ctx, cancel := context.WithCancel(e.supCtx)
@@ -535,6 +544,8 @@ func (e *Engine) Status() ipc.Status {
 		PacketLossPct:  -1,
 		HealthScore:    "unknown",
 	}
+	runState, _ := e.RunState()
+	st.RunState = string(runState)
 	life := e.Stats.Lifetime()
 	st.AllTimeBytesIn, st.AllTimeBytesOut = life.BytesIn, life.BytesOut
 	st.CumulativeUptimeMs = life.UptimeMs

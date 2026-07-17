@@ -94,6 +94,13 @@ type Status struct {
 	// PID lets a GUI distinguish "my own engine" from a foreign daemon.
 	PID int `json:"pid"`
 
+	// RunState is the tunnel run's lifecycle — running | stopping | stopped —
+	// which is a separate axis from the role and from Mode: a stopped run
+	// still answers here, because the daemon serving this pipe outlives it.
+	// Empty from a daemon too old to have an off switch, which reads as
+	// "running" for the same reason its tunnel is.
+	RunState string `json:"runState,omitempty"`
+
 	// Agent-side fields.
 	LinkUp    bool  `json:"linkUp,omitempty"`
 	RTTMillis int64 `json:"rttMillis,omitempty"`

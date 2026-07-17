@@ -759,6 +759,7 @@ export namespace app {
 	    hostname: string;
 	    pid: number;
 	    configPath: string;
+	    runState: string;
 	    linkUp: boolean;
 	    rttMillis: number;
 	    agentConnected: boolean;
@@ -803,6 +804,7 @@ export namespace app {
 	        this.hostname = source["hostname"];
 	        this.pid = source["pid"];
 	        this.configPath = source["configPath"];
+	        this.runState = source["runState"];
 	        this.linkUp = source["linkUp"];
 	        this.rttMillis = source["rttMillis"];
 	        this.agentConnected = source["agentConnected"];

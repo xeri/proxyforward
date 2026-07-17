@@ -1,10 +1,12 @@
 package app
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"proxyforward/internal/config"
+	"proxyforward/internal/engine"
 )
 
 // wedgeEngine hands a an engine that never finishes unwinding, and returns the
@@ -18,6 +20,70 @@ func wedgeEngine(t *testing.T, a *App) chan error {
 	a.mode, a.cancel, a.done = ModeEngine, func() {}, done
 	a.mu.Unlock()
 	return done
+}
+
+// TestStopEngineKeepsTheConfiguredMode is the regression the whole run-state
+// axis exists for. Stopping used to mean tearing the engine down, which set
+// mode back to wizard — and the frontend turns wizard into the entire
+// first-run shell. So an off switch built the obvious way would have answered
+// "stop my tunnel for a minute" by offering to set the machine up from
+// scratch. Stopped is a second axis, not a fourth mode.
+func TestStopEngineKeepsTheConfiguredMode(t *testing.T) {
+	a := newTestAppDir(t, testAgentConfig())
+	// StartEngine rather than Startup: Startup also spawns the tick loop, and
+	// its EventsEmit needs the context Wails hands the lifecycle hooks.
+	if err := a.StartEngine(); err != nil {
+		t.Fatalf("StartEngine: %v", err)
+	}
+	defer a.Shutdown(context.Background())
+
+	if st := a.Status(); st.Mode != ModeEngine || st.RunState != string(engine.RunRunning) {
+		t.Fatalf("after startup: mode %q / runState %q, want %q / %q",
+			st.Mode, st.RunState, ModeEngine, engine.RunRunning)
+	}
+	if err := a.StopEngine(false); err != nil {
+		t.Fatalf("StopEngine: %v", err)
+	}
+
+	st := a.Status()
+	if st.Mode != ModeEngine {
+		t.Errorf("mode after stop = %q, want %q — the user is in the wizard", st.Mode, ModeEngine)
+	}
+	if st.Role == "" {
+		t.Error("role empty after stop: the frontend reads that as first-run setup")
+	}
+	if st.RunState != string(engine.RunStopped) {
+		t.Errorf("runState after stop = %q, want %q", st.RunState, engine.RunStopped)
+	}
+	// Deliberately off is not a crash, and must not paint like one.
+	if st.EngineFatal != "" {
+		t.Errorf("EngineFatal = %q after a deliberate stop, want empty", st.EngineFatal)
+	}
+
+	if err := a.StartEngine(); err != nil {
+		t.Fatalf("StartEngine: %v", err)
+	}
+	if st := a.Status(); st.RunState != string(engine.RunRunning) {
+		t.Errorf("runState after start = %q, want %q", st.RunState, engine.RunRunning)
+	}
+}
+
+// TestStartEngineFromWizardBuildsADaemon: with no daemon live, Start is a
+// first start rather than a resume, and must say so when there is no role.
+func TestStartEngineFromWizardBuildsADaemon(t *testing.T) {
+	a := newTestAppDir(t, config.Default()) // no role
+	if err := a.StartEngine(); err == nil {
+		t.Fatal("StartEngine with no role configured succeeded, want a refusal")
+	}
+
+	a2 := newTestAppDir(t, testAgentConfig())
+	defer a2.Shutdown(context.Background())
+	if err := a2.StartEngine(); err != nil {
+		t.Fatalf("StartEngine on a configured app with no daemon: %v", err)
+	}
+	if st := a2.Status(); st.Mode != ModeEngine || st.RunState != string(engine.RunRunning) {
+		t.Errorf("mode %q / runState %q, want %q / %q", st.Mode, st.RunState, ModeEngine, engine.RunRunning)
+	}
 }
 
 // TestStopEngineDoesNotHoldTheAppLock: the wait for a stopping engine used to

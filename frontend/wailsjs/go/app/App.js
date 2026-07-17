@@ -214,8 +214,16 @@ export function SetupGateway(arg1) {
   return window['go']['app']['App']['SetupGateway'](arg1);
 }
 
+export function StartEngine() {
+  return window['go']['app']['App']['StartEngine']();
+}
+
 export function Status() {
   return window['go']['app']['App']['Status']();
+}
+
+export function StopEngine(arg1) {
+  return window['go']['app']['App']['StopEngine'](arg1);
 }
 
 export function Summary(arg1) {

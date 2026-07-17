@@ -222,7 +222,12 @@ func (a *App) closeAnalyticsConnLocked() {
 func (a *App) startEngineLocked() {
 	eng, err := engine.New(a.cfg, a.configDir, a.configPath, a.logger)
 	if err != nil {
+		// Near-unreachable (New only rejects an unset role, and every caller
+		// checks that first), but it used to log and return with the mode
+		// unchanged — a construction failure with nowhere to be seen. There is
+		// somewhere now.
 		a.logger.Error("engine start failed", "err", err)
+		a.engineFatal, a.mode = err.Error(), ModeEngine
 		return
 	}
 	if eng.Agent != nil {
@@ -301,6 +306,13 @@ type UIStatus struct {
 	Hostname   string `json:"hostname"`
 	PID        int    `json:"pid"`
 	ConfigPath string `json:"configPath"`
+
+	// RunState is the tunnel run's lifecycle — running | stopping | stopped —
+	// a second axis crossing Mode rather than a fourth value of it. "Configured
+	// but deliberately off" is not the wizard, and telling those apart is the
+	// whole point: EngineFatal says which kind of stopped this is, so an empty
+	// one with RunState "stopped" means someone chose it.
+	RunState string `json:"runState"`
 
 	LinkUp         bool  `json:"linkUp"`
 	RTTMillis      int64 `json:"rttMillis"`
@@ -421,6 +433,12 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 	st.Role = s.Role
 	st.Version = s.Version
 	st.PID = s.PID
+	// A daemon too old to have an off switch reports nothing here, and its
+	// tunnel is running for the same reason it has no way to say otherwise.
+	st.RunState = s.RunState
+	if st.RunState == "" {
+		st.RunState = string(engine.RunRunning)
+	}
 	if s.ConfigPath != "" {
 		st.ConfigPath = s.ConfigPath
 	}
@@ -506,17 +524,31 @@ func (a *App) statusLocked() UIStatus {
 		if a.eng != nil {
 			st.applyIPCStatus(a.eng.Status())
 			st.AnalyticsUnsupported = !a.eng.AnalyticsReady()
+			// The run's own error, not a.done: since the supervisor/run split a
+			// fatal run leaves the daemon standing, so nothing is delivered to
+			// a.done and this is the only place the fatal surfaces. StartRun
+			// clears it, which is why it is read live rather than latched.
+			if _, runErr := a.eng.RunState(); runErr != nil {
+				st.EngineFatal = runErr.Error()
+			}
+		} else {
+			// Mode says this process owns an engine, but there is none: its
+			// construction failed, and engineFatal below says why.
+			st.RunState = string(engine.RunStopped)
 		}
 		select {
 		case err := <-a.done:
-			// Engine died; reflect it rather than pretending all is well.
+			// The supervisor itself died — the pipe failed, which ends this
+			// process's claim on the ports and is fatal by design.
 			if err != nil {
 				a.engineFatal = err.Error()
 			}
 			a.done = nil
 		default:
 		}
-		st.EngineFatal = a.engineFatal
+		if a.engineFatal != "" {
+			st.EngineFatal = a.engineFatal // a dead daemon outranks a dead run
+		}
 	case ModeAttached:
 		st.HistoryUnsupported = a.historyUnsupported
 		st.AnalyticsUnsupported = a.analyticsUnsupported
@@ -738,6 +770,67 @@ func (a *App) SetTheme(theme string) error {
 	defer a.mu.Unlock()
 	a.cfg.UI.Theme = theme
 	return a.cfg.Save(a.configPath)
+}
+
+// StopEngine stops the tunnel run: the link is cut, the listeners close, and
+// every player is dropped. The daemon stays up — it keeps the pipe, so this is
+// undoable from the GUI, and it keeps answering for the port it no longer
+// serves. force skips the wait for a clean unwind.
+//
+// This is deliberately not a teardown. Tearing the daemon down would drop back
+// to the wizard, which is a lie: the role is still configured, it is just off.
+func (a *App) StopEngine(force bool) error {
+	a.engMu.Lock()
+	defer a.engMu.Unlock()
+	if err := a.refuseIfAttached("the engine runs in another process (service or headless run); stop it there"); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	eng := a.eng
+	a.mu.Unlock()
+	if eng == nil {
+		return nil // nothing configured, or already down
+	}
+	return eng.StopRun(force)
+}
+
+// StartEngine starts the tunnel run. Usually a resume: the daemon is already
+// up and only its run is stopped, so it costs one StartRun. When no daemon is
+// live — a first start, or one whose supervisor died with the pipe — it builds
+// and starts a fresh one.
+func (a *App) StartEngine() error {
+	a.engMu.Lock()
+	defer a.engMu.Unlock()
+	if err := a.refuseIfAttached("the engine runs in another process (service or headless run); start it there"); err != nil {
+		return err
+	}
+
+	a.mu.Lock()
+	eng := a.eng
+	a.mu.Unlock()
+	if eng != nil {
+		err := eng.StartRun()
+		// Anything but a missing supervisor is answered by the daemon we have:
+		// ErrRunStopping especially, where a fresh daemon would race the old
+		// run for the ports it has not released yet.
+		if !errors.Is(err, engine.ErrNoSupervisor) {
+			return err
+		}
+	}
+
+	if err := a.stopEngine(); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cfg.Role == config.RoleUnset {
+		return errors.New("no role configured yet — finish setup first")
+	}
+	if err := a.cfg.Validate(); err != nil {
+		return err
+	}
+	a.startEngineLocked()
+	return nil
 }
 
 // RestartEngine bounces the in-process engine to pick up settings changes.
