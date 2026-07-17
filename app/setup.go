@@ -116,22 +116,31 @@ func (a *App) importSetupFromPath(path, passphrase string) error {
 		return fmt.Errorf("read setup file: %w", err)
 	}
 
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.mode == ModeAttached {
-		return fmt.Errorf("the setup is owned by the daemon (service or headless run) — stop it first, then import")
+	a.engMu.Lock()
+	defer a.engMu.Unlock()
+	if err := a.refuseIfAttached("the setup is owned by the daemon (service or headless run) — stop it first, then import"); err != nil {
+		return err
 	}
+	// Decode before the stop: a wrong passphrase must not cost the user their
+	// running engine.
 	role, files, err := setup.Decode(data, passphrase)
 	if err != nil {
 		return err
 	}
 	// The engine's shutdown includes the final stats flush, so it must be
 	// fully down before the imported files land (Windows file locking, and
-	// a late flush would clobber the imported stats).
-	a.stopEngineLocked()
+	// a late flush would clobber the imported stats). So an unclean stop is
+	// fatal here rather than a warning: writing over a store the old engine
+	// still holds is how the import corrupts what it just imported.
+	if err := a.stopEngine(); err != nil {
+		return fmt.Errorf("refusing to import over a running engine: %w", err)
+	}
 	if err := setup.WriteFiles(files, a.configDir); err != nil {
 		return err
 	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	loaded, err := config.Load(a.configPath)
 	if err != nil {
 		return fmt.Errorf("imported config failed to load: %w", err)

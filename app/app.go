@@ -10,6 +10,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -41,6 +42,12 @@ const (
 // tickInterval is the GUI snapshot cadence (the only Go→JS status traffic).
 const tickInterval = 500 * time.Millisecond
 
+// engineStopGrace bounds how long a lifecycle verb waits for the in-process
+// engine to unwind before reporting that it did not stop cleanly. It bounds
+// the caller, not the engine: the engine is already cancelled and keeps
+// unwinding either way.
+const engineStopGrace = 10 * time.Second
+
 type App struct {
 	ctx        context.Context
 	configPath string
@@ -48,6 +55,14 @@ type App struct {
 	hostname   string
 	ring       *logging.Ring
 	logger     *slog.Logger
+
+	// engMu serializes engine lifecycle transitions (stop → mutate → start) so
+	// two of them can never interleave a config swap. It is the OUTER lock: a
+	// transition holds engMu for its whole duration but takes a.mu only to read
+	// fields, swap engine handles, and mutate cfg — never across the wait for a
+	// stopping engine, which is what used to freeze the 2 Hz tick and every
+	// binding behind it for ten seconds. Never take engMu while holding a.mu.
+	engMu sync.Mutex
 
 	mu     sync.Mutex // guards cfg, mode, engine handles, ipcClient
 	cfg    *config.Config
@@ -177,9 +192,13 @@ func (a *App) surfaceWindow() {
 
 // Shutdown is wired to Wails OnShutdown.
 func (a *App) Shutdown(ctx context.Context) {
+	a.engMu.Lock()
+	defer a.engMu.Unlock()
+	if err := a.stopEngine(); err != nil {
+		a.logger.Warn("shutdown", "err", err)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.stopEngineLocked()
 	a.closeAnalyticsConnLocked()
 	if a.client != nil {
 		a.client.Close()
@@ -227,25 +246,49 @@ func (a *App) startEngineLocked() {
 	}()
 }
 
-// stopEngineLocked stops the in-process engine; a.mu must be held.
-func (a *App) stopEngineLocked() {
-	if a.cancel == nil {
-		return
-	}
-	a.cancel()
-	// a.done is nil when statusLocked already drained it (the engine had
-	// exited on its own); waiting on a nil channel would burn the full 10s.
-	if a.done != nil {
-		select {
-		case <-a.done:
-		case <-time.After(10 * time.Second):
-			a.logger.Error("engine did not stop within 10s")
-		}
-	}
+// stopEngine stops the in-process engine and waits for it to unwind, reporting
+// if that took longer than engineStopGrace. a.mu must NOT be held — the wait is
+// the whole reason this exists — and engMu must be, so that the window where
+// a.mu is free cannot be used to start a second engine.
+//
+// The engine handles are cleared before the wait, so anything that reads them
+// during it sees no engine, which is true: it is already cancelled.
+func (a *App) stopEngine() error {
+	a.mu.Lock()
+	cancel, done := a.cancel, a.done
 	a.eng, a.cancel, a.done = nil, nil, nil
 	if a.mode == ModeEngine {
 		a.mode = ModeWizard
 	}
+	a.mu.Unlock()
+
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	// done is nil when statusLocked already drained it (the engine had exited
+	// on its own); waiting on a nil channel would burn the whole grace period.
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-time.After(engineStopGrace):
+		return fmt.Errorf("the engine did not stop within %s; it is still shutting down", engineStopGrace)
+	}
+}
+
+// refuseIfAttached rejects a lifecycle verb when the engine belongs to another
+// process. msg is the caller's whole message: what it wanted to do is what
+// makes the refusal actionable, and that differs per verb.
+func (a *App) refuseIfAttached(msg string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.mode == ModeAttached {
+		return errors.New(msg)
+	}
+	return nil
 }
 
 // UIStatus is the frontend's per-tick snapshot. It mirrors ipc.Status with
@@ -517,12 +560,17 @@ func (a *App) tickLoop(ctx context.Context) {
 // SetupGateway configures this machine as a gateway (first-run wizard) and
 // starts the engine. publicHost may be empty.
 func (a *App) SetupGateway(publicHost string) error {
+	a.engMu.Lock()
+	defer a.engMu.Unlock()
+	if err := a.refuseIfAttached("a daemon is already running on this machine — configure it instead"); err != nil {
+		return err
+	}
+	if err := a.stopEngine(); err != nil {
+		return err
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.mode == ModeAttached {
-		return fmt.Errorf("a daemon is already running on this machine — configure it instead")
-	}
-	a.stopEngineLocked()
 	a.cfg.Role = config.RoleGateway
 	if a.cfg.Gateway.Token == "" {
 		a.cfg.Gateway.Token = config.NewToken()
@@ -541,12 +589,17 @@ func (a *App) SetupAgent(pairingCode, localAddr string, publicPort int) error {
 	if err != nil {
 		return err
 	}
+	a.engMu.Lock()
+	defer a.engMu.Unlock()
+	if err := a.refuseIfAttached("a daemon is already running on this machine — configure it instead"); err != nil {
+		return err
+	}
+	if err := a.stopEngine(); err != nil {
+		return err
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.mode == ModeAttached {
-		return fmt.Errorf("a daemon is already running on this machine — configure it instead")
-	}
-	a.stopEngineLocked()
 	a.cfg.Role = config.RoleAgent
 	if a.cfg.Agent.AgentID == "" {
 		a.cfg.Agent.AgentID = config.NewID()
@@ -689,12 +742,17 @@ func (a *App) SetTheme(theme string) error {
 
 // RestartEngine bounces the in-process engine to pick up settings changes.
 func (a *App) RestartEngine() error {
+	a.engMu.Lock()
+	defer a.engMu.Unlock()
+	if err := a.refuseIfAttached("the engine runs in another process (service or headless run); restart it there"); err != nil {
+		return err
+	}
+	if err := a.stopEngine(); err != nil {
+		return err
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.mode == ModeAttached {
-		return fmt.Errorf("the engine runs in another process (service or headless run); restart it there")
-	}
-	a.stopEngineLocked()
 	if a.cfg.Role == config.RoleUnset {
 		return nil
 	}
@@ -709,15 +767,25 @@ func (a *App) RestartEngine() error {
 // restarts the engine so it takes effect immediately. Existing agents must
 // re-pair with the new pairing code — that is the point of rotating it.
 func (a *App) RegenerateToken() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.mode == ModeAttached {
-		return fmt.Errorf("the engine runs in another process (service or headless run); rotate the token there")
+	a.engMu.Lock()
+	defer a.engMu.Unlock()
+	if err := a.refuseIfAttached("the engine runs in another process (service or headless run); rotate the token there"); err != nil {
+		return err
 	}
-	if a.cfg.Role != config.RoleGateway {
+	// Both guards precede the stop: refusing after it would leave the engine
+	// down for a verb that never ran.
+	a.mu.Lock()
+	role := a.cfg.Role
+	a.mu.Unlock()
+	if role != config.RoleGateway {
 		return fmt.Errorf("only the gateway issues pairing tokens")
 	}
-	a.stopEngineLocked()
+	if err := a.stopEngine(); err != nil {
+		return err
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.cfg.Gateway.Token = config.NewToken()
 	if err := a.cfg.Save(a.configPath); err != nil {
 		return err
