@@ -23,8 +23,19 @@ import (
 
 	"proxyforward/internal/agent"
 	"proxyforward/internal/config"
+	"proxyforward/internal/control"
 	"proxyforward/internal/gateway"
 )
+
+// syncOnlyOffer is the capability offer of an agent build that predates
+// gateway-config: its local edits are authoritative and ride sync_tunnels
+// frames. Enrolled harness agents negotiate gateway-config + config-consent by
+// default, under which local edits are proposed instead of hot-applied — so the
+// tests exercising the sync/hot-apply mechanics pin this offer to stay on the
+// path a peer that never learned those capabilities still uses.
+func syncOnlyOffer() []string {
+	return []string{control.CapTunnelSync, control.CapConnStats}
+}
 
 func TestMain(m *testing.M) {
 	// winio starts one process-lifetime IO-completion goroutine on first
@@ -112,10 +123,6 @@ type harnessOpts struct {
 	// returns the address the agent should dial instead — e.g. a transparent
 	// TCP proxy that observes the agent→gateway connections.
 	interpose func(gwAddr string) string
-	// enroll drives per-agent identity: the harness issues a single-use pairing
-	// ticket from the gateway, sets it on the agent, and clears the shared token so
-	// the agent authenticates purely by its Ed25519 identity.
-	enroll bool
 }
 
 func newHarness(t *testing.T, localAddr string) *harness {
@@ -161,16 +168,15 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 	dialPort, _ := strconv.Atoi(dialPortStr)
 	agentCfg.Agent.GatewayHost = dialHost
 	agentCfg.Agent.GatewayPort = dialPort
-	agentCfg.Agent.Token = gwCfg.Gateway.Token
 	agentCfg.Agent.CertFingerprint = gw.Fingerprint()
-	if opts.enroll {
-		ticket, err := gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		agentCfg.Agent.EnrollTicket = ticket
-		agentCfg.Agent.Token = "" // authenticate purely by Ed25519 identity
+	// Every harness agent authenticates by its Ed25519 identity: a single-use
+	// pairing ticket enrolls the fresh key on first hello, so the whole suite
+	// exercises the identity path end to end.
+	ticket, err := gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{})
+	if err != nil {
+		t.Fatal(err)
 	}
+	agentCfg.Agent.EnrollTicket = ticket
 	// Pin mux as the harness default so existing tests keep exercising the mux
 	// path even though the shipped default is "auto"; per-transport coverage is
 	// opt-in via opts.transport.
@@ -471,7 +477,7 @@ func TestConfigHotApply(t *testing.T) {
 	echoB, closeB := echoServer(t)
 	defer closeB()
 
-	h := newHarness(t, echoA)
+	h := newHarnessWith(t, echoA, harnessOpts{offerCaps: syncOnlyOffer()})
 	addrA := h.waitPublicPort()
 	roundTrip(t, addrA, []byte("tunnel A up"))
 
@@ -522,7 +528,7 @@ func TestConfigHotApply(t *testing.T) {
 func TestSyncIdempotent(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarness(t, echoAddr)
+	h := newHarnessWith(t, echoAddr, harnessOpts{offerCaps: syncOnlyOffer()})
 	addr := h.waitPublicPort()
 	portBefore := h.agent.MustPublicPort(h.tunnelID)
 
@@ -569,7 +575,7 @@ func TestSyncIdempotent(t *testing.T) {
 func TestSyncRebindOnChange(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarness(t, echoAddr)
+	h := newHarnessWith(t, echoAddr, harnessOpts{offerCaps: syncOnlyOffer()})
 	addrOld := h.waitPublicPort()
 
 	// Reserve a distinct free port for the move.
@@ -662,7 +668,7 @@ func TestLegacyRegisterFallback(t *testing.T) {
 func TestSyncPartialFailure(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarnessWith(t, echoAddr, harnessOpts{tweakGateway: func(cfg *config.Config) {
+	h := newHarnessWith(t, echoAddr, harnessOpts{offerCaps: syncOnlyOffer(), tweakGateway: func(cfg *config.Config) {
 		cfg.Gateway.PortAllowlist = []int{40000} // port 0 (ephemeral) bypasses the allowlist
 	}})
 	addrA := h.waitPublicPort()
@@ -797,15 +803,22 @@ func tcpTunnel(id, localAddr string, publicPort int) config.Tunnel {
 	}
 }
 
-// addAgent starts another agent against the same gateway with a fresh agentID
-// and its own tunnels, and registers its shutdown. Drive it via
-// waitPublicPortOf / roundTrip.
+// addAgent starts another agent against the same gateway with its own identity
+// key (a fresh tempdir), its own single-use pairing ticket, and its own tunnels,
+// and registers its shutdown. Drive it via waitPublicPortOf / roundTrip.
 func (h *harness) addAgent(t *testing.T, agentID string, tunnels []config.Tunnel) *agent.Agent {
 	t.Helper()
 	cfg := config.Default()
 	*cfg = *h.agentCfg
 	cfg.Agent.AgentID = agentID
 	cfg.Agent.Tunnels = tunnels
+	// The copied config carries the first agent's (already consumed) ticket;
+	// this agent's fresh key needs its own.
+	ticket, err := h.gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Agent.EnrollTicket = ticket
 	ag := agent.New(cfg, t.TempDir(), testLogger(t).With("side", "agent-"+agentID[:4]))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -835,8 +848,8 @@ func waitPublicPortOf(t *testing.T, ag *agent.Agent, tunnelID string) string {
 	return ""
 }
 
-// TestSecondAgentAdmitted: on the shared token, a second agent with a distinct
-// identity is admitted alongside the first (was rejected before multi-agent).
+// TestSecondAgentAdmitted: a second agent with a distinct identity is admitted
+// alongside the first (was rejected before multi-agent).
 func TestSecondAgentAdmitted(t *testing.T) {
 	echoA, closeA := echoServer(t)
 	defer closeA()
@@ -1263,7 +1276,10 @@ func TestBandwidthCapPerAgentIsolation(t *testing.T) {
 	}
 }
 
-// TestBadTokenRejected: wrong token → fatal ErrBadToken.
+// TestBadTokenRejected: bad credentials → fatal ErrBadToken, never a retry loop.
+// The thief's own tempdir mints a fresh key, and the config it copied carries the
+// harness ticket the real agent already consumed — an unknown key on a spent
+// ticket, the post-theft shape of a stolen config file.
 func TestBadTokenRejected(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
@@ -1273,7 +1289,6 @@ func TestBadTokenRejected(t *testing.T) {
 	thiefCfg := config.Default()
 	*thiefCfg = *h.agentCfg
 	thiefCfg.Agent.AgentID = config.NewID()
-	thiefCfg.Agent.Token = config.NewToken() // wrong
 	thiefCfg.Agent.Tunnels = nil
 
 	thief := agent.New(thiefCfg, t.TempDir(), testLogger(t).With("side", "thief"))
@@ -1292,7 +1307,7 @@ func TestBadTokenRejected(t *testing.T) {
 func TestEnrollAndRevoke(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarnessWith(t, echoAddr, harnessOpts{enroll: true})
+	h := newHarness(t, echoAddr)
 	addr := h.waitPublicPort()
 
 	// Enrolled exactly once, with a derived agt_ id and a stored public key.
@@ -1335,7 +1350,7 @@ func TestEnrollAndRevoke(t *testing.T) {
 func TestSetAgentScopeEvictsLiveSession(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarnessWith(t, echoAddr, harnessOpts{enroll: true})
+	h := newHarness(t, echoAddr)
 	addr := h.waitPublicPort()
 
 	// The agent is enrolled and serving on its granted (unrestricted) scope.

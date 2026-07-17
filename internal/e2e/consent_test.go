@@ -60,7 +60,7 @@ func waitIncomingProposal(t *testing.T, a *agent.Agent) *agent.ProposalView {
 func TestConfigConsentNegotiated(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarnessWith(t, echoAddr, harnessOpts{enroll: true})
+	h := newHarness(t, echoAddr)
 	h.waitPublicPort()
 	waitConfigGen(t, h.gw, 1)
 
@@ -80,7 +80,7 @@ func TestConfigConsentNegotiated(t *testing.T) {
 func TestConfigConsentAgentEditNeedsApproval(t *testing.T) {
 	echoA, closeA := echoServer(t)
 	defer closeA()
-	h := newHarnessWith(t, echoA, harnessOpts{enroll: true})
+	h := newHarness(t, echoA)
 	h.waitPublicPort()
 	rec := waitConfigGen(t, h.gw, 1)
 
@@ -130,7 +130,7 @@ func TestConfigConsentAgentEditNeedsApproval(t *testing.T) {
 func TestConfigConsentRejectedEditChangesNothing(t *testing.T) {
 	echoA, closeA := echoServer(t)
 	defer closeA()
-	h := newHarnessWith(t, echoA, harnessOpts{enroll: true})
+	h := newHarness(t, echoA)
 	addrA := h.waitPublicPort()
 	rec := waitConfigGen(t, h.gw, 1)
 
@@ -177,7 +177,7 @@ func TestConfigConsentRejectedEditChangesNothing(t *testing.T) {
 func TestConfigConsentGatewayAuthoredEditNeedsAgentApproval(t *testing.T) {
 	echoA, closeA := echoServer(t)
 	defer closeA()
-	h := newHarnessWith(t, echoA, harnessOpts{enroll: true})
+	h := newHarness(t, echoA)
 	h.waitPublicPort()
 	rec := waitConfigGen(t, h.gw, 1)
 
@@ -224,7 +224,7 @@ func TestConfigConsentGatewayAuthoredEditNeedsAgentApproval(t *testing.T) {
 func TestConfigConsentAgentDeclinesGatewayEdit(t *testing.T) {
 	echoA, closeA := echoServer(t)
 	defer closeA()
-	h := newHarnessWith(t, echoA, harnessOpts{enroll: true})
+	h := newHarness(t, echoA)
 	addrA := h.waitPublicPort()
 	rec := waitConfigGen(t, h.gw, 1)
 

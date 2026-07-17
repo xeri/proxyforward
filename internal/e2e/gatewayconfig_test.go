@@ -56,7 +56,7 @@ func waitPortForTunnel(t *testing.T, a *agent.Agent, tunnelID string) string {
 func TestGatewayConfigSeed(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarnessWith(t, echoAddr, harnessOpts{enroll: true})
+	h := newHarness(t, echoAddr)
 	addr := h.waitPublicPort()
 
 	rec := waitConfigGen(t, h.gw, 1)
@@ -84,7 +84,7 @@ func TestGatewayConfigSeed(t *testing.T) {
 func TestGatewayConfigPromote(t *testing.T) {
 	echoA, closeA := echoServer(t)
 	defer closeA()
-	h := newHarnessWith(t, echoA, harnessOpts{enroll: true, offerCaps: gatewayConfigOnlyOffer()})
+	h := newHarnessWith(t, echoA, harnessOpts{offerCaps: gatewayConfigOnlyOffer()})
 	h.waitPublicPort()
 	waitConfigGen(t, h.gw, 1)
 
@@ -119,7 +119,7 @@ func TestGatewayConfigPromote(t *testing.T) {
 func TestGatewayConfigDriftOnReconnect(t *testing.T) {
 	echoAddr, closeEcho := echoServer(t)
 	defer closeEcho()
-	h := newHarnessWith(t, echoAddr, harnessOpts{enroll: true})
+	h := newHarness(t, echoAddr)
 	h.waitPublicPort()
 	waitConfigGen(t, h.gw, 1)
 
@@ -149,7 +149,7 @@ func TestGatewayConfigScopeNarrowingHidesTunnel(t *testing.T) {
 	defer closeA()
 	// Scope enforcement is orthogonal to consent; a gateway-config-only agent keeps
 	// the setup to one auto-adopted edit rather than an approval round-trip.
-	h := newHarnessWith(t, echoA, harnessOpts{enroll: true, offerCaps: gatewayConfigOnlyOffer()})
+	h := newHarnessWith(t, echoA, harnessOpts{offerCaps: gatewayConfigOnlyOffer()})
 	h.waitPublicPort()
 	rec := waitConfigGen(t, h.gw, 1)
 
