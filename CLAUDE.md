@@ -63,6 +63,14 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   never raise the cap itself.
 - Never advertise a capability that isn't implemented end-to-end — the peer acts on
   the offer, then fails. (`tunnel-udp` violated this until it was un-advertised.)
+- **Consent vs arbitration** — every config path picks a side (`CapConfigConsent`).
+  *Authored edits* (either party editing tunnel definitions) ride
+  `config_proposal`→`config_decision`, applying only on approval (`gateway/consent.go`,
+  `agent/consent.go`). *Arbitration* (connect-sync, drift, reclaim, auto-reassign)
+  stays immediate on `push_config` with a notice, never a veto. `push_config` is the
+  single commit point for both — so a rejected edit has nothing to roll back — and an
+  edit the gateway cannot see (`LocalAddr`, PP2) applies unproposed. Mechanics in
+  `docs/agent/architecture.md`.
 
 ### Security (`internal/link/`, `internal/gateway/`)
 - TLS 1.3 only, both sides (`cert.go GatewayTLSConfig` / `AgentTLSConfig`). Trust =
@@ -99,6 +107,12 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   by revocation *because* the key-derived `agt_` namespace is **reserved**, so a self-asserted
   ID can never name an enrolled one (`link/cred.go IsDerivedAgentID`, `gateway/auth.go
   sharedTokenValidator`). Disabling `AcceptSharedToken` once every agent is enrolled closes it.
+- **The gateway never decides what the agent exposes.** A disabled tunnel keeps a
+  `LocalAddr` naming a real service and ids are guessable slugs (`link.TunnelID`), so
+  a pushed spec must not enable one (`agent/hotapply.go mergeTunnels`) and a data
+  stream must not dial one (`agent/agent.go enabledTunnelByID`) — `push_config`
+  auto-applies without consent, so both halves are load-bearing
+  (`TestMergeTunnelsKeepsDisabledDraftsDisabled`, `TestEnabledTunnelByIDIgnoresDisabledTunnels`).
 - The IPC pipe ACL admits Administrators, SYSTEM, and the interactive user only
   (`ipc/server_windows.go pipeSecurity`).
 - Diagnostics bundles redact every secret, host, IP, and identity; peer IPs become

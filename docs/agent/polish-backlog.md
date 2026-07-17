@@ -166,37 +166,23 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
 
 ## Agent-management surfacing (backend ahead of the GUI)
 
-The per-agent identity/enrollment/config work landed backend-first; these surfaces are
-implemented and tested in Go but only partly exposed. None is a bug — each is an unbuilt
-GUI affordance, so they belong here, not in the "Reality check" (nothing is *oversold*).
+The per-agent identity/enrollment/config work landed backend-first. Items 26–29 and 31
+are now built (enrollment issuance on Agents + the Overview strip, one-click port
+reclaim, the version "Update" badge, the gateway-side config editor with mutual
+consent, and typed `tnl_` ids on create); what remains is below.
 
-26. **Enrollment issuance is under-surfaced** — `IssuePairingCode` (mode + scope + ttl) is
-    reachable only from the first-run wizard's reusable toggle (`frontend/src/screens/Wizard.tsx`),
-    with ttl and scope fixed. The Overview pairing strip still hands out the *legacy
-    shared-token* code (`frontend/src/screens/Overview.tsx`), and the Agents screen has no
-    issue-code control — so the headline per-agent-enrollment path isn't the default one.
-    Fix: an issue-code control (mode/scope/ttl) on the Agents screen, and switch Overview's
-    strip to `IssuePairingCode`.
-27. **Port-conflict cards are informational, not one-click** — the gateway auto-reassigns a
-    clashing public port and logs it, but the roster's conflict cards
-    (`frontend/src/screens/Agents.tsx ConflictCards`) only offer "View agent"; the planned
-    one-click "take the port / evict the other" needs a gateway reclaim op. Auto-reassign
-    already avoids the hard failure, so this is a convenience affordance. Fix: a reclaim
-    engine op + a card action.
-28. **No per-agent "Update" nudge** — `AgentView` (`gateway.go AgentView`) carries no agent
-    app version, so a version-skewed agent can't be flagged in the roster. Fix: thread the
-    agent's reported version onto `AgentView` and render a card badge.
-29. **Config overlay/promote has no GUI** — gateway-authoritative sync works at the wire
-    level (push/propose/adopt), but no App method or view shows a pending local edit and a
-    "propose to gateway" action. The gateway reconciles silently, so nothing is broken; the
-    L2 overlay view is simply unbuilt. Fix: surface the pending overlay + a promote button
-    when the agent's set diverges.
 30. **Per-agent transport pin absent** — transport (auto / quic / per-conn / mux) is one
     global agent setting; per-agent management (`frontend/src/screens/Agents.tsx`) can't pin
-    a single agent's transport. Low priority. Fix: a per-agent override if ever needed.
-31. **`link.TunnelID` minter is unused in production** — the typed `tnl_` + `-2`-suffix
-    minter (`link/cred.go TunnelID`, tested by `TestTunnelID`) is not on the real
-    tunnel-create path, which still mints random hex (`config/config.go NewID`). Cross-agent
-    tunnel-ID uniqueness isn't required (per-agent namespacing + port auto-reassign handle
-    clashes), so it's a latent primitive, not a bug. Fix: adopt `tnl_` IDs on create, or drop
-    the unused minter.
+    a single agent's transport. Low priority, and arguably correct as-is: the agent owns its
+    own dial. Fix: a per-agent override if ever needed.
+32. **The gateway editor cannot add a tunnel** — it edits ports and removes tunnels
+    (`frontend/src/screens/Agents.tsx AgentConfigPanel`), because the wire carries no
+    `LocalAddr` and an operator has no way to know where a tunnel points on the agent's
+    LAN — an invented one would land inert. Adding stays the agent's job. Fix (if wanted):
+    let the operator propose a named tunnel the agent must complete with a local address
+    before it enables.
+33. **A dropped session forgets a pending proposal** — consent proposals are session-scoped
+    by design (no persisted schema), so a disconnect mid-approval drops the edit and the
+    author must re-submit. Self-healing and honest (the surfaces go quiet), but a
+    long-offline gateway operator can't queue a change. Fix (if wanted): persist pending
+    proposals on `AgentRecord` and re-offer them on connect.

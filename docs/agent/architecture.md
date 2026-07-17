@@ -141,6 +141,30 @@ the control stream → tunnel registration:
   adopts, bumps, and re-pushes — deterministic, not last-write-wins; a proposal on a
   stale generation is refused and the authoritative set re-pushed
   (`pushConfigOnConnect`/`adoptProposal`).
+- Capability `config-consent` (layers on `gateway-config`, so it drops with it for a
+  shared-token agent): mutual consent for *authored* edits. Either side proposes
+  `config_proposal{proposalId, baseGen, tunnels[], hash}`; the other holds it for its
+  user and answers `config_decision{proposalId, approved, reason, generation, hash}`.
+  Held state lives on the live session (`agentSession.pendingInbound`/`pendingOutbound`,
+  agent `session.pendingIncoming`/`pendingLocal`), so it is session-scoped: a
+  disconnect drops it and the author re-proposes. Nothing is durable.
+  - **The commit point is always `push_config`.** Approval makes the gateway adopt +
+    bump + push (`adoptAndPush`), and applying that push is what changes the agent —
+    the same path connect-sync, drift, and reclaim use. So a rejection needs no
+    rollback: nothing was written. `App.SaveTunnels` therefore persists nothing under
+    consent; the approval's push does, via the `ConfigPersister` the app wires.
+  - **Consent covers authored content only.** Arbitration (reclaim, auto-reassign,
+    connect-sync, drift) stays immediate on `push_config` with a notice. And an edit
+    the gateway cannot see — `LocalAddr`, PP2 — is applied unproposed, because
+    consent governs the gateway's set, not the agent's wiring
+    (`agent/consent.go ProposeTunnels` compares `HashTunnels` before proposing).
+  - Agent-local fields never ride the wire, so an approved *new* tunnel would come
+    back with no `LocalAddr`. The authored draft rides the pending proposal and is
+    overlaid on the merge (`agent/hotapply.go overlayDraft`); the push lands before
+    its decision on one ordered stream, so the draft is still there.
+  - A pushed spec can never *enable* a disabled draft (`mergeTunnels`), and a data
+    stream can never dial one (`enabledTunnelByID`) — see CLAUDE.md's Security
+    invariants.
 - Legacy: per-tunnel `register_tunnel`/`unregister_tunnel` + `register_ok|register_err`.
 Steady state: `ping/pong` both directions (RTT/jitter/loss both sides; pong echoes
 `recvUnixNano` for one-way estimates); agent pushes `health{tunnelId, localUp}` on
@@ -358,7 +382,12 @@ switcher cannot become the agent and must route to setup), `&geo=off|empty|error
 `&fx=low|high`, `&fleet=multi|old` (gateway only — `multi`: a five-agent fleet with a
 good/fair/poor health spread instead of the default single agent, for the Agents roster
 + drill-in; `old`: a pre-roster daemon that sends no agents array → the roster's
-honest-unavailable state). The traffic model is deterministic functions of absolute time, so
+honest-unavailable state), `&conflict=port|clone|both` (seeds the gateway event ring so
+the conflict cards + event log have data), `&deeplink=1` (a clicked `pxf://` invite),
+`&pending=in|out|both` (config-consent: a proposal awaiting this side, awaiting the
+peer, or both — the approval surfaces on either role), `&consent=off` (the peer predates
+config-consent, so edits apply the old way and the surfaces must say so honestly).
+The traffic model is deterministic functions of absolute time, so
 chart/tiles/replay all agree at any poll cadence. When you add a binding, add its stub
 here or the mock throws. Role setup mutates the mock's role, so the switcher flips the
 whole app live in the browser with no Go running.
