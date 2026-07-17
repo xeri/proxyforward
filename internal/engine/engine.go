@@ -3,6 +3,15 @@
 // headless CLI runs, the Windows service, and the GUI running in-process —
 // hosts exactly one Engine, so a GUI can always attach to whichever process
 // owns the ports.
+//
+// An Engine has two nested lifetimes. Run is the supervisor: it owns the pipe,
+// the analytics store, the identity resolver, and the metrics endpoint, and it
+// lives as long as the process is configured for a role. Inside it, the
+// tunnel run — the agent's dial loop or the gateway's listeners — starts and
+// stops independently via StartRun/StopRun. The supervisor outliving the run
+// is the point: a stopped or crashed tunnel must not take the pipe with it,
+// because the GUI needs the pipe most when the tunnel is down — to show why,
+// and to start it again.
 package engine
 
 import (
@@ -13,6 +22,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"proxyforward/internal/agent"
@@ -41,6 +51,21 @@ const (
 	// sessionSampleInterval is the per-connection traffic sample cadence for
 	// the session-replay timeline.
 	sessionSampleInterval = 15 * time.Second
+	// stopGrace bounds how long StopRun waits for a cancelled run to unwind
+	// before reporting that the stop did not land cleanly. It bounds the
+	// *caller*, not the run: the run is already cancelled and keeps unwinding
+	// either way, so a wedged link can delay the report but never withhold it.
+	stopGrace = 10 * time.Second
+)
+
+// RunState is the tunnel run's lifecycle, which is a separate axis from the
+// supervisor's: a stopped run leaves a live Engine still serving the pipe.
+type RunState string
+
+const (
+	RunRunning  RunState = "running"
+	RunStopping RunState = "stopping"
+	RunStopped  RunState = "stopped"
 )
 
 type Engine struct {
@@ -52,6 +77,11 @@ type Engine struct {
 	// Exactly one of these is non-nil, per cfg.Role.
 	Agent   *agent.Agent
 	Gateway *gateway.Gateway
+
+	// roleRun runs whichever of the two is live, until its ctx dies or it
+	// fails. Bound in New, where the role is already decided, so nothing later
+	// has to re-derive it.
+	roleRun func(context.Context) error
 
 	// Stats is the persistent bandwidth-history and lifetime store. Only the
 	// engine-owning process writes it; attached GUIs read over IPC.
@@ -72,6 +102,20 @@ type Engine struct {
 	// geo enriches sessions with GeoLite2 country/network data. Always
 	// non-nil; with no databases configured every lookup just misses.
 	geo *geo.Resolver
+
+	// runMu guards the tunnel run's lifecycle below. It is never held across a
+	// wait: StopRun copies the cancel/done pair out and releases it before
+	// blocking, so a wedged run cannot freeze a status read.
+	runMu sync.Mutex
+	// supCtx is the supervisor's context, set by Run. nil before Run starts,
+	// which is what makes StartRun refuse: a run started outside the
+	// supervisor's lifetime would have nothing to die with.
+	supCtx    context.Context
+	runCancel context.CancelFunc
+	runDone   chan struct{}
+	runState  RunState
+	// runErr is why the run stopped on its own, or nil when it was asked to.
+	runErr error
 }
 
 // conns returns the active role's connection registry.
@@ -84,12 +128,16 @@ func (e *Engine) conns() *conntrack.Registry {
 
 // New constructs the role object for cfg.Role (which must be set and valid).
 func New(cfg *config.Config, configDir, configPath string, logger *slog.Logger) (*Engine, error) {
-	e := &Engine{cfg: cfg, configDir: configDir, configPath: configPath, logger: logger}
+	e := &Engine{cfg: cfg, configDir: configDir, configPath: configPath, logger: logger, runState: RunStopped}
 	switch cfg.Role {
 	case config.RoleAgent:
 		e.Agent = agent.New(cfg, configDir, logger)
+		e.roleRun = e.Agent.Run
 	case config.RoleGateway:
 		e.Gateway = gateway.New(cfg, configDir, logger)
+		e.roleRun = func(ctx context.Context) error {
+			return gateway.RunStarted(ctx, e.Gateway, e.cfg, e.logger)
+		}
 	default:
 		return nil, fmt.Errorf("no role configured")
 	}
@@ -157,26 +205,22 @@ func (e *Engine) onConnRTT(en *conntrack.Entry) {
 	e.rec.RecordRTT(en, en.RTT())
 }
 
-// Run blocks until ctx is cancelled or either the role engine or the IPC
-// pipe fails. A pipe conflict (another daemon running) is fatal by design:
-// exactly one process may own ports and config.
+// Run is the supervisor. It serves the IPC pipe, the stats sampler, the
+// identity resolver, and the metrics endpoint, starts the tunnel run, and
+// blocks until ctx is cancelled or the pipe fails. A run that stops — asked to
+// or crashed — leaves the supervisor standing.
+//
+// A pipe conflict (another daemon running) is fatal by design: exactly one
+// process may own ports and config.
 func (e *Engine) Run(ctx context.Context) error {
-	var engineRun func(context.Context) error
-	if e.Agent != nil {
-		engineRun = e.Agent.Run
-	} else {
-		engineRun = func(ctx context.Context) error {
-			return gateway.RunStarted(ctx, e.Gateway, e.cfg, e.logger)
-		}
-	}
-
-	// Bracket this run in the uptime journal so the uptime queries can treat
-	// time between a graceful shutdown and the next start as unknown, not down.
-	e.rec.RecordEvent(analytics.EventEngine, "", "", true)
-
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errCh := make(chan error, 2)
+
+	e.runMu.Lock()
+	e.supCtx = runCtx
+	e.runMu.Unlock()
+
+	pipeErr := make(chan error, 1)
 	go func() {
 		// Extra pipe owners are a service-mode affair: there the engine runs as
 		// LocalSystem, so granting "the account we run as" grants nobody a GUI can
@@ -194,58 +238,147 @@ func (e *Engine) Run(ctx context.Context) error {
 		} else if err != nil && runCtx.Err() == nil {
 			err = fmt.Errorf("ipc pipe failed (is another proxyforward daemon running?): %w", err)
 		}
-		errCh <- err
+		pipeErr <- err
 	}()
-	go func() { errCh <- engineRun(runCtx) }()
 
-	// The stats sampler lives exactly as long as Run: its final flush must
-	// complete before Run returns, because a restarting GUI opens a new store
-	// on the same file the moment Run is done.
+	// The sampler, the resolver, and the metrics endpoint are supervisor-scoped:
+	// they describe the process, not the tunnel, so a stop must not silence them
+	// — Prometheus keeps answering with the tunnel down, which is when a monitor
+	// most wants an answer. They still end with Run: the sampler's final flush
+	// must land before it returns, because a GUI that swaps roles opens a new
+	// store on the same file the moment Run is done, and the metrics listener
+	// must be released for that new Engine to re-bind the port.
 	samplerDone := make(chan struct{})
 	go func() {
 		defer close(samplerDone)
 		e.runSampler(runCtx)
 	}()
-
-	// The identity resolver drains sightings until ctx dies.
 	resolverDone := make(chan struct{})
 	go func() {
 		defer close(resolverDone)
 		e.resolver.Run(runCtx)
 	}()
-
-	// The Prometheus endpoint (if enabled) lives exactly as long as Run and is
-	// best-effort: a bind failure never stops proxying. It must release its
-	// listener before Run returns so a restart can re-bind the same port.
 	metricsDone := make(chan struct{})
 	go func() {
 		defer close(metricsDone)
 		e.serveMetrics(runCtx)
 	}()
 
-	// First non-nil error (or first exit) wins; stop the other side, drain.
-	err := <-errCh
+	if err := e.StartRun(); err != nil {
+		e.logger.Error("engine run failed to start", "err", err)
+	}
+
+	// Only the process being asked to stop, or the pipe failing, ends the
+	// supervisor. A run exiting on its own does not: that is the state the GUI
+	// stays connected to read.
+	var err error
+	select {
+	case err = <-pipeErr:
+	case <-ctx.Done():
+	}
 	cancel()
-	if second := <-errCh; err == nil {
-		err = second
+
+	// Wait for the run the supervisor's cancel just killed: its final stats
+	// flush and its stop event both need the store this teardown closes.
+	e.runMu.Lock()
+	runDone := e.runDone
+	e.runMu.Unlock()
+	if runDone != nil {
+		<-runDone
 	}
 	<-samplerDone
 	<-resolverDone
 	<-metricsDone
-	// The sampler's final flush has landed and the resolver has stopped
-	// enqueuing; record the graceful stop and close. Close drains the writer,
-	// so this last event still commits.
-	e.rec.RecordEvent(analytics.EventEngine, "", "", false)
 	if e.DB != nil {
 		if cerr := e.DB.Close(); cerr != nil {
 			e.logger.Warn("analytics: close failed", "err", cerr)
 		}
 	}
 	e.geo.Close()
-	if ctx.Err() != nil {
-		return nil // orderly shutdown
-	}
 	return err
+}
+
+// StartRun starts the tunnel run. It is idempotent — starting a running engine
+// is a no-op — and refuses while a previous run is still unwinding, because
+// the ports it is about to bind may not be free yet.
+func (e *Engine) StartRun() error {
+	e.runMu.Lock()
+	defer e.runMu.Unlock()
+	switch {
+	case e.supCtx == nil:
+		return errors.New("engine is not running: start the daemon first")
+	case e.supCtx.Err() != nil:
+		return errors.New("engine is shutting down")
+	case e.runState == RunRunning:
+		return nil
+	case e.runState == RunStopping:
+		return errors.New("engine is still stopping: wait for it to finish, then start it again")
+	}
+
+	ctx, cancel := context.WithCancel(e.supCtx)
+	done := make(chan struct{})
+	e.runCancel, e.runDone, e.runState, e.runErr = cancel, done, RunRunning, nil
+
+	// Bracket the run in the uptime journal so uptime queries can treat time
+	// between a graceful stop and the next start as unknown, not down. It
+	// brackets the run and not the process: an engine stopped for a week must
+	// not read as a week of uptime.
+	e.rec.RecordEvent(analytics.EventEngine, "", "", true)
+
+	go func() {
+		defer close(done)
+		err := e.roleRun(ctx)
+		// A cancelled run stopped because it was asked to; that is not a fault
+		// to report, and only a fault should reach the UI as one.
+		if ctx.Err() != nil {
+			err = nil
+		}
+		e.runMu.Lock()
+		e.runErr, e.runState = err, RunStopped
+		e.runMu.Unlock()
+		e.rec.RecordEvent(analytics.EventEngine, "", "", false)
+		if err != nil {
+			e.logger.Error("engine run stopped with error", "err", err)
+		}
+	}()
+	return nil
+}
+
+// StopRun stops the tunnel run: the link is cut, the listeners close, and every
+// connection is dropped. It always completes.
+//
+// Without force it waits up to stopGrace and reports if that ran out. With
+// force it returns as soon as the run is cancelled, without waiting — the run
+// unwinds on its own either way, so force buys promptness, not power.
+func (e *Engine) StopRun(force bool) error {
+	e.runMu.Lock()
+	cancel, done := e.runCancel, e.runDone
+	if e.runState == RunRunning {
+		e.runState = RunStopping
+	}
+	e.runMu.Unlock()
+	if cancel == nil {
+		return nil // never started
+	}
+	cancel()
+	if force {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-time.After(stopGrace):
+		return fmt.Errorf("stopped, but the link did not close cleanly within %s", stopGrace)
+	}
+}
+
+// RunState reports the tunnel run's lifecycle and, when it stopped on its own,
+// the error that stopped it. A stopped run says nothing about the supervisor,
+// which is still serving the pipe this was read over.
+func (e *Engine) RunState() (RunState, error) {
+	e.runMu.Lock()
+	defer e.runMu.Unlock()
+	return e.runState, e.runErr
 }
 
 // linkAgentID identifies the agent on the far side of the control link, for
