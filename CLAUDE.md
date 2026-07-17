@@ -123,6 +123,15 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   (reconnect), a distinct one is admitted **alongside**; supersede is anti-flap dampened
   so an ID collision degrades to a slow contest, not a loop (`actor.go admit`,
   `noteSupersede`).
+- **Port 0 is not a port, it is "any port in the ephemeral range"** — so it is
+  policy-*valid* only when nothing constrains the choice. A port-0 request names
+  nothing for `validateSpec` to check; it asks the gateway to choose, so policy is
+  enforced where the choice is made, by `bindLocked` picking only from
+  `conflict.go allowedPorts` (scope narrows, allowlist filters; empty means this
+  agent may have no port at all). Waiving the check for 0 instead — which is what
+  it did — let a scoped agent bind a public listener on a port nobody allowed, once
+  per invented tunnel id (`TestEphemeralRequestStaysInsideScope`). Any new
+  port-granting path uses `allowedPorts` or it is not constrained.
 - "Unforgeable" above is a claim about **width**, and therefore a security parameter, not
   a display choice: `agentID` is the label the gateway keys supersede, scope, revocation,
   and config on, so it must stay wide enough that no second key answering to a victim's

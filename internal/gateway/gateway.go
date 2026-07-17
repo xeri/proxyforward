@@ -1563,9 +1563,11 @@ func (g *Gateway) validateSpec(spec control.TunnelSpec, scope Scope) *bindError 
 	if spec.PublicPort < 0 || spec.PublicPort > 65535 {
 		return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q: invalid public port %d", spec.Name, spec.PublicPort)}
 	}
-	// Per-agent scope: a scoped agent may bind only its allowed ports/tunnels. An
-	// ephemeral (0) port is gateway-chosen, so it is not port-scoped (mirrors the
-	// PortAllowlist rule below).
+	// Per-agent scope: a scoped agent may bind only its allowed ports/tunnels.
+	// An ephemeral (0) request names no port to check here — it asks the gateway
+	// to choose one — so policy for it is enforced where the choice is made, by
+	// bindLocked picking only from allowedPorts. It is emphatically not waived:
+	// waiving it here was how a scoped agent bound whatever it liked.
 	if spec.PublicPort != 0 && !scope.AllowsPort(spec.PublicPort) {
 		return &bindError{control.ErrCodePortNotAllowed, fmt.Sprintf("port %d is outside this agent's allowed ports", spec.PublicPort)}
 	}

@@ -1,6 +1,9 @@
 package gateway
 
-import "sort"
+import (
+	"slices"
+	"sort"
+)
 
 // Conflict resolution: the gateway prefers to keep an agent online and *report* a
 // clash rather than fail it. Two clashes are handled here — a public port already
@@ -86,25 +89,23 @@ func (r *eventRing) since(cursor uint64) []GatewayEvent {
 	return out
 }
 
-// reassignCandidates returns the ordered public ports to try when `requested` (a
-// specific, already-validated port) is found in use. Each candidate is
-// policy-valid — it passes the same scope + allowlist checks validateSpec applied
-// to the requested port — and the requested port itself is excluded. When neither
-// a scope nor an allowlist constrains the choice, the single candidate 0 means
-// "let the OS pick any free ephemeral port"; a constrained gateway must instead
-// stay inside its allowed set and never hand out an arbitrary port. An empty
-// result means no reassignment is possible (every allowed alternative is taken or
-// the request was already ephemeral) and the caller hard-fails as before.
-func reassignCandidates(requested int, scope Scope, allowlist []int) []int {
-	if requested == 0 {
-		return nil // an ephemeral request never conflicts, so it never reassigns
+// allowedPorts returns every public port policy permits, ascending — the single
+// source for "which ports may this agent have?", shared by the ephemeral-request
+// path and the reassignment fallback.
+//
+// The result [0] means *unconstrained*: 0 is not a port, it is "ask the OS for
+// anything free", so it is only ever policy-valid when nothing constrains the
+// choice. A constrained gateway gets concrete ports and never 0 — mixing the two
+// would hand out the whole ephemeral range next to the set the operator wrote
+// down, which is the same as having written nothing. An empty result is the
+// honest answer when a scope and an allowlist do not meet: this agent may have
+// no port at all.
+func allowedPorts(scope Scope, allowlist []int) []int {
+	if len(scope.Ports) == 0 && len(allowlist) == 0 {
+		return []int{0}
 	}
-	constrained := len(scope.Ports) > 0 || len(allowlist) > 0
-	if !constrained {
-		return []int{0} // unconstrained: any ephemeral port is policy-valid
-	}
-	// Enumerate the constraining set (scope narrows first; the allowlist filters),
-	// keep only policy-valid ports other than the requested one, sorted ascending.
+	// The scope narrows first (it is the per-agent grant); the allowlist filters
+	// (it is the gateway-wide ceiling). Either alone constrains.
 	universe := allowlist
 	if len(scope.Ports) > 0 {
 		universe = scope.Ports
@@ -112,8 +113,8 @@ func reassignCandidates(requested int, scope Scope, allowlist []int) []int {
 	seen := make(map[int]struct{}, len(universe))
 	var out []int
 	for _, p := range universe {
-		if p == requested || p <= 0 {
-			continue
+		if p <= 0 {
+			continue // 0 in a scope is not "any port"; it is not a port
 		}
 		if _, dup := seen[p]; dup {
 			continue
@@ -125,6 +126,24 @@ func reassignCandidates(requested int, scope Scope, allowlist []int) []int {
 		out = append(out, p)
 	}
 	sort.Ints(out)
+	return out
+}
+
+// reassignCandidates returns the ordered public ports to try when `requested` (a
+// specific, already-validated port) is found in use: every policy-valid port bar
+// the requested one. An empty result means no reassignment is possible (every
+// allowed alternative is taken, or the request was already ephemeral) and the
+// caller hard-fails as before.
+func reassignCandidates(requested int, scope Scope, allowlist []int) []int {
+	if requested == 0 {
+		return nil // an ephemeral request never conflicts, so it never reassigns
+	}
+	out := slices.DeleteFunc(allowedPorts(scope, allowlist), func(p int) bool {
+		return p == requested
+	})
+	if len(out) == 0 {
+		return nil // "nothing is possible", not "an empty list of possibilities"
+	}
 	return out
 }
 

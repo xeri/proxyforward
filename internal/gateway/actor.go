@@ -431,30 +431,44 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, bindAddr
 		<-old.done
 		delete(subtree, spec.ID)
 	}
-	ln, err := net.Listen("tcp", net.JoinHostPort(bindAddr, strconv.Itoa(spec.PublicPort)))
-	if err != nil {
-		if !portowner.IsAddrInUse(err) {
-			return 0, portowner.DecorateBindError(spec.PublicPort, err)
+	var ln net.Listener
+	if spec.PublicPort == 0 {
+		// "Gateway, you choose." The choice is the gateway's, so it must obey the
+		// gateway's policy: on a constrained gateway it comes from the allowed set,
+		// never from the OS's ephemeral range. Binding :0 here was the scope escape
+		// — an agent scoped to one port got a public listener on a port nobody
+		// allowed just by asking for 0, and could repeat it per invented tunnel id.
+		ln = listenFirstFree(bindAddr, allowedPorts(sess.scope, allowlist))
+		if ln == nil {
+			return 0, fmt.Errorf("tunnel %q: no public port this agent is allowed to bind is free", spec.Name)
 		}
-		// The requested port is taken. Bind a policy-valid alternative instead of
-		// failing, so the tunnel comes up; the listener keeps the *requested* spec
-		// so a later reconcile of the same spec is a no-op (sameListener) and the
-		// reassigned port stays put rather than re-contending on every sync.
-		reln := listenFirstFree(bindAddr, reassignCandidates(spec.PublicPort, sess.scope, allowlist))
-		if reln == nil {
-			return 0, portowner.DecorateBindError(spec.PublicPort, err)
+	} else {
+		var err error
+		ln, err = net.Listen("tcp", net.JoinHostPort(bindAddr, strconv.Itoa(spec.PublicPort)))
+		if err != nil {
+			if !portowner.IsAddrInUse(err) {
+				return 0, portowner.DecorateBindError(spec.PublicPort, err)
+			}
+			// The requested port is taken. Bind a policy-valid alternative instead of
+			// failing, so the tunnel comes up; the listener keeps the *requested* spec
+			// so a later reconcile of the same spec is a no-op (sameListener) and the
+			// reassigned port stays put rather than re-contending on every sync.
+			reln := listenFirstFree(bindAddr, reassignCandidates(spec.PublicPort, sess.scope, allowlist))
+			if reln == nil {
+				return 0, portowner.DecorateBindError(spec.PublicPort, err)
+			}
+			actual := reln.Addr().(*net.TCPAddr).Port
+			a.recordEvent(GatewayEvent{
+				Kind:          EventPortReassigned,
+				AgentID:       sess.agentID,
+				TunnelID:      spec.ID,
+				RequestedPort: spec.PublicPort,
+				ActualPort:    actual,
+				Message:       fmt.Sprintf("%q could not take port %d (in use by %s); it is on port %d until you reclaim %d", spec.Name, spec.PublicPort, a.portHolderDesc(spec.PublicPort), actual, spec.PublicPort),
+			})
+			a.logger.Warn("public port in use; reassigned tunnel", "tunnel_id", spec.ID, "requested_port", spec.PublicPort, "actual_port", actual)
+			ln = reln
 		}
-		actual := reln.Addr().(*net.TCPAddr).Port
-		a.recordEvent(GatewayEvent{
-			Kind:          EventPortReassigned,
-			AgentID:       sess.agentID,
-			TunnelID:      spec.ID,
-			RequestedPort: spec.PublicPort,
-			ActualPort:    actual,
-			Message:       fmt.Sprintf("%q could not take port %d (in use by %s); it is on port %d until you reclaim %d", spec.Name, spec.PublicPort, a.portHolderDesc(spec.PublicPort), actual, spec.PublicPort),
-		})
-		a.logger.Warn("public port in use; reassigned tunnel", "tunnel_id", spec.ID, "requested_port", spec.PublicPort, "actual_port", actual)
-		ln = reln
 	}
 	pl := &publicListener{spec: spec, owner: sess, ln: ln, done: make(chan struct{})}
 	pl.limiters.Store(bwcap.BuildSet(spec.BandwidthLimitMbps, spec.BandwidthLimitScope))
