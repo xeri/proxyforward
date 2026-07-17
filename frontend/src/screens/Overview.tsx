@@ -1,12 +1,16 @@
 import {ReactNode, useEffect, useRef, useState} from 'react'
-import {GetConfig, IssuePairingCode, MeasureLatency, PairingCode, RestartEngine} from '../../wailsjs/go/app/App'
+import {
+  ApproveGatewayProposal, GetConfig, IssuePairingCode, MeasureLatency, PairingCode,
+  RejectGatewayProposal, RestartEngine,
+} from '../../wailsjs/go/app/App'
 import {prefersReduced} from '../motion'
-import {app} from '../../wailsjs/go/models'
+import {agent, app} from '../../wailsjs/go/models'
+import {proposalAge, ProposalDiff, specsOf, useAgentConsent} from '../consent'
 import {BandwidthPanel} from '../components/BandwidthChart'
 import {NumberTicker} from '../components/NumberTicker'
 import {
   Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, Disclosure, ErrorBanner,
-  IconButton, Overline, PageHeader, RoleWord, SignalCard, StatTile, StatusDot,
+  IconButton, Overline, PageHeader, RoleWord, SignalCard, StatTile, StatusDot, TextInput,
 } from '../components/ui'
 import {Emblem} from '../components/Emblem'
 import {IconActivity, IconEye, IconEyeOff, IconGlobe, IconLink, IconRefresh, IconServer} from '../components/icons'
@@ -19,11 +23,70 @@ const segColor: Record<Seg, string> = {
   good: 'var(--good)', warn: 'var(--warn)', bad: 'var(--bad)', unknown: 'var(--text-3)',
 }
 
+/** GatewayProposalBanner (agent role): the gateway operator has authored a change to
+ * this machine's tunnels and it is waiting on the person sitting here. It applies
+ * only on approval — that is the whole promise of config-consent — so the diff is
+ * spelled out and both answers are one click. A rejection asks for a reason, which
+ * the operator sees verbatim in their event log.
+ *
+ * A plain Banner in the existing alert stack: the pipeline below is this page's one
+ * identity surface, and nothing else may answer the pointer. */
+function GatewayProposalBanner({proposal, current, onDecided}: {
+  proposal: agent.ProposalView
+  current: {id: string; name?: string; publicPort?: number}[]
+  onDecided: () => void
+}) {
+  const [reason, setReason] = useState('')
+  const [rejecting, setRejecting] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const decide = (fn: () => Promise<void>) => {
+    setBusy(true); setErr('')
+    fn().then(() => { setRejecting(false); setReason(''); onDecided() })
+      .catch(e => setErr(String(e?.message ?? e)))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <Banner tone="warn">
+      <div className="space-y-2.5">
+        <div>
+          <div className="font-medium">The gateway proposes a change to your tunnels</div>
+          <div className="text-[12px] text-[var(--text-3)]">Sent {proposalAge(proposal.atMs)}. Nothing on this machine changes unless you approve it.</div>
+        </div>
+        <ProposalDiff current={current} proposed={specsOf(proposal.tunnels)} />
+        {rejecting ? (
+          <div className="space-y-2">
+            <TextInput value={reason} onChange={setReason} size="sm" autoFocus
+              placeholder="Why? The gateway operator sees this."
+              onEnter={() => { if (!busy) decide(() => RejectGatewayProposal(proposal.proposalId, reason)) }} />
+            <div className="flex gap-2">
+              <Button size="sm" variant="danger" disabled={busy}
+                onClick={() => decide(() => RejectGatewayProposal(proposal.proposalId, reason))}>Reject</Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setRejecting(false); setErr('') }}>Cancel</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Button size="sm" disabled={busy}
+              onClick={() => decide(() => ApproveGatewayProposal(proposal.proposalId))}>Approve</Button>
+            <Button size="sm" variant="subtle" disabled={busy} onClick={() => setRejecting(true)}>Reject…</Button>
+          </div>
+        )}
+        {err && <div className="text-[12px] text-[var(--bad)]">{err}</div>}
+      </div>
+    </Banner>
+  )
+}
+
 /** Overview: the tunnel at a glance — alerts, the traffic pipeline, link
  * health with an inline latency probe, headline stats, both identities, the
  * role tool, and a one-hour bandwidth teaser that jumps to Traffic. */
 export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (id: NavId) => void}) {
   const isAgent = status.role === 'agent'
+  // Only the agent role can be asked to approve anything, so only it polls.
+  const consent = useAgentConsent(isAgent)
   const tunnels = status.tunnels ?? []
   const conns = status.connections ?? []
   const firstTunnel = tunnels[0]
@@ -96,6 +159,15 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
         {status.mode === 'attached' && (
           <div className="mb-4">
             <Banner tone="info">Running as a Windows service — this window is a viewer.</Banner>
+          </div>
+        )}
+        {consent.view?.incoming && (
+          <div className="mb-4">
+            <GatewayProposalBanner
+              proposal={consent.view.incoming}
+              current={(status.tunnels ?? []).map(t => ({id: t.id, name: t.name, publicPort: t.publicPort}))}
+              onDecided={consent.refresh}
+            />
           </div>
         )}
 

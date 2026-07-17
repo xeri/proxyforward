@@ -1,9 +1,11 @@
-import {ReactNode, useEffect, useMemo, useRef, useState} from 'react'
+import {ReactNode, useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {
-  AgentBandwidthHistory, AgentDesiredConfig, GatewayEvents, IssuePairingCode, ListAgents,
-  ReclaimPort, RenameAgent, RevokeAgent, SetAgentScope,
+  AgentBandwidthHistory, AgentDesiredConfig, ApproveAgentProposal, GatewayEvents, IssuePairingCode,
+  ListAgents, ProposeAgentConfig, ReclaimPort, RejectAgentProposal, RenameAgent, RevokeAgent,
+  SetAgentScope,
 } from '../../wailsjs/go/app/App'
-import {app, gateway} from '../../wailsjs/go/models'
+import {app, control, gateway} from '../../wailsjs/go/models'
+import {proposalAge, ProposalDiff, specsOf} from '../consent'
 import {BandwidthPanel} from '../components/BandwidthChart'
 import {Emblem} from '../components/Emblem'
 import {
@@ -151,21 +153,33 @@ function useGatewayEvents(enabled: boolean): GwEvent[] | null {
 // from a resolved-but-empty set, and `err` is the honest-unavailable state (a
 // pre-roster daemon that lacks the binding) — usePolled swallows errors and can't tell
 // those apart, so this is its own hook like useGatewayEvents.
+// Polled, not one-shot: under config-consent a proposal can arrive from the agent at
+// any moment and a decision on either side moves the generation, so the panel has to
+// notice both without a reload. Cached by agentId so re-opening a drill-in paints
+// instantly; refresh() forces the re-read after this operator decides something.
 const agentConfigCache = new Map<string, gateway.AgentConfigView>()
-function useAgentConfig(agentId: string): {cfg: gateway.AgentConfigView | null; loading: boolean; err: boolean} {
+function useAgentConfig(agentId: string, pollMs = 3000): {
+  cfg: gateway.AgentConfigView | null; loading: boolean; err: boolean; refresh: () => void
+} {
   const [cfg, setCfg] = useState<gateway.AgentConfigView | null>(() => agentConfigCache.get(agentId) ?? null)
   const [loading, setLoading] = useState(!agentConfigCache.has(agentId))
   const [err, setErr] = useState(false)
+  const [nonce, setNonce] = useState(0)
+  const refresh = useCallback(() => setNonce(n => n + 1), [])
   useEffect(() => {
     let alive = true
     const cached = agentConfigCache.get(agentId)
     setCfg(cached ?? null); setLoading(!cached); setErr(false)
-    AgentDesiredConfig(agentId)
-      .then(v => { if (!alive) return; agentConfigCache.set(agentId, v); setCfg(v); setLoading(false) })
-      .catch(() => { if (alive) { setErr(true); setLoading(false) } })
-    return () => { alive = false }
-  }, [agentId])
-  return {cfg, loading, err}
+    const tick = () => {
+      AgentDesiredConfig(agentId)
+        .then(v => { if (!alive) return; agentConfigCache.set(agentId, v); setCfg(v); setLoading(false); setErr(false) })
+        .catch(() => { if (alive) { setErr(true); setLoading(false) } })
+    }
+    tick()
+    const id = setInterval(tick, pollMs)
+    return () => { alive = false; clearInterval(id) }
+  }, [agentId, pollMs, nonce])
+  return {cfg, loading, err, refresh}
 }
 
 /**
@@ -947,15 +961,110 @@ function AgentManagement({view, onChanged}: {view: AgentView; onChanged: () => v
   )
 }
 
-/** AgentConfigPanel: the gateway-authoritative desired tunnel set the gateway holds
- * for this agent — read-only in Batch A (editing + promote with consent is Batch B).
+/** InboundProposalBanner: this agent has authored an edit and is waiting on us. The
+ * diff is the whole point — approving is agreeing to specific changes, so they are
+ * spelled out rather than summarised. Rejecting asks for a reason, because the agent
+ * shows it verbatim to whoever made the edit. */
+function InboundProposalBanner({agentId, proposal, current, onDecided}: {
+  agentId: string
+  proposal: gateway.ProposalView
+  current: control.TunnelSpec[]
+  onDecided: () => void
+}) {
+  const [reason, setReason] = useState('')
+  const [rejecting, setRejecting] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const decide = (fn: () => Promise<void>) => {
+    setBusy(true); setErr('')
+    fn().then(() => { setRejecting(false); setReason(''); onDecided() })
+      .catch(e => setErr(String(e?.message ?? e)))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <Banner tone="warn">
+      <div className="space-y-2.5">
+        <div>
+          <div className="font-medium">This agent proposes a config change</div>
+          <div className="text-[12px] text-[var(--text-3)]">Sent {proposalAge(proposal.atMs)}. Nothing changes until you approve it.</div>
+        </div>
+        <ProposalDiff current={specsOf(current)} proposed={specsOf(proposal.tunnels)} />
+        {rejecting ? (
+          <div className="space-y-2">
+            <TextInput value={reason} onChange={setReason} size="sm" autoFocus
+              placeholder="Why? The agent shows this to whoever made the edit."
+              onEnter={() => { if (!busy) decide(() => RejectAgentProposal(agentId, proposal.proposalId, reason)) }} />
+            <div className="flex gap-2">
+              <Button size="sm" variant="danger" disabled={busy}
+                onClick={() => decide(() => RejectAgentProposal(agentId, proposal.proposalId, reason))}>Reject</Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setRejecting(false); setErr('') }}>Cancel</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Button size="sm" disabled={busy}
+              onClick={() => decide(() => ApproveAgentProposal(agentId, proposal.proposalId))}>Approve</Button>
+            <Button size="sm" variant="subtle" disabled={busy} onClick={() => setRejecting(true)}>Reject…</Button>
+          </div>
+        )}
+        {err && <div className="text-[12px] text-[var(--bad)]">{err}</div>}
+      </div>
+    </Banner>
+  )
+}
+
+/** AgentConfigPanel: the gateway-authoritative tunnel set the gateway holds for this
+ * agent — and, under config-consent, where an operator edits it. An edit here is a
+ * *proposal*: Save sends it and the agent must accept before anything moves, so the
+ * button says so and the panel then shows the wait.
+ *
+ * Ports and removal only. The gateway allocates ports and decides what it serves; it
+ * has no idea where a tunnel points on the agent's LAN, and the wire never carries
+ * that — so an operator-invented tunnel would land with nothing to dial. Adding stays
+ * the agent's job.
+ *
  * Four states: skeleton while AgentDesiredConfig resolves, the tunnel list, a written
  * empty state for an enrolled agent with no config yet, and the honest-unavailable
  * state told two ways apart — a shared-token agent (config is agent-pushed, not
  * gateway-held) vs a daemon too old to report it. */
 function AgentConfigPanel({view}: {view: AgentView}) {
-  const {cfg, loading, err} = useAgentConfig(view.agentId)
-  const tunnels = cfg?.tunnels ?? []
+  const {cfg, loading, err, refresh} = useAgentConfig(view.agentId)
+  const server = useMemo(() => cfg?.tunnels ?? [], [cfg])
+  const pendingOut = cfg?.pendingOutbound
+  const pendingIn = cfg?.pendingInbound
+
+  // Reseed the draft from the server's set, but never over an edit in progress —
+  // this panel re-polls every 3s and would otherwise wipe what is being typed.
+  const serverKey = useMemo(() => JSON.stringify(server.map(t => [t.id, t.publicPort])), [server])
+  const [draft, setDraft] = useState<control.TunnelSpec[]>([])
+  const [dirty, setDirty] = useState(false)
+  const [saveErr, setSaveErr] = useState('')
+  const [saving, setSaving] = useState(false)
+  useEffect(() => {
+    if (dirty) return
+    setDraft(server.map(t => ({...t} as control.TunnelSpec)))
+  }, [serverKey, dirty, server])
+
+  // Editing needs a live consent session and no proposal already in flight — a
+  // second one would silently supersede the first.
+  const editable = !!cfg?.enrolled && !!cfg.consentActive && !pendingOut
+  const edit = (id: string, port: number) => {
+    setDirty(true)
+    setDraft(d => d.map(t => (t.id === id ? {...t, publicPort: port} as control.TunnelSpec : t)))
+  }
+  const drop = (id: string) => { setDirty(true); setDraft(d => d.filter(t => t.id !== id)) }
+  const reset = () => { setDirty(false); setSaveErr(''); setDraft(server.map(t => ({...t} as control.TunnelSpec))) }
+  const submit = () => {
+    setSaving(true); setSaveErr('')
+    ProposeAgentConfig(view.agentId, draft)
+      .then(() => { setDirty(false); refresh() })
+      .catch(e => setSaveErr(String(e?.message ?? e)))
+      .finally(() => setSaving(false))
+  }
+
+  const rows = dirty ? draft : server
   return (
     <Card label="Gateway config" pad={false}
       action={cfg?.enrolled ? <div className="pr-1"><MonoChip>gen {cfg.generation}</MonoChip></div> : undefined}>
@@ -975,25 +1084,76 @@ function AgentConfigPanel({view}: {view: AgentView}) {
       ) : cfg && !cfg.enrolled ? (
         <div className="px-5 pb-5"><EmptyState icon={<IconShield size={24} />} title="Shared-token agent"
           hint="This agent authenticates with the legacy shared token, so its tunnel config is agent-pushed — the gateway holds none to show." /></div>
-      ) : tunnels.length === 0 ? (
-        <div className="px-5 pb-5"><EmptyState icon={<IconTunnels size={24} />} title="No tunnels yet"
-          hint="The gateway holds no config for this agent — it will seed on connect." /></div>
       ) : (
-        <div className="divide-y divide-[var(--border)]">
-          {tunnels.map(t => (
-            <div key={t.id} className="flex items-center gap-3 px-5 py-2.5">
-              <div className="pf-control grid h-8 w-8 shrink-0 place-items-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-2)]"><IconServer size={15} /></div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{t.name || t.id}</div>
-                <div className="truncate font-mono text-[11px] text-[var(--text-3)]">{t.id}</div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Badge>{(t.type || 'tcp').toUpperCase()}</Badge>
-                <MonoChip>{t.publicPort > 0 ? `:${t.publicPort}` : 'auto'}</MonoChip>
-              </div>
+        <>
+          {(pendingIn || pendingOut || (cfg?.enrolled && !cfg.consentActive)) && (
+            <div className="space-y-2 px-5 pb-3">
+              {pendingIn && (
+                <InboundProposalBanner agentId={view.agentId} proposal={pendingIn} current={server} onDecided={refresh} />
+              )}
+              {pendingOut && (
+                <Banner tone="info">
+                  <div className="space-y-2">
+                    <div>
+                      <div className="font-medium">Proposed — awaiting the agent’s approval</div>
+                      <div className="text-[12px] text-[var(--text-3)]">Sent {proposalAge(pendingOut.atMs)}. It applies only if the agent accepts.</div>
+                    </div>
+                    <ProposalDiff current={specsOf(server)} proposed={specsOf(pendingOut.tunnels)} />
+                  </div>
+                </Banner>
+              )}
+              {cfg?.enrolled && !cfg.consentActive && (
+                <Banner tone="info">
+                  {view.connected
+                    ? 'This agent runs a build without config approvals, so its tunnels can’t be edited from here. Update the agent to edit them.'
+                    : 'This agent is offline. Editing needs a live session — a proposal has to be delivered and accepted.'}
+                </Banner>
+              )}
             </div>
-          ))}
-        </div>
+          )}
+          {rows.length === 0 ? (
+            <div className="px-5 pb-5"><EmptyState icon={<IconTunnels size={24} />} title="No tunnels yet"
+              hint="The gateway holds no config for this agent — it will seed on connect." /></div>
+          ) : (
+            <div className="divide-y divide-[var(--border)]">
+              {rows.map(t => (
+                <div key={t.id} className="flex items-center gap-3 px-5 py-2.5">
+                  <div className="pf-control grid h-8 w-8 shrink-0 place-items-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-2)]"><IconServer size={15} /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{t.name || t.id}</div>
+                    <div className="truncate font-mono text-[11px] text-[var(--text-3)]">{t.id}</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Badge>{(t.type || 'tcp').toUpperCase()}</Badge>
+                    {editable ? (
+                      <>
+                        <div className="w-20">
+                          <TextInput value={t.publicPort ? String(t.publicPort) : ''} placeholder="auto" size="sm" mono
+                            ariaLabel={`Public port for ${t.name || t.id}`}
+                            onChange={v => edit(t.id, Math.max(0, Math.min(65535, parseInt(v.replace(/\D/g, ''), 10) || 0)))} />
+                        </div>
+                        <Button size="sm" variant="ghost" onClick={() => drop(t.id)} title={`Stop serving ${t.name || t.id}`}>Remove</Button>
+                      </>
+                    ) : (
+                      <MonoChip>{t.publicPort > 0 ? `:${t.publicPort}` : 'auto'}</MonoChip>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {editable && dirty && (
+            <div className="space-y-2 border-t border-[var(--border)] px-5 py-3">
+              <ProposalDiff current={specsOf(server)} proposed={specsOf(draft)} />
+              <div className="flex items-center gap-2">
+                <Button size="sm" disabled={saving} onClick={submit}>Propose to agent</Button>
+                <Button size="sm" variant="ghost" disabled={saving} onClick={reset}>Cancel</Button>
+                <span className="text-[12px] text-[var(--text-3)]">The agent must accept before anything moves.</span>
+              </div>
+              {saveErr && <div className="text-[12px] text-[var(--bad)]">{saveErr}</div>}
+            </div>
+          )}
+        </>
       )}
     </Card>
   )

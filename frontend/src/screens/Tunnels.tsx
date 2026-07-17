@@ -2,8 +2,9 @@ import {useEffect, useState} from 'react'
 import {GetConfig, SaveTunnels, TestReachability} from '../../wailsjs/go/app/App'
 import {config} from '../../wailsjs/go/models'
 import {Column, DataTable} from '../components/DataTable'
+import {proposalAge, ProposalDiff, specsOf, useAgentConsent} from '../consent'
 import {
-  Badge, Button, Card, Disclosure, EmptyState, ErrorBanner, Field, IconButton,
+  Badge, Banner, Button, Card, Disclosure, EmptyState, ErrorBanner, Field, IconButton,
   Modal, MonoChip, PageHeader, Select, Skeleton, TextInput, Toggle,
 } from '../components/ui'
 import {IconBolt, IconEdit, IconPlus, IconServer, IconTrash, IconTunnels} from '../components/icons'
@@ -41,18 +42,33 @@ export function Tunnels({status}: {status: UIStatus}) {
   const [loaded, setLoaded] = useState(false)
   const [editing, setEditing] = useState<Tunnel | null>(null)
   const [err, setErr] = useState('')
+  // Only the agent authors tunnels, so only it can be waiting on an approval.
+  const consent = useAgentConsent(isAgent)
 
   const reload = () => GetConfig().then(c => { setTunnels(c.Agent?.Tunnels ?? []); setLoaded(true) }).catch(e => setErr(String(e)))
   useEffect(() => { reload() }, [])
 
   // Live state per tunnel, keyed by ID.
   const live = new Map((status.tunnels ?? []).map(t => [t.id, t]))
+  // The set the gateway can see — a proposal only ever carries the enabled tunnels,
+  // so the diff must compare against those, not local drafts.
+  const enabledNow = tunnels.filter(t => t.Enabled)
 
+  // Under config-consent a save is a *submission*: the gateway has to approve before
+  // anything here moves, so painting `next` as applied would be a lie — the screen
+  // would show a port that isn't serving. Re-read the truth instead and let the
+  // pending banner explain the wait. This is also right for an edit the gateway
+  // cannot see (a local address), which applies at once and reload() picks up.
   const persist = async (next: Tunnel[]) => {
     setErr('')
     try {
       await SaveTunnels(next)
-      setTunnels(next)
+      if (consent.view?.consentActive) {
+        await reload()
+        consent.refresh()
+      } else {
+        setTunnels(next)
+      }
       setEditing(null)
     } catch (e) { setErr(String(e)) }
   }
@@ -99,10 +115,39 @@ export function Tunnels({status}: {status: UIStatus}) {
     <div className="pf-stagger space-y-4">
       <PageHeader
         title="Tunnels"
-        subtitle="Map local servers to public ports. Changes apply live."
+        subtitle={consent.view?.consentActive
+          ? 'Map local servers to public ports. Changes go to the gateway for approval.'
+          : 'Map local servers to public ports. Changes apply live.'}
         action={<Button onClick={() => setEditing(blankTunnel(tunnels))}><IconPlus size={16} /> Add tunnel</Button>}
       />
       {err && <ErrorBanner message={err} onDismiss={() => setErr('')} />}
+
+      {/* A submitted edit is invisible without this: the list still shows the old
+          truth (correctly), so the wait has to be stated or the save reads as a no-op. */}
+      {consent.view?.outgoing && (
+        <Banner tone="info">
+          <div className="space-y-2">
+            <div>
+              <div className="font-medium">Waiting for the gateway to approve your change</div>
+              <div className="text-[12px] text-[var(--text-3)]">
+                Sent {proposalAge(consent.view.outgoing.atMs)}. Your tunnels keep running as they are until it is accepted.
+              </div>
+            </div>
+            <ProposalDiff
+              current={enabledNow.map(t => ({id: t.ID, name: t.Name, publicPort: t.PublicPort}))}
+              proposed={specsOf(consent.view.outgoing.tunnels)}
+            />
+          </div>
+        </Banner>
+      )}
+      {/* A declined edit changed nothing, so without the reason the save just
+          vanished. The gateway operator's words, verbatim. */}
+      {consent.view?.lastDecline && !consent.view.outgoing && (
+        <Banner tone="warn">
+          <div className="font-medium">The gateway declined your last change</div>
+          <div className="text-[12px] text-[var(--text-3)]">{consent.view.lastDecline}</div>
+        </Banner>
+      )}
 
       {!loaded && (
         <div className="grid grid-cols-1 gap-[var(--grid-gap)] @min-[56rem]:grid-cols-2 @min-[84rem]:grid-cols-3" aria-busy="true">

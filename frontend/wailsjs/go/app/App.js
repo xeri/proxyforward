@@ -6,8 +6,20 @@ export function AgentBandwidthHistory(arg1, arg2, arg3) {
   return window['go']['app']['App']['AgentBandwidthHistory'](arg1, arg2, arg3);
 }
 
+export function AgentConsent() {
+  return window['go']['app']['App']['AgentConsent']();
+}
+
 export function AgentDesiredConfig(arg1) {
   return window['go']['app']['App']['AgentDesiredConfig'](arg1);
+}
+
+export function ApproveAgentProposal(arg1, arg2) {
+  return window['go']['app']['App']['ApproveAgentProposal'](arg1, arg2);
+}
+
+export function ApproveGatewayProposal(arg1) {
+  return window['go']['app']['App']['ApproveGatewayProposal'](arg1);
 }
 
 export function AvatarHandler() {
@@ -138,12 +150,24 @@ export function Players(arg1) {
   return window['go']['app']['App']['Players'](arg1);
 }
 
+export function ProposeAgentConfig(arg1, arg2) {
+  return window['go']['app']['App']['ProposeAgentConfig'](arg1, arg2);
+}
+
 export function ReclaimPort(arg1, arg2, arg3) {
   return window['go']['app']['App']['ReclaimPort'](arg1, arg2, arg3);
 }
 
 export function RegenerateToken() {
   return window['go']['app']['App']['RegenerateToken']();
+}
+
+export function RejectAgentProposal(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RejectAgentProposal'](arg1, arg2, arg3);
+}
+
+export function RejectGatewayProposal(arg1, arg2) {
+  return window['go']['app']['App']['RejectGatewayProposal'](arg1, arg2);
 }
 
 export function RenameAgent(arg1, arg2) {

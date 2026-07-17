@@ -32,6 +32,18 @@
 //                      (event log shows its written-empty state, no cards).
 //                      Pair with &fleet=multi so the port event links to its
 //                      contesting agent in the roster.
+//   &pending=in|out|both
+//                    — config-consent (mutual approval) axes. On the gateway:
+//                      in → SURVIVAL-RIG has proposed an edit awaiting your
+//                      approval; out → you have proposed one awaiting the agent.
+//                      On the agent: in → the gateway has proposed an edit
+//                      awaiting yours; out → your own edit is awaiting the
+//                      gateway; both → both at once. No axis → consent is live
+//                      but nothing is pending (the editor's idle state).
+//   &consent=off     — the peer is an older build (or shared-token) with no
+//                      config-consent, so edits apply the old way and the
+//                      approval surfaces must say so honestly rather than
+//                      promise an approval that never comes.
 //   &paired=0        — this machine has never been paired to a gateway, so the
 //                      sidebar's role switcher can't become the agent and must
 //                      route to setup instead (pair with ?mock=gateway)
@@ -59,6 +71,8 @@ export function installDevMock() {
   const axisFleet = params.get('fleet') || '' // '' (single agent) | multi | old
   const axisConflict = params.get('conflict') || '' // '' | port | clone | both
   const axisDeepLink = params.get('deeplink') === '1' // simulate a clicked pxf:// invite
+  const axisPending = params.get('pending') || '' // '' | in | out | both
+  const axisConsentOff = params.get('consent') === 'off' // peer without config-consent
   const fx = params.get('fx')
   if (fx) document.documentElement.dataset.fx = fx // &fx=high | &fx=low
 
@@ -406,14 +420,62 @@ export function installDevMock() {
     agt_b7k3n5pd: {gen: 0, tunnels: []}, // enrolled, no config yet → empty state
     agt_x2m8r6ct: {gen: 2, tunnels: []},
   }
+  // consentState decorates a config view with the live session's approval state.
+  // Only a connected, enrolled agent can be consent-capable; an offline one has no
+  // session, so the editor must fall back to its honest unavailable state rather
+  // than offer a Save that could never be delivered.
+  const consentState = (id: string, connected: boolean) => ({
+    consentActive: connected && consentLive,
+    pendingInbound: id === CONSENT_AGENT ? gwPendingIn ?? undefined : undefined,
+    pendingOutbound: id === CONSENT_AGENT ? gwPendingOut ?? undefined : undefined,
+  })
   const agentDesiredConfig = (id: string) => {
-    if (state.role !== 'gateway') return {generation: 0, tunnels: [], enrolled: false}
+    if (state.role !== 'gateway') return {generation: 0, tunnels: [], enrolled: false, consentActive: false}
     const extra = extraAgents.find(a => a.agentId === id)
-    if (extra) return {generation: 3 + extra.tunnels.length, tunnels: extra.tunnels.map(toSpec), enrolled: true}
+    if (extra) return {generation: 3 + extra.tunnels.length, tunnels: extra.tunnels.map(toSpec), enrolled: true, ...consentState(id, true)}
     const off = OFFLINE_CONFIG[id]
-    if (off) return {generation: off.gen, tunnels: off.tunnels.map(toSpec), enrolled: true}
-    return {generation: 0, tunnels: [], enrolled: false} // agentid (shared-token) / unknown
+    if (off) return {generation: off.gen, tunnels: off.tunnels.map(toSpec), enrolled: true, ...consentState(id, false)}
+    return {generation: 0, tunnels: [], enrolled: false, consentActive: false} // agentid (shared-token) / unknown
   }
+
+  // ---- config consent (mutual approval) ----
+  // Pending proposals are session-scoped in the real engine, so they live here as
+  // plain mutable state: approve/reject clear them and the next poll shows the
+  // result, mirroring the real write-then-repoll loop. The proposed sets are a
+  // visible *diff* against what the agent serves today (a port move plus an added
+  // tunnel), so the approval surfaces have something to render rather than a set
+  // identical to the current one.
+  // SURVIVAL-RIG: enrolled, connected, and already the reclaim card's subject, so the
+  // consent surfaces land on an agent every other gateway axis also populates.
+  const CONSENT_AGENT = '7788990011223344aabbccddeeff0011'
+  // A proposal is only interesting if it *differs* from what is served today: move
+  // the first tunnel's port and add one, so the approval diff has both kinds of row.
+  const consentTunnels = (base: any[], addName: string) => [
+    ...base.map((t, i) => (i === 0 ? {...toSpec(t), publicPort: t.port + 100} : toSpec(t))),
+    {id: `tnl_${addName.toLowerCase()}`, name: addName, type: 'tcp', publicPort: 0, bandwidthLimitMbps: 0, bandwidthLimitScope: ''},
+  ]
+  const wantIn = axisPending === 'in' || axisPending === 'both'
+  const wantOut = axisPending === 'out' || axisPending === 'both'
+  const consentLive = !axisConsentOff
+  // Gateway side: inbound = the agent proposed, awaiting this operator.
+  //               outbound = this operator proposed, awaiting the agent.
+  const gwBase = extraAgents.find(a => a.agentId === CONSENT_AGENT)?.tunnels ?? []
+  let gwPendingIn: any = wantIn && consentLive
+    ? {proposalId: 'prp_a1b2c3d4', baseGen: 5, tunnels: consentTunnels(gwBase, 'Creative'), atMs: Date.now() - 4 * 60_000}
+    : null
+  let gwPendingOut: any = wantOut && consentLive
+    ? {proposalId: 'prp_e5f6a7b8', baseGen: 5, tunnels: consentTunnels(gwBase, 'Staging'), atMs: Date.now() - 90_000}
+    : null
+  // Agent side: incoming = the gateway proposed, awaiting this machine.
+  //             outgoing = this machine proposed, awaiting the gateway.
+  const agBase = [{id: tunnelID, name: 'Minecraft', port: 25565}]
+  let agPendingIn: any = wantIn && consentLive
+    ? {proposalId: 'prp_c3d4e5f6', tunnels: consentTunnels(agBase, 'Creative'), atMs: Date.now() - 3 * 60_000}
+    : null
+  let agPendingOut: any = wantOut && consentLive
+    ? {proposalId: 'prp_b2c3d4e5', tunnels: consentTunnels(agBase, 'Staging'), atMs: Date.now() - 45_000}
+    : null
+  let agLastDecline = ''
 
   // ---- gateway conflict / auto-fix events (GatewayEvents) ----
   // Seeded once from the &conflict axis. Both event kinds ARE conflicts (there
@@ -964,6 +1026,52 @@ export function installDevMock() {
     // the mock never has to model the legacy-party refusal).
     AgentDesiredConfig: (agentId: string) => ok(agentDesiredConfig(agentId)),
     ReclaimPort: (_agentId: string, _tunnelId: string, _port: number) => gated(() => undefined),
+    // ---- config consent (mutual approval) ----
+    // Gateway side. Approving/rejecting the agent's proposal clears it; the next
+    // poll shows the result. Approve also folds the proposed set into the agent's
+    // live tunnels so the drill-in reflects what was just adopted — the real flow
+    // adopts, bumps, and pushes, and the panel re-reads that.
+    ApproveAgentProposal: (agentId: string, proposalId: string) => gated(() => {
+      if (!gwPendingIn || gwPendingIn.proposalId !== proposalId) throw new Error('that proposal is no longer pending')
+      const extra = extraAgents.find(a => a.agentId === agentId)
+      if (extra) {
+        extra.tunnels = gwPendingIn.tunnels.map((s: any) => ({
+          id: s.id, name: s.name, port: s.publicPort || 25590, localUp: true,
+          bandwidthLimitMbps: s.bandwidthLimitMbps, bandwidthLimitScope: s.bandwidthLimitScope,
+        }))
+      }
+      gwPendingIn = null
+      return undefined
+    }),
+    RejectAgentProposal: (_agentId: string, proposalId: string, _reason: string) => gated(() => {
+      if (!gwPendingIn || gwPendingIn.proposalId !== proposalId) throw new Error('that proposal is no longer pending')
+      gwPendingIn = null // a rejection changes nothing else — that is the point
+      return undefined
+    }),
+    // The gateway-side editor's submit: it proposes, it does not apply. The card
+    // then shows "awaiting the agent", which is the whole contract.
+    ProposeAgentConfig: (agentId: string, tunnels: any[]) => gated(() => {
+      if (!consentLive) throw new Error(`agent ${agentId} runs a build without config-consent — update it to edit its tunnels from here`)
+      gwPendingOut = {proposalId: `prp_${Math.random().toString(16).slice(2, 10)}`, baseGen: 5, tunnels, atMs: Date.now()}
+      return undefined
+    }),
+    // Agent side.
+    AgentConsent: () => ok({
+      consentActive: state.role === 'agent' && state.linkUp && consentLive,
+      incoming: agPendingIn ?? undefined,
+      outgoing: agPendingOut ?? undefined,
+      lastDecline: agLastDecline || undefined,
+    }),
+    ApproveGatewayProposal: (proposalId: string) => gated(() => {
+      if (!agPendingIn || agPendingIn.proposalId !== proposalId) throw new Error('that proposal is no longer pending')
+      agPendingIn = null
+      return undefined
+    }),
+    RejectGatewayProposal: (proposalId: string, _reason: string) => gated(() => {
+      if (!agPendingIn || agPendingIn.proposalId !== proposalId) throw new Error('that proposal is no longer pending')
+      agPendingIn = null
+      return undefined
+    }),
     IssuePairingCode: (_reusable: boolean, _ttlSecs: number, _ports: number[], _tunnels: string[]) =>
       gated(() => {
         // Each call mints a fresh enrollment ticket → a different token segment,
