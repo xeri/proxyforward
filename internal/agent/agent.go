@@ -166,6 +166,10 @@ type Agent struct {
 	// configPersister, when set by the app, persists a pushed tunnel set + generation
 	// so it survives a restart. nil keeps the pushed set in memory only.
 	configPersister atomic.Pointer[ConfigPersister]
+	// enrollPersister persists the gateway-assigned identity once enrollment
+	// completes (see EnrollmentPersister). nil (bare test agents) drops the
+	// notification; the engine always wires one in production.
+	enrollPersister atomic.Pointer[EnrollmentPersister]
 }
 
 // ConfigPersister persists a gateway-pushed tunnel set and its generation to disk so
@@ -175,6 +179,34 @@ type ConfigPersister func(tunnels []config.Tunnel, generation uint64) error
 
 // SetConfigPersister installs the disk-persistence hook for gateway-pushed config.
 func (a *Agent) SetConfigPersister(fn ConfigPersister) { a.configPersister.Store(&fn) }
+
+// EnrollmentPersister persists the gateway-assigned identity after a successful
+// hello: Agent.AgentID becomes the assigned agt_ id and the spent EnrollTicket is
+// cleared, so config.toml holds no live credential in steady state. The persister
+// owns the config mutation and its locking: the engine wires a direct write for
+// hostless runs, and the app substitutes a lock-taking one in GUI-hosted runs
+// (the config is shared with the 2 Hz status read there).
+type EnrollmentPersister func(assignedID string) error
+
+// SetEnrollmentPersister installs the hook that persists the gateway-assigned
+// identity and clears the spent enrollment ticket.
+func (a *Agent) SetEnrollmentPersister(fn EnrollmentPersister) { a.enrollPersister.Store(&fn) }
+
+// finishEnrollment hands the gateway-assigned identity to the persister when the
+// hello that carried it completed (or repeated) an enrollment. It runs on the
+// session goroutine — the same one that builds the next hello — so by the time a
+// reconnect reads the config, a successful persist has already landed.
+func (a *Agent) finishEnrollment(assigned string) {
+	if assigned == "" || (assigned == a.cfg.Agent.AgentID && a.cfg.Agent.EnrollTicket == "") {
+		return // steady state: nothing new to record
+	}
+	a.logger.Info("enrolled with gateway", "agent_id", assigned)
+	if p := a.enrollPersister.Load(); p != nil {
+		if err := (*p)(assigned); err != nil {
+			a.logger.Warn("enrollment not persisted; the spent ticket stays in the config", "err", err)
+		}
+	}
+}
 
 func New(cfg *config.Config, dir string, logger *slog.Logger) *Agent {
 	return &Agent{
@@ -676,6 +708,7 @@ func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (
 		}
 		a.peer.Store(&peerIdentity{hostname: ok.Hostname, localIPs: ok.LocalIPs, observedIP: ok.ObservedIP})
 		a.configSeedNeeded.Store(ok.ConfigSeedNeeded)
+		a.finishEnrollment(ok.AssignedAgentID)
 		a.logger.Info("connected to gateway", "gateway", remoteAddr, "generation", ok.SessionGeneration, "gateway_version", ok.AppVersion, "gateway_host", ok.Hostname, "observed_ip", ok.ObservedIP, "capabilities", ok.Capabilities)
 		rw.SetDeadline(time.Time{})
 		return control.NewCapSet(ok.Capabilities), nil

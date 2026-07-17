@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,5 +125,49 @@ func TestStatsLifecycle(t *testing.T) {
 	}
 	if ups != 1 || downs != 1 {
 		t.Errorf("engine events = %d up / %d down, want 1/1", ups, downs)
+	}
+}
+
+// TestPersistEnrollmentClearsTicket: the engine's default enrollment persister
+// (hostless runs) lands the gateway-assigned identity in config.toml and clears
+// the spent ticket, so the file holds no live credential in steady state.
+func TestPersistEnrollmentClearsTicket(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Role = config.RoleAgent
+	cfg.Agent.AgentID = config.NewID()
+	cfg.Agent.GatewayHost = "127.0.0.1"
+	cfg.Agent.GatewayPort = 1
+	cfg.Agent.CertFingerprint = "sha256:" + strings.Repeat("ab", 32)
+	cfg.Agent.EnrollTicket = "tkt_0123456789abcdef0123456789abcdef"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	path := filepath.Join(dir, "config.toml")
+	eng, err := New(cfg, dir, path, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("engine.New: %v", err)
+	}
+	// New opened the analytics store; close it or TempDir cleanup trips over
+	// the open handle (Windows file locking).
+	t.Cleanup(func() {
+		if eng.DB != nil {
+			eng.DB.Close()
+		}
+	})
+
+	const assigned = "agt_5w7d2k9rq3v8xj4m"
+	if err := eng.persistEnrollment(assigned); err != nil {
+		t.Fatalf("persistEnrollment: %v", err)
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if loaded.Agent.AgentID != assigned {
+		t.Errorf("persisted AgentID = %q, want the assigned %q", loaded.Agent.AgentID, assigned)
+	}
+	if loaded.Agent.EnrollTicket != "" {
+		t.Error("the spent enrollment ticket survived in config.toml — still a live credential on disk")
 	}
 }

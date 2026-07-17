@@ -84,10 +84,11 @@ type AgentConfig struct {
 	CertFingerprint string   `toml:"cert_fingerprint"` // "sha256:<hex>" of the gateway's pinned cert
 	Transport       string   `toml:"transport"`        // "auto" | "quic" | "per-conn" | "mux"
 	Tunnels         []Tunnel `toml:"tunnels"`
-	// EnrollTicket is a one-time pairing ticket carried on the first connect to a
-	// gateway running per-agent identity; the agent clears it once the gateway
-	// confirms enrollment. Empty in steady state (the Ed25519 identity authenticates
-	// thereafter).
+	// EnrollTicket is a one-time pairing ticket carried on the first connect;
+	// once the gateway confirms enrollment (hello_ok's assigned identity) the
+	// engine persists the assigned agt_ id into AgentID and clears this field
+	// (agent.go finishEnrollment). Empty in steady state — the Ed25519 identity
+	// authenticates thereafter, and the config holds no live credential.
 	EnrollTicket string `toml:"enroll_ticket"`
 }
 

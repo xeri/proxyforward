@@ -1299,6 +1299,63 @@ func TestBadTokenRejected(t *testing.T) {
 	}
 }
 
+// TestEnrollmentReportsAssignedIdentity: the hello_ok that completes an
+// enrollment carries the gateway-assigned agt_ id, and the agent hands it to its
+// enrollment persister (which in production rewrites config.toml and clears the
+// spent ticket — TestPersistEnrollmentClearsTicket covers that write).
+func TestEnrollmentReportsAssignedIdentity(t *testing.T) {
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarness(t, echoAddr)
+	h.waitPublicPort()
+
+	cfg := config.Default()
+	*cfg = *h.agentCfg
+	cfg.Agent.AgentID = config.NewID()
+	cfg.Agent.Tunnels = nil
+	ticket, err := h.gw.IssuePairingTicket(false, time.Time{}, gateway.Scope{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Agent.EnrollTicket = ticket
+
+	ag := agent.New(cfg, t.TempDir(), testLogger(t).With("side", "enrollee"))
+	assigned := make(chan string, 4)
+	ag.SetEnrollmentPersister(func(id string) error {
+		assigned <- id
+		return nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- ag.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("enrollee did not stop within 10s")
+		}
+	})
+
+	select {
+	case id := <-assigned:
+		if len(id) < 5 || id[:4] != "agt_" {
+			t.Fatalf("assigned id %q is not a derived agt_ identity", id)
+		}
+		found := false
+		for _, rec := range h.gw.ListAgents() {
+			if rec.AgentID == id {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("assigned id %q is not in the gateway roster", id)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("enrollment never reached the persister")
+	}
+}
+
 // TestEnrollAndRevoke drives per-agent identity end to end: an agent enrolls with a
 // single-use pairing ticket, joins the gateway allowlist, moves traffic over the
 // identity-authenticated link, and after revocation gives up fatally on reconnect

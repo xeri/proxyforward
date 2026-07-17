@@ -235,6 +235,9 @@ func (a *App) startEngineLocked() {
 		// set lives only in memory and the config file keeps a set the gateway no
 		// longer holds until the next connect re-pushes it.
 		eng.Agent.SetConfigPersister(a.persistPushedConfig)
+		// And land the assigned identity under a.mu — this config is shared with
+		// the 2 Hz status read, so the engine's bare-write default must not run.
+		eng.Agent.SetEnrollmentPersister(a.persistEnrollment)
 	}
 	// A lifecycle op over the pipe (an attached GUI, or another GUI driving this
 	// engine) persists the stopped flag through a.mu — this config is shared
@@ -854,6 +857,18 @@ func (a *App) StartEngine() error {
 	}
 	a.startEngineLocked()
 	return nil
+}
+
+// persistEnrollment overrides the engine's bare-write default: the assigned
+// agt_ identity replaces Agent.AgentID and the spent enrollment ticket is
+// cleared, under a.mu because this config is shared with the status read and the
+// settings screens. Mirrors persistStopped.
+func (a *App) persistEnrollment(assignedID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfg.Agent.AgentID = assignedID
+	a.cfg.Agent.EnrollTicket = ""
+	return a.cfg.Save(a.configPath)
 }
 
 // persistStopped records the run's on/off intent so it survives restart and

@@ -134,6 +134,16 @@ type Engine struct {
 	stoppedPersister atomic.Pointer[StoppedPersister]
 }
 
+// persistEnrollment records the gateway-assigned identity in the config and
+// clears the spent enrollment ticket, so config.toml is credential-free in steady
+// state. The bare write is safe only because a hostless daemon shares its config
+// with nobody; GUI-hosted runs substitute the app's locked persister.
+func (e *Engine) persistEnrollment(assignedID string) error {
+	e.cfg.Agent.AgentID = assignedID
+	e.cfg.Agent.EnrollTicket = ""
+	return e.cfg.Save(e.configPath)
+}
+
 // conns returns the active role's connection registry.
 func (e *Engine) conns() *conntrack.Registry {
 	if e.Agent != nil {
@@ -148,6 +158,9 @@ func New(cfg *config.Config, configDir, configPath string, logger *slog.Logger) 
 	switch cfg.Role {
 	case config.RoleAgent:
 		e.Agent = agent.New(cfg, configDir, logger)
+		// The gateway-assigned identity must outlive the process; a GUI host
+		// overrides this with its lock-taking hook (mirrors SetStoppedPersister).
+		e.Agent.SetEnrollmentPersister(e.persistEnrollment)
 		e.roleRun = e.Agent.Run
 	case config.RoleGateway:
 		e.Gateway = gateway.New(cfg, configDir, logger)
