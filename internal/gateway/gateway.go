@@ -90,6 +90,11 @@ type Gateway struct {
 	actor   atomic.Pointer[actor]
 	authLim *authLimiter
 	gate    *connGate
+	// preAuth bounds the connections sitting in the pre-auth prologue. authLim
+	// cannot: it only refuses a network once its failures have landed, and a
+	// stalled conn does not fail until preAuthTimeout, so without this the
+	// unauthenticated set is unbounded for ~10 s at a time.
+	preAuth *preAuthGate
 	// validator authenticates every hello, on the control accept path and (with
 	// the per-conn data plane) the data accept path. It is a compositeValidator:
 	// per-agent Ed25519 identity backed by agents, with the shared token as a
@@ -182,6 +187,11 @@ func (g *Gateway) Start(ctx context.Context) error {
 	g.cancel = cancel
 	g.authLim = newAuthLimiter(g.cfg.Gateway.AuthAttemptsPerMin)
 	g.gate = newConnGate(g.cfg.Gateway.MaxConnsGlobal, g.cfg.Gateway.MaxConnsPerIP)
+	// Sized off the public cap, not chosen: under the per-conn data plane each
+	// admitted player conn causes at most one dial-back, and a dial-back holds its
+	// slot only for the handshake. So no legitimate load can reach this, and the
+	// two numbers cannot drift apart when one is tuned.
+	g.preAuth = newPreAuthGate(g.cfg.Gateway.MaxConnsGlobal + preAuthHeadroom)
 	var shared *sharedTokenValidator
 	if g.cfg.Gateway.AcceptSharedToken {
 		shared = &sharedTokenValidator{token: g.cfg.Gateway.Token}
@@ -824,38 +834,84 @@ func (g *Gateway) TunnelLocalUp(tunnelID string) (up, known bool) {
 	return false, false
 }
 
+// acceptBackoff is how long an accept loop waits after a failed Accept, doubling
+// from the first value to the second. The point is not to recover faster but to
+// keep a permanently broken listener down to about one log line a second instead
+// of a hot spin.
+const (
+	acceptBackoffMin = 5 * time.Millisecond
+	acceptBackoffMax = time.Second
+)
+
+// retryAccept decides what an accept loop does about an Accept error, and waits
+// if the answer is "go again". It reports false when the loop must stop: the
+// listener is closed or the gateway is shutting down. Nothing else is fatal —
+// see isListenerClosed.
+func (g *Gateway) retryAccept(ctx context.Context, err error, backoff *time.Duration, what string) bool {
+	if ctx.Err() != nil || isListenerClosed(err) {
+		return false
+	}
+	*backoff = max(min(*backoff*2, acceptBackoffMax), acceptBackoffMin)
+	g.logger.Error(what+" accept failed; retrying", "err", err, "in", *backoff)
+	select {
+	case <-time.After(*backoff):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 func (g *Gateway) acceptControl(ctx context.Context) {
+	var backoff time.Duration
 	for {
 		conn, err := g.controlLn.Accept()
 		if err != nil {
-			if ctx.Err() != nil {
+			if !g.retryAccept(ctx, err, &backoff, "control") {
 				return
 			}
-			g.logger.Error("control accept failed", "err", err)
-			return
+			continue
+		}
+		backoff = 0
+		// Bound the unauthenticated set before spending a goroutine and a TLS
+		// handshake on a peer that has proved nothing. Refusing costs the peer a
+		// reconnect; not refusing is how the descriptors run out.
+		if !g.preAuth.admit() {
+			g.logger.Warn("pre-auth gate full; refusing control conn", "remote", conn.RemoteAddr().String())
+			conn.Close()
+			continue
 		}
 		g.wg.Add(1)
 		go func() {
 			defer g.wg.Done()
-			g.handleControlConn(ctx, conn)
+			release := g.preAuth.releaser()
+			defer release()
+			g.handleControlConn(ctx, conn, release)
 		}()
 	}
 }
 
 func (g *Gateway) acceptQUIC(ctx context.Context) {
+	var backoff time.Duration
 	for {
 		sess, err := g.quicLn.Accept(ctx)
 		if err != nil {
-			if ctx.Err() != nil {
+			if !g.retryAccept(ctx, err, &backoff, "quic") {
 				return
 			}
-			g.logger.Error("quic accept failed", "err", err)
-			return
+			continue
+		}
+		backoff = 0
+		if !g.preAuth.admit() {
+			g.logger.Warn("pre-auth gate full; refusing quic session", "remote", sess.RemoteAddr().String())
+			sess.Close()
+			continue
 		}
 		g.wg.Add(1)
 		go func() {
 			defer g.wg.Done()
-			g.handleQUICSession(ctx, sess)
+			release := g.preAuth.releaser()
+			defer release()
+			g.handleQUICSession(ctx, sess, release)
 		}()
 	}
 }
@@ -867,7 +923,7 @@ func (g *Gateway) acceptQUIC(ctx context.Context) {
 // control stream. Pre-auth guards mirror the TCP path — per-IP rate limit, a
 // preAuthTimeout deadline on the hello read, the PreAuthMaxFrame cap — and
 // QUIC's own Retry/address validation covers amplification.
-func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session) {
+func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session, preAuthDone func()) {
 	remote := sess.RemoteAddr().String()
 	ip := ipFromAddr(sess.RemoteAddr())
 	logger := g.logger.With("remote", remote, "transport", "quic")
@@ -926,6 +982,10 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session)
 		sess.Close()
 		return
 	}
+	// Authenticated: give the handshake slot back before this becomes a session
+	// that outlives every peer currently waiting for one.
+	preAuthDone()
+
 	// QUIC has no per-conn dial-back — data streams ride this same connection, so
 	// only a control kind is valid; a data hello would have nothing to match.
 	if hello.Kind != control.KindControl {
@@ -990,7 +1050,11 @@ func authErrorReply(err error) (code, msg string, countFail bool) {
 // handleControlConn walks one agent connection through the pre-auth
 // prologue, admission, and then serves its control stream until the session
 // dies.
-func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
+// preAuthDone is called the moment a connection stops being unauthenticated, so
+// its pre-auth slot goes back to the peers still handshaking. It is a func, not a
+// gate method, because it must be safe to call here *and* from the deferred
+// cleanup that covers every failure path above.
+func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthDone func()) {
 	remote := conn.RemoteAddr().String()
 	ip := remoteIP(conn)
 	logger := g.logger.With("remote", remote)
@@ -1043,6 +1107,11 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn) {
 		conn.Close()
 		return
 	}
+	// Authenticated: this conn is no longer part of the set the pre-auth gate
+	// exists to bound, and everything past here can live for weeks. Holding the
+	// slot would turn a handshake cap into a session cap.
+	preAuthDone()
+
 	switch hello.Kind {
 	case control.KindControl:
 		// Falls through to admission below.

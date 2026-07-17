@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"container/list"
+	"errors"
 	"net"
 	"net/netip"
 	"sync"
@@ -206,6 +207,66 @@ func (g *connGate) release(ip string) {
 	} else {
 		g.perNet[key]--
 	}
+}
+
+// preAuthHeadroom is what the pre-auth gate allows *above* the public
+// connection cap. Concurrent legitimate pre-auth work is bounded by that cap —
+// under the per-conn data plane every player conn causes at most one dial-back,
+// and each holds its slot only for a handshake — so this covers the rest: agent
+// control conns, and reconnect attempts racing a session that has not yet been
+// reaped. Generous on purpose. The gate exists to make the unauthenticated set a
+// constant, not to be a tight limit; authLimiter is what punishes an abuser, and
+// it needs ~preAuthTimeout to notice one.
+const preAuthHeadroom = 256
+
+// preAuthGate bounds how many connections may sit in the pre-auth prologue at
+// once. Without it the unauthenticated set is unbounded for preAuthTimeout at a
+// stretch: authLimiter.allow only refuses a network once its failures have
+// landed, and a connection that stalls does not fail until the deadline fires.
+// So a peer that opens sockets and says nothing spends ~10 s buying a goroutine,
+// a descriptor and a TLS handshake buffer each, for free — enough to exhaust
+// descriptors, which is exactly what makes Accept start erroring.
+//
+// A counted semaphore, not a connGate: this cannot be keyed per network. The
+// per-conn data plane dials back from the agent's own address once per player,
+// so a per-network cap tight enough to matter would throttle the data plane, and
+// one loose enough not to would not be a cap.
+type preAuthGate struct {
+	slots chan struct{}
+}
+
+func newPreAuthGate(max int) *preAuthGate {
+	return &preAuthGate{slots: make(chan struct{}, max)}
+}
+
+// admit takes a slot, reporting false when the gate is full.
+func (p *preAuthGate) admit() bool {
+	select {
+	case p.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// release returns a slot. Never call it without a matching admit — a slot freed
+// twice raises the ceiling permanently, which is worse than no gate, because it
+// looks like one. Use releaser at call sites with more than one exit.
+func (p *preAuthGate) release() { <-p.slots }
+
+// releaser returns a release func that is safe to call any number of times, for
+// the pre-auth path: it must run on every failure path (defer) *and* the moment
+// auth succeeds, so that an authenticated session — which may live for weeks —
+// stops occupying a slot meant for handshakes.
+func (p *preAuthGate) releaser() func() { return sync.OnceFunc(p.release) }
+
+// isListenerClosed reports whether an Accept error means the listener is gone,
+// which is the only reason to stop accepting. Everything else — the OS out of
+// descriptors or buffers, a peer resetting between SYN and accept — is transient
+// and must be retried: returning instead leaves the process up, the public ports
+// still serving players, and no agent able to reconnect, forever.
+func isListenerClosed(err error) bool {
+	return err != nil && errors.Is(err, net.ErrClosed)
 }
 
 // remoteIP extracts the bare IP from a net.Conn's remote address, falling

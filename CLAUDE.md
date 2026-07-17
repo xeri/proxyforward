@@ -89,6 +89,21 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   limiters reduce the address themselves; callers pass the raw IP, because
   `remoteIP`'s other callers (GUI link card, cloned-identity warning) need it whole.
   Any new per-source limit keys on `sourceNet` or it is decorative.
+- **An accept loop stops only when its listener is closed** (`limits.go
+  isListenerClosed`, used by `gateway.go retryAccept`). Every other Accept error is
+  transient — descriptors, buffers, a reset between SYN and accept — and returning
+  on one is a *permanent* outage wearing a healthy face: process up, GUI green,
+  players still served, no agent able to reconnect ever again
+  (`TestControlAcceptSurvivesATransientError`). Retry with capped backoff, never a
+  bare `continue` (a broken listener would spin).
+- **The unauthenticated set must be bounded by a gate, not by the rate limiter**
+  (`limits.go preAuthGate`). `authLimiter.allow` only refuses a network once its
+  failures have *landed*, and a stalled conn doesn't fail until `preAuthTimeout` —
+  so it leaves a ~10 s window of unbounded goroutines/descriptors, which is what
+  makes Accept fail in the first place. The slot is released the instant auth
+  succeeds, or a handshake cap silently becomes a session cap; the release is
+  `sync.OnceFunc` because it runs on every failure path *and* on success, and a
+  double-release raises the ceiling forever (`TestPreAuthGateBoundsUnauthenticatedConns`).
 - **A limiter's own table is attack surface**: it must be bounded by construction
   and O(1) to update, because `allow` runs before auth on every connection and holds
   a mutex every honest agent needs. Hence a token bucket per network (one scalar,

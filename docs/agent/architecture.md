@@ -95,6 +95,8 @@ persisted to config.
 | Abuse defaults | 4096 global / 32 per-network conns; 10 auth fails/min/network (token bucket: burst 10, refill 10/min) | `config.go Default` |
 | Abuse accounting unit | one IPv4 address; one IPv6 **/64** (smallest block a subscriber holds) | `limits.go sourceNet` |
 | Auth-failure table cap | 4096 networks, LRU-evicted (hard cap, not a cleanup trigger) | `limits.go authFailNets` |
+| Pre-auth gate | `MaxConnsGlobal + 256` concurrent unauthenticated conns; slot freed at auth | `limits.go preAuthGate`, `preAuthHeadroom` |
+| Accept retry backoff | 5 ms doubling → 1 s; only a closed listener stops the loop | `gateway.go retryAccept` |
 | Loss window / ping-loss timeout | 32 heartbeats / 2×interval | `agent.go:50-51`, `linkquality.go` |
 | Gateway per-conn RTT sample | every 5 s, ≤200 entries per frame | `gateway.go:59`, `control.go:291` |
 | GUI tick | 500 ms; log poll 250 ms; UI re-render tick 1 s | `app.go:42`, `Activity.tsx:35`, `Overview.tsx:33` |
