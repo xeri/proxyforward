@@ -15,8 +15,8 @@ func TestEnrollTicket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(a, EnrollTicketPrefix) {
-		t.Fatalf("ticket %q missing %q prefix", a, EnrollTicketPrefix)
+	if !strings.HasPrefix(a, enrollTicketPrefix) {
+		t.Fatalf("ticket %q missing %q prefix", a, enrollTicketPrefix)
 	}
 	if !IsEnrollTicket(a) {
 		t.Fatalf("IsEnrollTicket(%q) = false, want true", a)

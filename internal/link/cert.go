@@ -31,8 +31,8 @@ func Fingerprint(der []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// FingerprintEqual compares fingerprints in constant time.
-func FingerprintEqual(a, b string) bool {
+// fingerprintEqual compares fingerprints in constant time.
+func fingerprintEqual(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(strings.ToLower(a)), []byte(strings.ToLower(b))) == 1
 }
 
@@ -132,7 +132,7 @@ func AgentTLSConfig(pinnedFingerprint string) *tls.Config {
 				return errors.New("gateway presented no certificate")
 			}
 			got := Fingerprint(rawCerts[0])
-			if !FingerprintEqual(got, pinnedFingerprint) {
+			if !fingerprintEqual(got, pinnedFingerprint) {
 				return fmt.Errorf("gateway certificate fingerprint mismatch: expected %s, got %s (re-pair if the gateway was reinstalled)", pinnedFingerprint, got)
 			}
 			return nil

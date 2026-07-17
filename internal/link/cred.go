@@ -23,12 +23,12 @@ import (
 	"strings"
 )
 
-// EnrollTicketPrefix marks a pairing code's token as a single-use enrollment
+// enrollTicketPrefix marks a pairing code's token as a single-use enrollment
 // ticket, as opposed to the legacy shared gateway token (bare hex). The token is
 // thus self-describing — the agent routes a pasted code to per-identity enrollment
 // or shared-token auth without a second field in the code — mirroring the typed
 // agt_/gw_/tnl_ ids above. It must stay distinct from a 32-hex shared token.
-const EnrollTicketPrefix = "tkt_"
+const enrollTicketPrefix = "tkt_"
 
 // NewEnrollTicket mints a random single-use enrollment ticket (128-bit nonce)
 // carrying the tkt_ prefix. The gateway stores it and embeds it in a pairing code;
@@ -38,13 +38,13 @@ func NewEnrollTicket() (string, error) {
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", fmt.Errorf("generate enrollment ticket: %w", err)
 	}
-	return EnrollTicketPrefix + hex.EncodeToString(raw[:]), nil
+	return enrollTicketPrefix + hex.EncodeToString(raw[:]), nil
 }
 
 // IsEnrollTicket reports whether a pairing-code token is an enrollment ticket
 // rather than a legacy shared token, so a pasted code routes to the right auth.
 func IsEnrollTicket(token string) bool {
-	return strings.HasPrefix(token, EnrollTicketPrefix)
+	return strings.HasPrefix(token, enrollTicketPrefix)
 }
 
 // crockfordLower is Crockford base32 (no confusable i/l/o/u) lowercased, so derived
@@ -66,14 +66,14 @@ func fingerprint(seed []byte) string {
 	return idEncoding.EncodeToString(sum[:5])
 }
 
-// AgentIDPrefix marks an agentID as *derived from an Ed25519 public key*. The
+// agentIDPrefix marks an agentID as *derived from an Ed25519 public key*. The
 // prefix is a reserved namespace, not decoration: a legacy shared-token agent
 // self-asserts its agentID (config.NewID gives it bare 32-hex), so anything wearing
 // this prefix must have been minted by AgentID from a key the gateway verified. The
 // shared-token path therefore refuses to assert it (gateway/auth.go
 // sharedTokenValidator) — otherwise a mere token holder could name itself an
 // enrolled agent and inherit its session, ports, and scope.
-const AgentIDPrefix = "agt_"
+const agentIDPrefix = "agt_"
 
 // agentFingerprintBytes is how much of sha256(pubkey) an agentID carries. It is a
 // security parameter, not a display choice: the gateway keys supersede, revocation,
@@ -90,14 +90,14 @@ const agentFingerprintBytes = 10
 // re-derives the same ID and no two keys render alike.
 func AgentID(pub ed25519.PublicKey) string {
 	sum := sha256.Sum256(pub)
-	return AgentIDPrefix + idEncoding.EncodeToString(sum[:agentFingerprintBytes])
+	return agentIDPrefix + idEncoding.EncodeToString(sum[:agentFingerprintBytes])
 }
 
 // IsDerivedAgentID reports whether s claims the key-derived agent namespace. Only
 // AgentID mints these; a self-asserted one is a peer claiming an identity it did not
 // prove, which is why the shared-token validator rejects it outright.
 func IsDerivedAgentID(s string) bool {
-	return strings.HasPrefix(s, AgentIDPrefix)
+	return strings.HasPrefix(s, agentIDPrefix)
 }
 
 // GatewayID derives the gateway's display identity from its (pinned) certificate
