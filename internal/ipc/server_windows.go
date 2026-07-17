@@ -45,11 +45,11 @@ func Serve(ctx context.Context, logger *slog.Logger, src Sources, owners ...stri
 	if err != nil {
 		return err
 	}
-	// Closing the listener unblocks Accept when ctx dies.
+	// watchCtx is cancelled when ctx dies *or* when Serve returns for any other
+	// reason (a failed Accept), so both exits tear down identically: the listener
+	// closes, and with it every client connection still being served.
 	stopped := make(chan struct{})
-	defer func() { <-stopped }()
 	watchCtx, cancelWatch := context.WithCancel(ctx)
-	defer cancelWatch()
 	go func() {
 		defer close(stopped)
 		<-watchCtx.Done()
@@ -57,15 +57,15 @@ func Serve(ctx context.Context, logger *slog.Logger, src Sources, owners ...stri
 	}()
 
 	logger.Info("ipc pipe up", "pipe", PipeName)
-	var (
-		wg    sync.WaitGroup
-		conns []net.Conn // only the accept loop appends; no lock needed
-	)
-	defer wg.Wait() // runs after the conns close below (defers are LIFO)
+	var wg sync.WaitGroup
+	// Teardown in the only order that works: cancel first, so the listener closes
+	// and every handler's read is unblocked; then wait for the handlers that
+	// unblocked; then for the closer itself. Spelled out rather than left to three
+	// defers and LIFO, because the order is the whole correctness argument.
 	defer func() {
-		for _, c := range conns {
-			c.Close() // unblocks each handler's read
-		}
+		cancelWatch()
+		wg.Wait()
+		<-stopped
 	}()
 	for {
 		conn, err := ln.Accept()
@@ -78,11 +78,21 @@ func Serve(ctx context.Context, logger *slog.Logger, src Sources, owners ...stri
 			}
 			return err
 		}
-		conns = append(conns, conn)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			serveConn(ctx, logger, conn, src)
+			// Shutdown has to hang up on a client parked in a blocking read, or Serve
+			// waits out idleTimeout before its handlers return — that is the only
+			// reason the server takes any interest in a live connection. AfterFunc
+			// ties that close to this handler's lifetime, and stop() forgets the
+			// connection the moment it leaves. What this replaces was a slice the
+			// accept loop appended to and nothing ever pruned: every client ever
+			// served stayed reachable for the life of a process built to run for
+			// months, and a GUI that idles out and reconnects is a client every two
+			// minutes, forever.
+			stop := context.AfterFunc(watchCtx, func() { conn.Close() })
+			defer stop()
+			serveConn(watchCtx, logger, conn, src)
 		}()
 	}
 }
