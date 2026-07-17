@@ -5,6 +5,21 @@ import {app} from '../wailsjs/go/models'
 
 export type UIStatus = app.UIStatus
 
+export type RunState = 'running' | 'stopping' | 'stopped'
+
+/** The tunnel run's lifecycle. A daemon too old to report it is running, for
+ * the same reason it has no off switch. */
+export function runStateOf(s: UIStatus): RunState {
+  return (s.runState || 'running') as RunState
+}
+
+/** Deliberately off: the run is stopped and there is no fatal error. This is the
+ * state the power controls put it in — distinct from a crash, which stops the
+ * run too but keeps engineFatal, and must keep reading as the alarm it is. */
+export function isEngineOff(s: UIStatus): boolean {
+  return runStateOf(s) === 'stopped' && !s.engineFatal
+}
+
 /** useTick subscribes to the Go side's 2 Hz status snapshots. */
 export function useTick(): UIStatus | null {
   const [status, setStatus] = useState<UIStatus | null>(null)

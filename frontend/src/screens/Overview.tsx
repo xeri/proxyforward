@@ -3,6 +3,8 @@ import {
   ApproveGatewayProposal, IssuePairingCode, MeasureLatency,
   RejectGatewayProposal, RestartEngine,
 } from '../../wailsjs/go/app/App'
+import {PowerControls} from '../components/PowerControls'
+import {powerStart, useServiceRunning} from '../power'
 import {prefersReduced} from '../motion'
 import {agent, app} from '../../wailsjs/go/models'
 import {proposalAge, ProposalDiff, specsOf, useAgentConsent} from '../consent'
@@ -15,7 +17,7 @@ import {
 import {Emblem} from '../components/Emblem'
 import {IconActivity, IconEye, IconEyeOff, IconGlobe, IconLink, IconRefresh, IconServer} from '../components/icons'
 import {NavId} from '../nav'
-import {fmtBytes, fmtRtt, fmtUptime, hasRtt, UIStatus} from '../state'
+import {fmtBytes, fmtRtt, fmtUptime, hasRtt, isEngineOff, runStateOf, UIStatus} from '../state'
 
 type Seg = 'good' | 'warn' | 'bad' | 'unknown'
 
@@ -80,6 +82,30 @@ function GatewayProposalBanner({proposal, current, onDecided}: {
   )
 }
 
+/** StoppedBanner: the honest "you turned this off" surface — warn tone, not the
+ * crash's red, with the one action that undoes it. It carries Start (the header
+ * control is hidden while off, so this owns it); powerStart routes to the
+ * service when one is running. A plain Banner in the alert stack, never on the
+ * pipeline (DESIGN rule 2). */
+function StoppedBanner({isAgent, status}: {isAgent: boolean; status: UIStatus}) {
+  const svcRunning = useServiceRunning(status)
+  const [busy, setBusy] = useState(false)
+  const start = () => {
+    setBusy(true)
+    powerStart(svcRunning).catch(() => {}).finally(() => setBusy(false))
+  }
+  return (
+    <Banner
+      tone="warn"
+      action={<Button variant="primary" size="sm" onClick={start} disabled={busy}>Start</Button>}
+    >
+      {isAgent
+        ? 'Tunnel stopped — players can’t reach your server until you start it again.'
+        : 'Tunnel stopped — the public port is closed until you start it again.'}
+    </Banner>
+  )
+}
+
 /** Overview: the tunnel at a glance — alerts, the traffic pipeline, link
  * health with an inline latency probe, headline stats, both identities, the
  * role tool, and a one-hour bandwidth teaser that jumps to Traffic. */
@@ -103,14 +129,23 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
     status.cumulativeUptimeMs ? `all-time ${fmtUptime(status.cumulativeUptimeMs)}` : null,
   ].filter(Boolean).join(' · ')
 
+  // Deliberately off: the link is down because nothing is dialing, not because
+  // a dial is failing. So the pipeline goes neutral grey ('unknown'), never the
+  // down-link's red, its conduits stop, and its headlines say so (below) —
+  // color is signal, and there is no fault to signal.
+  const off = isEngineOff(status)
+
   // Segment states.
-  const localState: Seg = !firstTunnel || !firstTunnel.localKnown ? 'unknown'
-    : firstTunnel.localUp ? 'good' : 'bad'
-  const linkState: Seg = isAgent ? (status.linkUp ? 'good' : 'bad')
-    : (status.agentConnected ? 'good' : 'warn')
-  const portState: Seg = isAgent
-    ? (firstTunnel && firstTunnel.publicPort > 0 ? 'good' : 'unknown')
-    : (tunnels.length > 0 || status.agentConnected ? 'good' : 'unknown')
+  const localState: Seg = off ? 'unknown'
+    : !firstTunnel || !firstTunnel.localKnown ? 'unknown'
+      : firstTunnel.localUp ? 'good' : 'bad'
+  const linkState: Seg = off ? 'unknown'
+    : isAgent ? (status.linkUp ? 'good' : 'bad')
+      : (status.agentConnected ? 'good' : 'warn')
+  const portState: Seg = off ? 'unknown'
+    : isAgent
+      ? (firstTunnel && firstTunnel.publicPort > 0 ? 'good' : 'unknown')
+      : (tunnels.length > 0 || status.agentConnected ? 'good' : 'unknown')
   const flowing = linkState === 'good'
 
   // Moment: first-connect ignite. When the link transitions up, stamp
@@ -142,6 +177,9 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
         <PageHeader
           title="Overview"
           subtitle={isAgent ? 'The path from your server to your players.' : 'The public front door for your agent.'}
+          action={runStateOf(status) !== 'stopped'
+            ? <PowerControls status={status} players={conns.length} />
+            : undefined}
         />
 
         {status.engineFatal && (
@@ -154,6 +192,11 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
             >
               Engine stopped: {status.engineFatal}
             </Banner>
+          </div>
+        )}
+        {isEngineOff(status) && (
+          <div className="mb-4">
+            <StoppedBanner isAgent={isAgent} status={status} />
           </div>
         )}
         {status.mode === 'attached' && (
@@ -195,25 +238,29 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
             icon={<IconServer size={20} />}
             title={isAgent ? 'Local server' : 'Agent link'}
             state={isAgent ? localState : linkState}
-            headline={isAgent
-              ? (localState === 'good' ? 'Online' : localState === 'bad' ? 'Not reachable' : 'Checking…')
-              : (status.agentConnected ? 'Connected' : 'Waiting')}
-            detail={isAgent
-              ? (firstTunnel?.localUp ? 'Minecraft is ready' : 'Start your Minecraft server')
-              : (status.agentConnected ? 'Agent is dialed in' : 'No agent connected yet')}
+            headline={off ? 'Stopped'
+              : isAgent
+                ? (localState === 'good' ? 'Online' : localState === 'bad' ? 'Not reachable' : 'Checking…')
+                : (status.agentConnected ? 'Connected' : 'Waiting')}
+            detail={off ? 'Tunnel is turned off'
+              : isAgent
+                ? (firstTunnel?.localUp ? 'Minecraft is ready' : 'Start your Minecraft server')
+                : (status.agentConnected ? 'Agent is dialed in' : 'No agent connected yet')}
           />
           <Conduit on={flowing && (isAgent ? localState !== 'bad' : true)} label={leftHop > 0 ? fmtBytes(leftHop) : undefined} />
           <PipeNode
             icon={<IconLink size={20} />}
             title="Tunnel link"
             state={linkState}
-            pulse
-            headline={isAgent
-              ? (status.linkUp ? 'Connected' : 'Reconnecting…')
-              : (status.agentConnected ? 'Active' : 'Idle')}
-            detail={isAgent
-              ? (status.linkUp ? (hasRtt(status.rttMillis) ? `${fmtRtt(status.rttMillis)} round trip` : 'Measuring round trip…') : 'Retrying with backoff')
-              : (status.agentConnected ? 'Relaying player traffic' : 'Listening for the agent')}
+            pulse={!off}
+            headline={off ? 'Stopped'
+              : isAgent
+                ? (status.linkUp ? 'Connected' : 'Reconnecting…')
+                : (status.agentConnected ? 'Active' : 'Idle')}
+            detail={off ? 'Not dialing'
+              : isAgent
+                ? (status.linkUp ? (hasRtt(status.rttMillis) ? `${fmtRtt(status.rttMillis)} round trip` : 'Measuring round trip…') : 'Retrying with backoff')
+                : (status.agentConnected ? 'Relaying player traffic' : 'Listening for the agent')}
             extra={status.peerAddr ? (
               <span className="inline-flex max-w-full items-center gap-1 text-[11px] text-[var(--text-3)]">
                 <span className="select-text truncate font-mono">{status.peerAddr}</span>
@@ -229,9 +276,10 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
             headline={isAgent
               ? (firstTunnel && firstTunnel.publicPort > 0 ? `Port ${firstTunnel.publicPort}` : 'Not bound')
               : (tunnels.length ? `${tunnels.length} tunnel${tunnels.length === 1 ? '' : 's'}` : 'No ports')}
-            detail={isAgent
-              ? (firstTunnel && firstTunnel.publicPort > 0 ? 'Players connect here' : 'Waiting for the gateway')
-              : (tunnels.length ? 'Open to players' : 'Waiting for tunnels')}
+            detail={off ? 'Closed while stopped'
+              : isAgent
+                ? (firstTunnel && firstTunnel.publicPort > 0 ? 'Players connect here' : 'Waiting for the gateway')
+                : (tunnels.length ? 'Open to players' : 'Waiting for tunnels')}
             extra={(
               <span className="font-mono text-[11px] tabular-nums text-[var(--text-3)]">
                 {conns.length} live session{conns.length === 1 ? '' : 's'}

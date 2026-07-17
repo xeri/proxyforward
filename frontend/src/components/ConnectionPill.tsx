@@ -1,12 +1,13 @@
 import {useEffect, useState} from 'react'
-import {fmtRtt, fmtUptime, hasRtt, useTickStale, UIStatus, worstHealth} from '../state'
+import {fmtRtt, fmtUptime, hasRtt, isEngineOff, runStateOf, useTickStale, UIStatus, worstHealth} from '../state'
 import {RoleWord, Spinner} from './ui'
 
 /**
  * The one-glance link state in the title bar: state + consequence, with RTT,
  * loss and uptime once the link is up. For a gateway it rolls the whole fleet
  * up — "N agents online" with the worst-of-fleet health driving the dot. Shows
- * "Syncing…" when snapshots stall.
+ * "Syncing…" when snapshots stall, and "Stopped"/"Stopping…" when the run is
+ * deliberately off — a quiet grey, never the down-link's alarm.
  */
 export function ConnectionPill({status}: {status: UIStatus}) {
   const stale = useTickStale(status)
@@ -28,6 +29,24 @@ export function ConnectionPill({status}: {status: UIStatus}) {
       <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1 text-xs text-[var(--text-2)] shadow-[var(--shadow-soft)]">
         <span className="text-[var(--warn)]"><Spinner size={12} /></span>
         <span className="font-medium">Syncing…</span>
+      </div>
+    )
+  }
+
+  // Deliberately off (and the drain toward it): a quiet grey pill, no halo, no
+  // alarm colour. The whole pill swaps in like "Syncing…" rather than adding a
+  // second dot — one identity surface (DESIGN rule 1). A crash is not off: it
+  // keeps engineFatal, so isEngineOff excludes it and it falls through to the
+  // down-link rendering below, which reads as the fault it is.
+  const runState = runStateOf(status)
+  if (runState === 'stopping' || isEngineOff(status)) {
+    const stopping = runState === 'stopping'
+    return (
+      <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1 text-xs text-[var(--text-2)] shadow-[var(--shadow-soft)]">
+        {stopping
+          ? <span className="text-[var(--text-3)]"><Spinner size={12} /></span>
+          : <span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-[var(--text-3)]" />}
+        <span className="font-medium">{stopping ? 'Stopping…' : 'Stopped'}</span>
       </div>
     )
   }

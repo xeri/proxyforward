@@ -56,6 +56,22 @@ export const IconClose = (p: IconProps) => (
   <Base {...p}><path d="M6 6l12 12M18 6 6 18"/></Base>
 )
 
+/* --- Power ---------------------------------------------------------------- */
+/** The universal power symbol: a broken ring with a top stem. The one glyph
+ * everyone reads as on/off, so it fronts Start and Stop. */
+export const IconPower = (p: IconProps) => (
+  <Base {...p}><path d="M12 3.5v7"/><path d="M7 6.3a7 7 0 1 0 10 0"/></Base>
+)
+/** A filled square: the transport-control "stop". Filled, not stroked, so it
+ * reads as a button state rather than an outline. */
+export const IconStop = (p: IconProps) => (
+  <Base {...p}><rect x="6.5" y="6.5" width="11" height="11" rx="1.5" fill="currentColor" stroke="none"/></Base>
+)
+/** A filled triangle: transport-control "play"/start. */
+export const IconPlay = (p: IconProps) => (
+  <Base {...p}><path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/></Base>
+)
+
 /* --- Actions -------------------------------------------------------------- */
 export const IconCopy = (p: IconProps) => (
   <Base {...p}><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></Base>

@@ -15,7 +15,7 @@ import {Tunnels} from './screens/Tunnels'
 import {Wizard} from './screens/Wizard'
 import {CommandPalette} from './components/CommandPalette'
 import {Spinner} from './components/ui'
-import {UIStatus, useTick} from './state'
+import {isEngineOff, UIStatus, useTick} from './state'
 import {prefersReduced} from './motion'
 import {resetBands} from './rubberband'
 import {TakePendingDeepLink} from '../wailsjs/go/app/App'
@@ -30,6 +30,12 @@ type Ambient = 'ok' | 'warn' | 'bad'
 function ambientOf(s: UIStatus | null): Ambient {
   if (!s || s.mode === 'wizard' || !s.role) return 'ok'
   if (s.engineFatal) return 'bad'
+  // Deliberately off is not a fault: the link is down because nothing is
+  // dialing, not because a dial is failing. Never paint the room for a state
+  // the operator chose — the stopped banner carries that message. (Checked
+  // before the linkUp branch below, which would otherwise read the quiet link
+  // as an outage.)
+  if (isEngineOff(s)) return 'ok'
   // Link state first — the health score only means something over a live
   // link. A waiting gateway idles amber; an agent that lost its gateway is red.
   const up = s.role === 'agent' ? s.linkUp : s.agentConnected
