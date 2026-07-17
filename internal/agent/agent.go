@@ -1044,9 +1044,11 @@ func (s *session) handleDataStream(st relay.Conn) {
 		s.agent.logger.Debug("bad open_conn", "err", err)
 		return
 	}
-	tun := s.agent.tunnelByID(oc.TunnelID)
+	tun := s.agent.enabledTunnelByID(oc.TunnelID)
 	if tun == nil {
-		s.agent.logger.Warn("open_conn for unknown tunnel", "tunnel_id", oc.TunnelID)
+		// Unknown or not enabled — either way this agent does not serve it, and the
+		// next line would otherwise dial whatever address it names.
+		s.agent.logger.Warn("open_conn for a tunnel this agent does not serve", "tunnel_id", oc.TunnelID)
 		return
 	}
 	local, err := net.DialTimeout("tcp", tun.LocalAddr, localDialTimeout)
@@ -1176,13 +1178,29 @@ func (s *session) pushHealth(tunnelID string, up bool) {
 	}
 }
 
-// tunnelByID returns a copy so callers never hold a pointer into the
+// enabledTunnelByID resolves a tunnel id the gateway named to a tunnel this agent
+// is actually serving, returning a copy so callers never hold a pointer into the
 // hot-appliable config slice.
-func (a *Agent) tunnelByID(id string) *config.Tunnel {
+//
+// Disabled tunnels are invisible here, and that is a security boundary rather than
+// tidiness: the id comes off the wire in open_conn, and the only thing the caller
+// does with the result is dial its LocalAddr. A disabled draft still names a real
+// local service — keeping the address is what makes re-enabling one click — so
+// resolving one would let a gateway reach a service its owner switched off, just by
+// naming an id it can guess (ids are name slugs: tnl_rcon, tnl_ssh). A gateway is
+// routinely someone else's machine. mergeTunnels refuses to *enable* a draft; this
+// refuses to *serve* one, and this is the half that closes the door — a gateway
+// after a switched-off service never had to push a config for it.
+// Regression: TestEnabledTunnelByIDIgnoresDisabledTunnels.
+//
+// The gateway only binds listeners for the enabled set, so a legitimate open_conn
+// never names a disabled tunnel; refusing costs nothing and fails closed if the
+// owner disables one while a flow is in flight.
+func (a *Agent) enabledTunnelByID(id string) *config.Tunnel {
 	a.cfgMu.RLock()
 	defer a.cfgMu.RUnlock()
 	for i := range a.cfg.Agent.Tunnels {
-		if a.cfg.Agent.Tunnels[i].ID == id {
+		if a.cfg.Agent.Tunnels[i].ID == id && a.cfg.Agent.Tunnels[i].Enabled {
 			t := a.cfg.Agent.Tunnels[i]
 			return &t
 		}

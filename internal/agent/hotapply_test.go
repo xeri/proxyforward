@@ -1,11 +1,41 @@
 package agent
 
 import (
+	"log/slog"
 	"testing"
 
 	"proxyforward/internal/config"
 	"proxyforward/internal/control"
 )
+
+// TestEnabledTunnelByIDIgnoresDisabledTunnels guards the data-plane half of the
+// same boundary mergeTunnels guards on the control plane, and it is the half that
+// actually matters: handleDataStream picks the local address to dial straight from
+// the gateway's open_conn.TunnelID. Fixing only mergeTunnels would have been
+// theatre — a gateway that wants a switched-off service never needed to push a
+// config for it, it can just name the id on a data stream and be spliced to
+// whatever the draft points at (a disabled tnl_rcon is a Minecraft console).
+//
+// So the lookup itself must refuse anything not enabled. Ids are name slugs
+// (link.TunnelID), so the gateway does not need to have been told one to guess it.
+func TestEnabledTunnelByIDIgnoresDisabledTunnels(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agent.Tunnels = []config.Tunnel{
+		{ID: "tnl_mc", Name: "mc", LocalAddr: "127.0.0.1:25565", Enabled: true},
+		{ID: "tnl_rcon", Name: "rcon", LocalAddr: "127.0.0.1:25575", Enabled: false},
+	}
+	a := &Agent{cfg: cfg, logger: slog.Default()}
+
+	if got := a.enabledTunnelByID("tnl_mc"); got == nil || got.LocalAddr != "127.0.0.1:25565" {
+		t.Errorf("an enabled tunnel must still resolve: %+v", got)
+	}
+	if got := a.enabledTunnelByID("tnl_rcon"); got != nil {
+		t.Errorf("a disabled tunnel resolved to %s — the gateway can dial a service its owner switched off", got.LocalAddr)
+	}
+	if got := a.enabledTunnelByID("tnl_nope"); got != nil {
+		t.Errorf("an unknown tunnel resolved: %+v", got)
+	}
+}
 
 // TestMergeTunnelsKeepsDisabledDraftsDisabled pins the boundary the gateway's
 // authority stops at. Disabling a tunnel is the user's way of saying "do not
