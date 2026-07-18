@@ -200,20 +200,29 @@ function GatewayLive({status, controlPort, onDone}: {
   const [reusable, setReusable] = useState(false)
   const [gen, setGen] = useState(0)
 
-  // (Re)issue the enrollment ticket on mount, whenever the reusable toggle
-  // flips, and whenever "New code" bumps `gen`. Retries briefly in case the
-  // gateway's listener isn't ready yet, and cancels cleanly on the next issue.
+  // (Re)issue the enrollment ticket on mount and whenever "New code" bumps
+  // `gen`. A single-use code auto-issues — this screen exists to pair one
+  // machine right now, and its 10-minute code shows honestly as a pending
+  // invite row in the roster meanwhile. A REUSABLE code never auto-issues:
+  // it is a standing credential, so it must be an explicit click (gen > 0),
+  // never a toggle's side effect — flipping the toggle and back must mint
+  // nothing. Retries briefly in case the gateway's listener isn't ready yet,
+  // and cancels cleanly on the next issue.
   useEffect(() => {
+    if (reusable && gen === 0) { setCode(''); setErr(''); setBusy(false); return }
     let cancelled = false
     setBusy(true); setCode(''); setErr('')
     const poll = (n: number) => {
       // Single-use expires in 10 min; a reusable code lives until it is revoked (ttl 0).
       IssuePairingCode(reusable, reusable ? 0 : 600, [], [], '').then(c => { if (!cancelled) { setCode(c); setBusy(false) } })
-        .catch(e => { if (!cancelled) { if (n < 20) setTimeout(() => poll(n + 1), 250); else { setErr(String(e)); setBusy(false) } } })
+        .catch(e => { if (!cancelled) { if (n < 20) setTimeout(() => poll(n + 1), 250); else { setErr(String((e as Error)?.message ?? e)); setBusy(false) } } })
     }
     poll(0)
     return () => { cancelled = true }
   }, [reusable, gen])
+  // The toggle resets the mint counter both ways, so switching modes never
+  // inherits the other mode's "already asked" state.
+  const pickReusable = (v: boolean) => { setReusable(v); setGen(0) }
 
   const paired = !!status?.agentConnected
   return (
@@ -228,24 +237,28 @@ function GatewayLive({status, controlPort, onDone}: {
         ? <Codebox text={code} action={<CopyButton text={code} />} />
         : err
           ? <ErrorBanner message={err} onDismiss={() => setErr('')} />
-          : <div className="pf-well px-3 py-2.5 text-sm text-[var(--text-3)]">Generating code…</div>}
+          : reusable
+            ? <Button size="sm" variant="ghost" onClick={() => setGen(1)}>Mint reusable code</Button>
+            : <div className="pf-well px-3 py-2.5 text-sm text-[var(--text-3)]">Generating code…</div>}
       <div className="mt-2 flex items-center justify-between gap-3">
         <span className="min-w-0 text-xs text-[var(--text-3)]">
           {reusable
-            ? 'Reusable — enrolls multiple agents until you revoke it.'
+            ? 'Reusable — a standing code, listed under Agents until you revoke it.'
             : 'Single-use — enrolls one agent, then expires. Valid for 10 minutes.'}
         </span>
-        <Button variant="ghost" size="sm" onClick={() => setGen(g => g + 1)} disabled={busy}>
-          <IconRefresh size={13} /> New code
-        </Button>
+        {!(reusable && gen === 0) && (
+          <Button variant="ghost" size="sm" onClick={() => setGen(g => g + 1)} disabled={busy}>
+            <IconRefresh size={13} /> New code
+          </Button>
+        )}
       </div>
 
       <div className="mt-3">
         <Disclosure label="Advanced" hint="Reuse this code for more than one agent">
           <Toggle
-            checked={reusable} onChange={setReusable}
+            checked={reusable} onChange={pickReusable}
             label="Reusable code"
-            hint="Let this code enroll more than one machine. Otherwise it works exactly once, then expires." />
+            hint="Let this code enroll more than one machine. Nothing is minted until you ask — a standing code should never be a toggle's side effect." />
         </Disclosure>
       </div>
 
