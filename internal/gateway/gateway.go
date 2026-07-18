@@ -376,6 +376,101 @@ func (g *Gateway) SetAgentScope(agentID string, scope Scope) bool {
 	return ok
 }
 
+// SetPause records the gateway operator's own pause bits for one tunnel of an
+// agent (tunnelID "" = the whole agent) and applies them to the live session:
+// listeners keep their ports and turn new players away; live splices drain.
+// disconnect additionally drops the affected players now — the deliberate
+// extra, never the default. Pause is arbitration: immediate, a notice in the
+// event ring, no consent round-trip (it edits no tunnel definition), and it
+// only ever touches the gateway's OWN bits — the agent's set is the agent's.
+func (g *Gateway) SetPause(agentID, tunnelID string, paused, disconnect bool) bool {
+	if g.agents == nil {
+		return false
+	}
+	ids, all, ok := g.agents.PauseBits(agentID)
+	if !ok {
+		return false
+	}
+	cur := newPauseSet(ids, all)
+	if tunnelID == "" {
+		cur.all = paused
+	} else if paused {
+		cur.tunnels[tunnelID] = struct{}{}
+	} else {
+		delete(cur.tunnels, tunnelID)
+	}
+	if !g.agents.SetPause(agentID, cur.ids(), cur.all) {
+		return false
+	}
+	a := g.act()
+	if a == nil {
+		return true
+	}
+	a.do(func() {
+		sess := a.agents[agentID]
+		if sess == nil {
+			return // offline: the store seeds pauseMine at the next admission
+		}
+		prev := sess.pauseMine.Load()
+		sess.pauseMine.Store(cur)
+		a.refreshPause(sess)
+		a.recordPauseChange(agentID, prev, cur, "the gateway operator")
+		// Tell the agent so its UI can name who paused it; its own bits are
+		// untouched (each side clears only its own).
+		if sess.Has(control.CapPause) {
+			go g.sendPauseState(sess)
+		}
+		if disconnect {
+			go kickConns(sess, tunnelID)
+		}
+	})
+	return true
+}
+
+// sendPauseState writes the gateway's complete current pause set to the agent.
+// Complete-set semantics make it idempotent — safe to re-assert on connect.
+func (g *Gateway) sendPauseState(sess *agentSession) {
+	p := sess.pauseMine.Load()
+	var ps control.PauseState
+	if p != nil {
+		ps = control.PauseState{TunnelIDs: p.ids(), AgentWide: p.all}
+	}
+	if err := sess.writeControl(control.TypePauseState, ps); err != nil {
+		sess.logger.Debug("pause_state write failed", "err", err)
+	}
+}
+
+// kickConns closes the live player legs a pause chose not to drain: every
+// tracked public connection of the tunnel (or all of them, tunnelID ""). The
+// relay owns both legs of a splice, so closing the player side unwinds the
+// data leg under every transport.
+func kickConns(sess *agentSession, tunnelID string) {
+	sess.rttConns.Range(func(_, v any) bool {
+		rc := v.(*rttConn)
+		if tunnelID == "" || rc.entry.TunnelID == tunnelID {
+			rc.tcp.Close()
+		}
+		return true
+	})
+}
+
+func equalPauseSets(a, b *pauseSet) bool {
+	aEmpty := a == nil || (!a.all && len(a.tunnels) == 0)
+	bEmpty := b == nil || (!b.all && len(b.tunnels) == 0)
+	if aEmpty || bEmpty {
+		return aEmpty == bEmpty
+	}
+	if a.all != b.all || len(a.tunnels) != len(b.tunnels) {
+		return false
+	}
+	for id := range a.tunnels {
+		if _, ok := b.tunnels[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // AgentView is one agent's management row for the GUI roster: its persisted
 // identity and policy joined with live-session status. An agent that is offline
 // still appears (Connected=false). Scope is flattened to slices so the Wails
@@ -1246,6 +1341,14 @@ func (g *Gateway) buildAndAdmit(ctx context.Context, conn net.Conn, hello *contr
 		reportedConfigHash: hello.ConfigHash,
 	}
 	sess.agentConfigGen.Store(hello.ConfigGeneration)
+	sess.headless = hello.Headless
+	// Seed the gateway's own persisted pause bits before admission, so a
+	// listener bound during register/reconcile is born already paused.
+	if g.agents != nil {
+		if ids, all, ok := g.agents.PauseBits(identity.AgentID); ok {
+			sess.pauseMine.Store(newPauseSet(ids, all))
+		}
+	}
 	gen, err := g.act().admit(sess)
 	if err != nil {
 		// The only admission refusals left are transient — anti-flap dampening
@@ -1317,6 +1420,12 @@ func (g *Gateway) serveControl(ctx context.Context, sess *agentSession, ctrl tra
 	// capability-degraded peer instead pushes its own set via SyncTunnels.
 	if sess.Has(control.CapGatewayConfig) {
 		g.pushConfigOnConnect(sess)
+	}
+	// Re-assert the gateway's own pause bits on every connect (the agent does
+	// the same in the other direction): pause state is local per side and the
+	// wire only ever carries complete sets, so a reconnect converges both views.
+	if sess.Has(control.CapPause) {
+		g.sendPauseState(sess)
 	}
 	for {
 		if ctx.Err() != nil {
@@ -1535,6 +1644,27 @@ func (g *Gateway) handleControlMsg(sess *agentSession, ctrl transport.Stream, en
 		}
 		sess.health.Store(h.TunnelID, h.LocalUp)
 		sess.logger.Debug("tunnel health", "tunnel_id", h.TunnelID, "local_up", h.LocalUp)
+		return nil
+
+	case control.TypePauseState:
+		// The agent's complete pause set (CapPause). Arbitration, never a veto:
+		// store, fold into the listeners, and record a notice naming who acted.
+		// Without the negotiated capability the frame is ignored like any
+		// unknown type — never an error.
+		if !sess.Has(control.CapPause) {
+			return nil
+		}
+		ps, err := control.Decode[control.PauseState](env)
+		if err != nil {
+			return err
+		}
+		prev := sess.pauseTheirs.Load()
+		next := newPauseSet(ps.TunnelIDs, ps.AgentWide)
+		sess.pauseTheirs.Store(next)
+		g.act().do(func() {
+			g.act().refreshPause(sess)
+			g.act().recordPauseChange(sess.agentID, prev, next, "the agent")
+		})
 		return nil
 
 	default:
@@ -1777,10 +1907,11 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	}
 	defer g.gate.release(ip)
 	mux := sess.session()
-	if mux == nil || backendDown(sess, spec.ID) {
-		// No live session, or the agent reports the local server down: answer
-		// with the offline MOTD when configured, else fall through to a clean
-		// close.
+	if mux == nil || pl.paused.Load() || backendDown(sess, spec.ID) {
+		// No live session, a paused tunnel (either side's bit — the listener
+		// stays bound, so the port is held by construction), or the agent
+		// reports the local server down: answer with the offline MOTD when
+		// configured, else fall through to a clean close.
 		g.serveOffline(clientConn, spec)
 		return
 	}

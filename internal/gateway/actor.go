@@ -63,6 +63,10 @@ type agentSession struct {
 	// dial, the gateway only names what it accepted.
 	appVersion string
 	transport  string
+	// headless mirrors Hello.Headless: the agent runs with no GUI attached, so
+	// nobody may be watching for a consent proposal or a pause notice. Set at
+	// admission, immutable after; informational GUI surfacing only.
+	headless bool
 
 	// pendingInbound holds an agent-authored config proposal awaiting the gateway
 	// operator's decision; pendingOutbound a gateway-authored one awaiting the
@@ -72,6 +76,17 @@ type agentSession struct {
 	// actor-owned state.
 	pendingInbound  atomic.Pointer[pendingProposal]
 	pendingOutbound atomic.Pointer[pendingProposal]
+
+	// pauseMine holds the gateway operator's own pause bits (seeded from the
+	// store at admission); pauseTheirs the agent's last reported set
+	// (TypePauseState, control read loop). Atomics for the same reason as the
+	// proposals: the read loop and GUI ops race on them and never touch
+	// actor-owned state — the actor only folds both into pl.paused
+	// (refreshPause). Each side clears only its own set, which is what makes
+	// resume safe: clearing a bit can only un-cover a tunnel the agent itself
+	// still enables.
+	pauseMine   atomic.Pointer[pauseSet]
+	pauseTheirs atomic.Pointer[pauseSet]
 
 	sess    atomic.Pointer[sessionBox]
 	evicted atomic.Bool
@@ -190,6 +205,46 @@ type bindPolicy struct {
 // send an operator hunting for a process that does not exist.
 var errTooManyListeners = fmt.Errorf("this agent already holds the most public listeners one agent may have")
 
+// pauseSet is one side's pause bits: the tunnels it paused, or everything.
+// Immutable once built; swapped whole behind atomics so off-actor readers
+// never see a partial update. nil means nothing paused.
+type pauseSet struct {
+	tunnels map[string]struct{}
+	all     bool
+}
+
+func newPauseSet(tunnelIDs []string, all bool) *pauseSet {
+	p := &pauseSet{all: all, tunnels: make(map[string]struct{}, len(tunnelIDs))}
+	for _, id := range tunnelIDs {
+		p.tunnels[id] = struct{}{}
+	}
+	return p
+}
+
+func (p *pauseSet) covers(tunnelID string) bool {
+	if p == nil {
+		return false
+	}
+	if p.all {
+		return true
+	}
+	_, ok := p.tunnels[tunnelID]
+	return ok
+}
+
+// ids flattens the set back to its wire/store form.
+func (p *pauseSet) ids() []string {
+	if p == nil || len(p.tunnels) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(p.tunnels))
+	for id := range p.tunnels {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // publicListener is one bound public port serving one tunnel of one session.
 type publicListener struct {
 	spec  control.TunnelSpec
@@ -201,6 +256,12 @@ type publicListener struct {
 	// handleClient (hence atomic); written by bind/reconcile on the actor. nil
 	// pointer / uncapped set = the relay fast path.
 	limiters atomic.Pointer[bwcap.LimiterSet]
+	// paused is the combined verdict of both sides' pause bits for this tunnel,
+	// read off-actor by handleClient at its choke point and recomputed on the
+	// actor whenever either set changes (refreshPause). It cannot live in
+	// pl.spec — reconcile deliberately leaves pl.spec untouched for off-actor
+	// readers, and pause must never look like a spec change (no rebind, ever).
+	paused atomic.Bool
 }
 
 // actor owns all session/listener lifecycle state. Every mutation runs on
@@ -499,6 +560,9 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, pol bind
 	}
 	pl := &publicListener{spec: spec, owner: sess, ln: ln, done: make(chan struct{})}
 	pl.limiters.Store(bwcap.BuildSet(spec.BandwidthLimitMbps, spec.BandwidthLimitScope))
+	// A listener born under an existing pause bit starts paused — a reconnect
+	// or rebind must not open a window where paused players slip through.
+	pl.paused.Store(sess.pauseMine.Load().covers(spec.ID) || sess.pauseTheirs.Load().covers(spec.ID))
 	if subtree == nil {
 		subtree = make(map[string]*publicListener)
 		a.listeners[sess.agentID] = subtree
@@ -506,6 +570,43 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, pol bind
 	subtree[spec.ID] = pl
 	go a.acceptClients(pl, handle)
 	return ln.Addr().(*net.TCPAddr).Port, nil
+}
+
+// refreshPause folds both sides' pause sets into every live listener's combined
+// bit. Runs on the actor goroutine (listener map access); the sets themselves
+// are immutable snapshots, so this is pure recomputation.
+func (a *actor) refreshPause(sess *agentSession) {
+	mine, theirs := sess.pauseMine.Load(), sess.pauseTheirs.Load()
+	for _, pl := range a.listeners[sess.agentID] {
+		pl.paused.Store(mine.covers(pl.spec.ID) || theirs.covers(pl.spec.ID))
+	}
+}
+
+// recordPauseChange files the arbitration notice for a pause-set change. Runs
+// ON the actor goroutine (callers off it wrap in do; never nest do — it
+// deadlocks the single command loop). Idempotent re-asserts — a reconnect
+// resending the same set — record nothing, so the ring never fills with noise.
+func (a *actor) recordPauseChange(agentID string, prev, next *pauseSet, who string) {
+	if equalPauseSets(prev, next) {
+		return
+	}
+	kind, verb := EventTunnelPaused, "paused"
+	if next == nil || (!next.all && len(next.tunnels) == 0) {
+		kind, verb = EventTunnelResumed, "resumed"
+	}
+	scope := "tunnels"
+	switch {
+	case next != nil && next.all:
+		scope = "the whole agent"
+	case next != nil && len(next.tunnels) == 1:
+		scope = "a tunnel"
+	case kind == EventTunnelResumed:
+		scope = "everything"
+	}
+	a.recordEvent(GatewayEvent{
+		Kind: kind, AgentID: agentID,
+		Message: fmt.Sprintf("Agent %s: %s %s by %s.", agentID, scope, verb, who),
+	})
 }
 
 // listenFirstFree tries to bind each candidate port in order and returns the

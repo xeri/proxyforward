@@ -92,6 +92,12 @@ type AgentRecord struct {
 	EnrolledVia    string               `json:"enrolledVia,omitempty"`
 	DesiredTunnels []control.TunnelSpec `json:"desiredTunnels,omitempty"`
 	ConfigGen      uint64               `json:"configGen,omitempty"`
+	// PausedTunnels / PausedAll are the GATEWAY operator's own pause bits for
+	// this agent — the agent's bits live on the agent's disk. Deliberately not
+	// part of DesiredTunnels: pause is state, not config, so flipping it never
+	// bumps ConfigGen, never pushes, and never rebinds a listener.
+	PausedTunnels []string `json:"pausedTunnels,omitempty"`
+	PausedAll     bool     `json:"pausedAll,omitempty"`
 }
 
 // enrollNonce is one outstanding pairing ticket.
@@ -335,6 +341,26 @@ func (s *AgentStore) Rename(agentID, nickname string) bool {
 // SetScope replaces an agent's bind scope, reporting whether it was found.
 func (s *AgentStore) SetScope(agentID string, scope Scope) bool {
 	return s.mutate(agentID, func(r *AgentRecord) { r.Scope = scope })
+}
+
+// SetPause records the gateway operator's own pause bits for an agent.
+func (s *AgentStore) SetPause(agentID string, tunnelIDs []string, all bool) bool {
+	return s.mutate(agentID, func(r *AgentRecord) {
+		r.PausedTunnels = tunnelIDs
+		r.PausedAll = all
+	})
+}
+
+// PauseBits returns the gateway's persisted pause bits for an agent.
+func (s *AgentStore) PauseBits(agentID string) (tunnelIDs []string, all bool, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range s.agents {
+		if r.AgentID == agentID {
+			return append([]string(nil), r.PausedTunnels...), r.PausedAll, true
+		}
+	}
+	return nil, false, false
 }
 
 // mutate applies fn to the record with the given agentID and persists.

@@ -35,6 +35,11 @@ const (
 	// EventAgentEnrolled: a new machine joined the fleet through an invite. A
 	// completed outcome: event log only, and the roster shows the newcomer.
 	EventAgentEnrolled = "agent-enrolled"
+	// EventTunnelPaused / EventTunnelResumed: an arbitration notice — either side
+	// paused (or resumed) a tunnel or a whole agent, immediately and without
+	// consent (pause edits no tunnel definition). Message names who acted.
+	EventTunnelPaused  = "tunnel-paused"
+	EventTunnelResumed = "tunnel-resumed"
 )
 
 // GatewayEvent is one notable, user-facing thing the gateway did or noticed —
