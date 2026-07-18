@@ -49,6 +49,8 @@ export function GetConfig():Promise<config.Config>;
 
 export function HandleDeepLink(arg1:string):Promise<void>;
 
+export function HideToTray():Promise<void>;
+
 export function ImportSetup(arg1:string,arg2:string):Promise<void>;
 
 export function InstallService():Promise<void>;
@@ -85,6 +87,8 @@ export function Players(arg1:analytics.PlayersQuery):Promise<analytics.PlayersPa
 
 export function ProposeAgentConfig(arg1:string,arg2:Array<control.TunnelSpec>):Promise<void>;
 
+export function QuitAndDisconnect():Promise<void>;
+
 export function ReclaimPort(arg1:string,arg2:string,arg3:number):Promise<void>;
 
 export function RejectAgentProposal(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -110,6 +114,8 @@ export function SessionTimeline(arg1:number):Promise<analytics.SessionTimeline>;
 export function Sessions(arg1:analytics.SessionsQuery):Promise<analytics.SessionsPage>;
 
 export function SetAgentScope(arg1:string,arg2:Array<number>,arg3:Array<string>):Promise<void>;
+
+export function SetMinimizeToTray(arg1:boolean):Promise<void>;
 
 export function SetTheme(arg1:string):Promise<void>;
 

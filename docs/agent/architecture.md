@@ -9,9 +9,10 @@
 
 ```
 main.go                 CLI (cobra): GUI default | agent|gateway headless | pair |
-                        service | firewall | elevated-task | tray-spike; crash.log setup
+                        service | firewall | elevated-task; crash.log setup
 app/                    Wails-bound layer: App methods = the whole JS API; 2 Hz tick;
-                        avatars (player-head cache + /pf/avatar/ HTTP); setup export/
+                        system tray + the close fork (tray.go, close.go); avatars
+                        (player-head cache + /pf/avatar/ HTTP); setup export/
                         import (.pfsetup); diagnostics bundle (redacted)
 internal/
   engine/               Composition root, two nested lifetimes: Run = supervisor
@@ -407,7 +408,10 @@ config-consent, so edits apply the old way and the surfaces must say so honestly
 `&invites=friend|single|both` (gateway only — live pairing codes as roster rows: a
 reusable labeled "friends" invite with two enrollments, a pending single-use code
 expiring in minutes, or both; minting from Overview or the modal appends a row and
-revoke removes it).
+revoke removes it),
+`&tray=off|notice` (the close fork: the mock's X mirrors `closeDecision` — default is
+tray-on with the notice seen; `off` → close quits, confirming when players are on;
+`notice` → an uneventful close shows the one-time tray notice).
 The traffic model is deterministic functions of absolute time, so
 chart/tiles/replay all agree at any poll cadence. When you add a binding, add its stub
 here or the mock throws. Role setup mutates the mock's role, so the switcher flips the
@@ -429,3 +433,12 @@ whole app live in the browser with no Go running.
   (`portowner/`).
 - Console attach for windowsgui builds: `wincon.AttachParent()` at the top of every
   CLI subcommand — new subcommands must call it too.
+- System tray: energye/systray registers on the main goroutine in `runGUI` *before*
+  `wails.Run` (its `init()` locks the main thread; the tray window is created on the
+  registering thread and Wails' message pump services it — `OnStartup` runs in a
+  goroutine, too late). Menu callbacks fire inside that pump, so every handler
+  dispatches to a goroutine (`app/tray.go`). The close fork is one pure decision
+  (`app/close.go closeDecision`, wired to Wails `OnBeforeClose` — the funnel for the
+  X button, Alt-F4, and the frontend's `Quit()`); dialogs render in the frontend off
+  the `pxf:close` event. The icon is rendered from `build/appicon.png` at startup
+  (`internal/trayicon`), one ICO per run state.

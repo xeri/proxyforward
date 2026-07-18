@@ -10,7 +10,8 @@ description: Playbook for bumping a proxyforward dependency (Go module or npm pa
      keepalive OFF, window size, long write timeout) against the upstream changelog;
      the heartbeat-owns-liveness invariant depends on them.
    - For **wails**: diff the regenerated `frontend/wailsjs`, re-test the frameless
-     window + `tray_spike.go`.
+     window + the tray (`app/tray.go` rides Wails' message pump, so a Wails bump can
+     break tray menu dispatch even when the window is fine).
 2. Frontend: bump in `frontend/package.json`, `npm install`, `npm run build`, walk
    the mock axes.
 3. Gate: full Go suite + burst (`go test -run TestBurst -v ./internal/e2e/`) +

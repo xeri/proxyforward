@@ -2,7 +2,7 @@ import {ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react'
 import {
   BrowseMMDB, CreatorAvatar, CreatorInfo, FirewallRepair, FirewallStatus, GeoStatus, GetConfig,
   InstallService, OpenConfigDir, OpenCreatorURL, OpenExternal,
-  RestartEngine, SaveSettings, ServiceStatus, StartService, StopService, UninstallService,
+  RestartEngine, SaveSettings, ServiceStatus, SetMinimizeToTray, StartService, StopService, UninstallService,
 } from '../../wailsjs/go/app/App'
 import {config, geo} from '../../wailsjs/go/models'
 import {
@@ -276,7 +276,19 @@ export function Settings({status}: {status: UIStatus}) {
             )}
           </Section>
 
-          <SystemSection status={status} />
+          <SystemSection
+            status={status}
+            trayOn={!!cfg.UI.MinimizeToTray}
+            onTrayToggle={v => {
+              // Immediate like the theme — a UI preference, not a settings
+              // apply. The staged copy is kept in sync (without dirtying) so a
+              // later Save can't revert what the toggle already wrote.
+              const next = config.Config.createFrom(JSON.parse(JSON.stringify(cfg)))
+              next.UI.MinimizeToTray = v
+              setCfg(next)
+              SetMinimizeToTray(v).catch(e => setErr(String(e)))
+            }}
+          />
 
           <Section id="backup" title="Backup" subtitle="Move this setup to another machine — pairing, tunnels, keys, and statistics travel in one file.">
             {attached && <div className="pb-2 text-xs text-[var(--text-3)]">The background service owns this setup — stop the service to export or import.</div>}
@@ -530,7 +542,9 @@ function ForceStopRow({status}: {status: UIStatus}) {
 }
 
 /** SystemSection: Windows integration + the config file + build identity. */
-function SystemSection({status}: {status: UIStatus}) {
+function SystemSection({status, trayOn, onTrayToggle}: {
+  status: UIStatus; trayOn: boolean; onTrayToggle: (v: boolean) => void
+}) {
   const [fw, setFw] = useState<boolean | null>(null)
   const [svc, setSvc] = useState<string>('…')
   const [busy, setBusy] = useState('')
@@ -588,6 +602,20 @@ function SystemSection({status}: {status: UIStatus}) {
             The Windows service is installed but stopped — it should be running so the tunnel stays up without this window open. Start it above.
           </Banner>
         </div>
+      )}
+      {/* The tray preference lives with the other Windows integration, and
+          only where a tray can exist: an attached viewer's close never touches
+          the daemon's run, so there is nothing to prefer. */}
+      {status.mode !== 'attached' && (
+        <>
+          <Divider />
+          <Toggle
+            checked={trayOn}
+            onChange={onTrayToggle}
+            label="Close to tray"
+            hint="Closing the window keeps the tunnel running in the tray. Turn off to quit on close."
+          />
+        </>
       )}
       <Divider />
       {/* Stacked, not a FormRow: FormRow's control side is shrink-0 and this

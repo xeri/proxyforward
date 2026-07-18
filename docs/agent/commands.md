@@ -30,7 +30,7 @@ composable axes `&link=down &mode=attached &fatal=1 &engine=stopped
 &service=running|stopped &fresh=1 &analytics=off &paired=0
 &geo=off|empty|error|pending &fx=low|high &fleet=multi|old
 &conflict=port|clone|both &deeplink=1 &pending=in|out|both &consent=off
-&invites=friend|single|both`. Axis semantics are documented in
+&invites=friend|single|both &tray=off|notice`. Axis semantics are documented in
 `docs/agent/architecture.md` ("devmock axes") and the `devmock.ts` header. This is
 the UI state-matrix test harness — walk the relevant axes before calling UI work
 done, then spot-check in `wails dev` (WebView2 ≠ your browser).

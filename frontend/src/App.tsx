@@ -13,6 +13,7 @@ import {Activity} from './screens/Activity'
 import {Settings} from './screens/Settings'
 import {Tunnels} from './screens/Tunnels'
 import {Wizard} from './screens/Wizard'
+import {CloseDialog} from './components/CloseDialog'
 import {CommandPalette} from './components/CommandPalette'
 import {Spinner} from './components/ui'
 import {isEngineOff, UIStatus, useTick} from './state'
@@ -165,6 +166,9 @@ export default function App() {
     return (
       <Shell titlebar={<TitleBar brand />}>
         <Wizard status={status} onDone={finishWizard} deepLink={deepLink} />
+        {/* Mounted here too: a re-pair overlay can cover a running engine, and
+            a close during it must still get its fork. */}
+        <CloseDialog />
       </Shell>
     )
   }
@@ -201,6 +205,7 @@ export default function App() {
         </div>
       </div>
       {palette && <CommandPalette ctx={{status: s, go}} onClose={() => setPalette(false)} />}
+      <CloseDialog />
     </Shell>
   )
 }

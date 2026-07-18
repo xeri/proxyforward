@@ -237,7 +237,7 @@ The README and the Settings UI **oversell**. Ground truth re-verified by the
 |---|---|
 | UDP tunnels | Not implemented: no UDP socket code, `validateSpec` rejects `type:"udp"`. No longer advertised (the `tunnel-udp` capability was removed); config still accepts `type:"udp"` but the gateway rejects it — a latent gap, not an oversell. |
 | MC status polling (MOTD/players) | Only login sniffing (`mcsniff/`); the health probe is a bare TCP dial (`health.go probeOnce`). |
-| Tray / minimize-to-tray / autostart | Hidden `tray_spike.go` command only; `MinimizeToTray` / `Autostart` stored, unused. |
+| Autostart ("Start on login") | Stored (`config.go` `Autostart`), consumed by nothing, and shown nowhere since the honesty pass. The tray half of this row shipped (close-to-tray, run-state icon — `app/tray.go`). |
 | Linux / macOS binaries | CI **builds** them (`.github/workflows/ci.yml`) so the `*_other.go` stubs can't rot, but they **cannot run**: `ipc.Serve` returns `ErrUnsupported` off Windows and every engine must serve the pipe (`engine.go Run`), so the window opens and the engine dies. Unpublished artifacts, never release assets. Fixing this means a real unix-socket IPC port. |
 
 Rules: don't document these as working; don't build UI atop them; trust code over the

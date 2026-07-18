@@ -61,6 +61,13 @@
 //                      Minting from Overview/the modal also appends a row, and
 //                      revoke removes it — the real write-then-repoll loop. No
 //                      axis → no invite rows (the roster is agents only).
+//   &tray=off|notice — the close fork (X button). Default: the tray preference
+//                      is on and the one-time notice was already seen, so X
+//                      with players shows the Minimize/Quit fork and X without
+//                      them "hides" (logged). off → the preference is off: X
+//                      with players shows the disconnect confirm, without them
+//                      it quits. notice → the notice hasn't been seen, so an
+//                      uneventful X shows the one-time tray notice instead.
 
 type AnyFn = (...a: any[]) => any
 
@@ -87,6 +94,9 @@ export function installDevMock() {
   const axisPending = params.get('pending') || '' // '' | in | out | both
   const axisInvites = params.get('invites') || '' // '' | friend | single | both
   const axisConsentOff = params.get('consent') === 'off' // peer without config-consent
+  const axisTray = params.get('tray') || '' // '' (on, notice seen) | off | notice
+  // Latches when the mock's HideToTray runs, like the persisted flag it fakes.
+  let trayNoticeSeen = axisTray !== 'notice'
   const fx = params.get('fx')
   if (fx) document.documentElement.dataset.fx = fx // &fx=high | &fx=low
 
@@ -108,7 +118,22 @@ export function installDevMock() {
     WindowMinimise: () => {},
     WindowToggleMaximise: () => {},
     WindowSetBackgroundColour: () => {},
-    Quit: () => { console.info('[devmock] Quit()') },
+    // The X button. Mirrors app/close.go closeDecision so clicking it in a
+    // browser exercises the whole close fork: plain quit outside engine mode,
+    // hide (logged) when the tray takes it, the pxf:close dialog otherwise.
+    Quit: () => {
+      const st = status()
+      const players = st.connections?.length ?? 0
+      const trayOn = config.UI.MinimizeToTray && st.mode === 'engine'
+      if (st.mode !== 'engine' || (!trayOn && players === 0)) {
+        console.info('[devmock] Quit() — plain quit')
+        return
+      }
+      if (!trayOn) { emit('pxf:close', {kind: 'askquit', players}); return }
+      if (players > 0) { emit('pxf:close', {kind: 'asktray', players}); return }
+      if (!trayNoticeSeen) { emit('pxf:close', {kind: 'notice', players}); return }
+      console.info('[devmock] Quit() — hidden to tray')
+    },
     ClipboardSetText: (text: string) => navigator.clipboard.writeText(text).then(() => true, () => false),
   }, {get: (t, p) => (p in t ? (t as any)[p] : () => {})})
 
@@ -578,7 +603,7 @@ export function installDevMock() {
       MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10, MaxTunnelsPerAgent: 32},
     Metrics: {PrometheusEnabled: false, PrometheusAddr: '127.0.0.1:9464'},
     Logging: {Level: 'info', FileEnabled: true},
-    UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: true, Autostart: false},
+    UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: axisTray !== 'off', Autostart: false, TrayNoticeShown: axisTray !== 'notice'},
     Analytics: {RetentionDays: 180, MojangLookups: true, GeoIPCityPath: '', GeoIPASNPath: ''},
   }
   // A machine that has never been paired holds no agent credentials — the
@@ -1187,6 +1212,9 @@ export function installDevMock() {
       return ok(undefined)
     },
     SetTheme: (t: string) => { config.UI.Theme = t; return ok(undefined) },
+    SetMinimizeToTray: (v: boolean) => { config.UI.MinimizeToTray = v; return ok(undefined) },
+    HideToTray: () => { trayNoticeSeen = true; config.UI.TrayNoticeShown = true; console.info('[devmock] HideToTray()'); return ok(undefined) },
+    QuitAndDisconnect: () => { console.info('[devmock] QuitAndDisconnect()'); return ok(undefined) },
     RestartEngine: () => gated(() => undefined),
     // Start/Stop drive the run and mutate the mock world, so the next poll shows
     // the result — the real write-then-repoll loop. Not gated: unlike Restart,

@@ -10,12 +10,13 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
 ## Honesty (UI promises > backend truth)
 
 1. **Stub controls promise unimplemented behavior** — the top item; see CLAUDE.md
-   "Reality check" for the full inventory. Down to two after the honesty pass wired
-   Offline MOTD, the bandwidth cap, Prometheus, and the Transport selector:
-   - Settings: "Minimize to tray" and "Start on login" — both stored
-     (`config.go MinimizeToTray Autostart`), consumed by nothing.
-   - Fix: either implement, or visibly mark ("not yet wired") / hide until real.
-     Decide per-feature with the human (scope call — escalation trigger).
+   "Reality check" for the full inventory. Down to one after the honesty pass wired
+   Offline MOTD, the bandwidth cap, Prometheus, and the Transport selector, and the
+   tray shipped for real ("Close to tray" in Settings is honest now):
+   - Autostart ("Start on login") — stored (`config.go Autostart`), consumed by
+     nothing; the honesty pass removed its toggle, so today the promise is absence.
+   - Fix: implement it (registry Run key or startup-folder shortcut), or delete the
+     config field. Decide with the human (scope call — escalation trigger).
 
 2. **Overview under-reports live sessions when truncated** — pipeline node and the
    "Live sessions" tile use `conns.length` (clamped at 150 by `ipc.MaxStatusConns`)

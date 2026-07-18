@@ -116,7 +116,6 @@ func newRootCmd(deepLink string) *cobra.Command {
 		newServiceCmd(),
 		newFirewallCmd(),
 		newElevatedTaskCmd(),
-		newTraySpikeCmd(),
 	)
 	return root
 }

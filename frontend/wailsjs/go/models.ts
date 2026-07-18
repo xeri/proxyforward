@@ -987,6 +987,7 @@ export namespace config {
 	    Theme: string;
 	    MinimizeToTray: boolean;
 	    Autostart: boolean;
+	    TrayNoticeShown: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new UIConfig(source);
@@ -997,6 +998,7 @@ export namespace config {
 	        this.Theme = source["Theme"];
 	        this.MinimizeToTray = source["MinimizeToTray"];
 	        this.Autostart = source["Autostart"];
+	        this.TrayNoticeShown = source["TrayNoticeShown"];
 	    }
 	}
 	export class LoggingConfig {

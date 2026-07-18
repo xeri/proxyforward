@@ -78,6 +78,10 @@ export function HandleDeepLink(arg1) {
   return window['go']['app']['App']['HandleDeepLink'](arg1);
 }
 
+export function HideToTray() {
+  return window['go']['app']['App']['HideToTray']();
+}
+
 export function ImportSetup(arg1, arg2) {
   return window['go']['app']['App']['ImportSetup'](arg1, arg2);
 }
@@ -150,6 +154,10 @@ export function ProposeAgentConfig(arg1, arg2) {
   return window['go']['app']['App']['ProposeAgentConfig'](arg1, arg2);
 }
 
+export function QuitAndDisconnect() {
+  return window['go']['app']['App']['QuitAndDisconnect']();
+}
+
 export function ReclaimPort(arg1, arg2, arg3) {
   return window['go']['app']['App']['ReclaimPort'](arg1, arg2, arg3);
 }
@@ -200,6 +208,10 @@ export function Sessions(arg1) {
 
 export function SetAgentScope(arg1, arg2, arg3) {
   return window['go']['app']['App']['SetAgentScope'](arg1, arg2, arg3);
+}
+
+export function SetMinimizeToTray(arg1) {
+  return window['go']['app']['App']['SetMinimizeToTray'](arg1);
 }
 
 export function SetTheme(arg1) {
