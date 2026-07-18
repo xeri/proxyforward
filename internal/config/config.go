@@ -90,16 +90,26 @@ type AgentConfig struct {
 	// (agent.go finishEnrollment). Empty in steady state — the Ed25519 identity
 	// authenticates thereafter, and the config holds no live credential.
 	EnrollTicket string `toml:"enroll_ticket"`
+	// Paused is the agent-wide pause bit: every tunnel keeps its port but
+	// turns players away until resumed. Local-only state, not config — it
+	// rides the pause message, never config sync or consent.
+	Paused bool `toml:"paused"`
 }
 
 type Tunnel struct {
-	ID         string        `toml:"id"`
-	Name       string        `toml:"name"`
-	Type       string        `toml:"type"` // "tcp" | "udp"
-	LocalAddr  string        `toml:"local_addr"`
-	PublicPort int           `toml:"public_port"`
-	Enabled    bool          `toml:"enabled"`
-	Options    TunnelOptions `toml:"options"`
+	ID         string `toml:"id"`
+	Name       string `toml:"name"`
+	Type       string `toml:"type"` // "tcp" | "udp"
+	LocalAddr  string `toml:"local_addr"`
+	PublicPort int    `toml:"public_port"`
+	Enabled    bool   `toml:"enabled"`
+	// Paused is this tunnel's own pause bit: still enabled, still registered,
+	// still holding its public port — but players are turned away until
+	// resumed. Local-only like LocalAddr: it never serializes into TunnelSpec,
+	// so it cannot reach HashTunnels or any config/consent path, and flipping
+	// it never rebinds the listener.
+	Paused  bool          `toml:"paused"`
+	Options TunnelOptions `toml:"options"`
 }
 
 type TunnelOptions struct {

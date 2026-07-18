@@ -170,7 +170,73 @@ type Agent struct {
 	// completes (see EnrollmentPersister). nil (bare test agents) drops the
 	// notification; the engine always wires one in production.
 	enrollPersister atomic.Pointer[EnrollmentPersister]
+
+	// headless mirrors into Hello.Headless: this process runs with no GUI
+	// attached (service/CLI), so nobody may be watching for a consent proposal
+	// or a pause notice. Set before Run, immutable after.
+	headless bool
+	// pausedByGateway is the gateway's last reported pause set (CapPause) —
+	// informational for the UI ("paused by the gateway"); the gateway enforces
+	// its own bits itself. Cleared at session start, re-asserted after hello.
+	pausedByGateway atomic.Pointer[gwPause]
+	// pausePersister persists the agent's own pause bits. They live in the
+	// config the app owns under its own lock, so like the pushed-config and
+	// stopped-flag persisters the agent never writes that disk bare.
+	pausePersister atomic.Pointer[PausePersister]
+	// liveConns tracks this agent's live proxied connections (serial →
+	// tunnel + local leg) so a pause-with-disconnect can drop exactly one
+	// tunnel's players by closing its local legs — the relay owns both legs of
+	// a splice, so the data leg unwinds with it. Connection-setup cost only,
+	// never per-byte.
+	liveConns   sync.Map
+	liveConnSeq atomic.Uint64
 }
+
+// gwPause is the gateway's reported pause set — same shape as the wire
+// message, held immutably so readers never see a partial update.
+type gwPause struct {
+	tunnels map[string]struct{}
+	all     bool
+}
+
+func newGwPause(tunnelIDs []string, all bool) *gwPause {
+	p := &gwPause{all: all, tunnels: make(map[string]struct{}, len(tunnelIDs))}
+	for _, id := range tunnelIDs {
+		p.tunnels[id] = struct{}{}
+	}
+	return p
+}
+
+func (p *gwPause) covers(tunnelID string) bool {
+	if p == nil {
+		return false
+	}
+	if p.all {
+		return true
+	}
+	_, ok := p.tunnels[tunnelID]
+	return ok
+}
+
+// liveConn is one tracked proxied connection: enough to kick a tunnel's
+// players by closing their local legs.
+type liveConn struct {
+	tunnelID string
+	local    net.Conn
+}
+
+// PausePersister persists the agent's own pause bits (the agent-wide flag and
+// the per-tunnel Paused fields riding the tunnels slice). The app wires one;
+// nil keeps the bits in memory only.
+type PausePersister func(agentWide bool, tunnels []config.Tunnel) error
+
+// SetPausePersister installs the disk-persistence hook for the pause bits.
+func (a *Agent) SetPausePersister(fn PausePersister) { a.pausePersister.Store(&fn) }
+
+// SetHeadless marks this process as running without a GUI; reported in the
+// hello so the peer's UI can temper expectations (a consent proposal may wait).
+// Call before Run.
+func (a *Agent) SetHeadless(on bool) { a.headless = on }
 
 // ConfigPersister persists a gateway-pushed tunnel set and its generation to disk so
 // it survives a restart. The app wires one; with none set the agent keeps the pushed
@@ -275,6 +341,16 @@ type peerIdentity struct {
 	hostname   string
 	localIPs   []string
 	observedIP string // our public IP as the gateway saw it
+	headless   bool   // the gateway runs with no GUI attached (HelloOK.Headless)
+}
+
+// PeerHeadless reports whether the gateway said nobody may be watching its UI
+// (service/CLI run); false while the link is down.
+func (a *Agent) PeerHeadless() bool {
+	if p := a.peer.Load(); p != nil {
+		return p.headless
+	}
+	return false
 }
 
 // PeerHostname reports the gateway's hostname, or "" while the link is down.
@@ -519,8 +595,19 @@ func (a *Agent) runSessionWith(ctx context.Context, tr string) (bool, error) {
 	sess := &session{agent: a, mux: mux, ctrl: ctrl, caps: caps, quality: linkquality.New(lossWindow), linkCounters: sessCounters}
 	a.curSession.Store(sess)
 	defer a.curSession.Store(nil)
+	// The gateway's pause bits are session-scoped knowledge: clear the stale
+	// view now and let the gateway re-assert its set after the hello (it does,
+	// whenever CapPause negotiated — complete-set semantics make that safe).
+	a.pausedByGateway.Store(nil)
 	if err := sess.registerTunnels(); err != nil {
 		return true, err // connected, so no fallback; Run backs off
+	}
+	// Re-assert our own pause bits in the other direction, for the gateway's
+	// UI and event log; enforcement of our bits is ours either way.
+	if sess.Has(control.CapPause) {
+		if err := sess.write(control.TypePauseState, a.localPauseState()); err != nil {
+			a.logger.Debug("pause_state write failed", "err", err)
+		}
 	}
 	a.linkUp.Store(true)
 	a.linkUpSinceMs.Store(time.Now().UnixMilli())
@@ -693,6 +780,7 @@ func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (
 		EnrollTicket:     ticket,
 		ConfigHash:       cfgHash,
 		ConfigGeneration: cfgGen,
+		Headless:         a.headless,
 	}); err != nil {
 		return nil, fmt.Errorf("send hello: %w", err)
 	}
@@ -706,7 +794,7 @@ func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (
 		if err != nil {
 			return nil, err
 		}
-		a.peer.Store(&peerIdentity{hostname: ok.Hostname, localIPs: ok.LocalIPs, observedIP: ok.ObservedIP})
+		a.peer.Store(&peerIdentity{hostname: ok.Hostname, localIPs: ok.LocalIPs, observedIP: ok.ObservedIP, headless: ok.Headless})
 		a.configSeedNeeded.Store(ok.ConfigSeedNeeded)
 		a.finishEnrollment(ok.AssignedAgentID)
 		a.logger.Info("connected to gateway", "gateway", remoteAddr, "generation", ok.SessionGeneration, "gateway_version", ok.AppVersion, "gateway_host", ok.Hostname, "observed_ip", ok.ObservedIP, "capabilities", ok.Capabilities)
@@ -1080,6 +1168,22 @@ func (s *session) handleControlMsg(env *control.Envelope) error {
 		}
 		return nil
 
+	case control.TypePauseState:
+		// The gateway's complete pause set (CapPause) — informational: the
+		// gateway enforces its own bits at its listeners; we surface "paused
+		// by the gateway" in the UI. Without the negotiated capability the
+		// frame is ignored like any unknown type.
+		if !s.Has(control.CapPause) {
+			return nil
+		}
+		ps, err := control.Decode[control.PauseState](env)
+		if err != nil {
+			return err
+		}
+		s.agent.pausedByGateway.Store(newGwPause(ps.TunnelIDs, ps.AgentWide))
+		s.agent.logger.Info("gateway pause state updated", "agent_wide", ps.AgentWide, "tunnels", len(ps.TunnelIDs))
+		return nil
+
 	case control.TypeOpenData:
 		od, err := control.Decode[control.OpenData](env)
 		if err != nil {
@@ -1121,6 +1225,14 @@ func (s *session) handleDataStream(st relay.Conn) {
 		s.agent.logger.Warn("open_conn for a tunnel this agent does not serve", "tunnel_id", oc.TunnelID)
 		return
 	}
+	if tun.Paused || s.agent.agentPaused() {
+		// Our own pause bits, enforced on our side of the wire too: a paused
+		// tunnel never dials the local server, so it costs no Minecraft slot —
+		// even against a legacy gateway that can't enforce pause at its
+		// listeners. (The gateway's bits are the gateway's to enforce.)
+		s.agent.logger.Debug("refusing open_conn for a paused tunnel", "tunnel_id", oc.TunnelID)
+		return
+	}
 	local, err := net.DialTimeout("tcp", tun.LocalAddr, localDialTimeout)
 	if err != nil {
 		// Milestone 3's health checks make this state visible before
@@ -1149,6 +1261,11 @@ func (s *session) handleDataStream(st relay.Conn) {
 	// post-hoc) because the control goroutine reads ConnKey concurrently.
 	entry, closeEntry := s.agent.Conns.Open(s.agent.cfg.Agent.AgentID, tun.ID, tun.Name, oc.ClientAddr, oc.ConnID, false)
 	defer closeEntry()
+	// Track the local leg so pause-with-disconnect can drop this tunnel's
+	// players by closing it (either leg closing unwinds the splice).
+	lcID := s.agent.liveConnSeq.Add(1)
+	s.agent.liveConns.Store(lcID, &liveConn{tunnelID: tun.ID, local: tcp})
+	defer s.agent.liveConns.Delete(lcID)
 
 	// Minecraft-aware tunnels sniff the client's login handshake (which flows
 	// in on the stream leg) to attribute the connection to a player. The tap
@@ -1251,6 +1368,94 @@ func (s *session) pushHealth(tunnelID string, up bool) {
 	if err := s.write(control.TypeHealth, control.Health{TunnelID: tunnelID, LocalUp: up}); err != nil {
 		s.agent.logger.Debug("health push failed", "tunnel_id", tunnelID, "err", err)
 	}
+}
+
+// SetPause flips this agent's own pause bit for one tunnel (tunnelID "" = the
+// agent-wide bit): the tunnel stays enabled and keeps its public port, but
+// players are turned away until resumed. disconnect additionally drops the
+// affected players now — the deliberate extra, never the default. Pause is
+// state, not config: the change persists locally (PausePersister), rides
+// TypePauseState to the gateway when the session negotiated CapPause, and
+// never touches config sync or consent.
+func (a *Agent) SetPause(tunnelID string, paused, disconnect bool) error {
+	a.cfgMu.Lock()
+	if tunnelID == "" {
+		a.cfg.Agent.Paused = paused
+	} else {
+		found := false
+		for i := range a.cfg.Agent.Tunnels {
+			if a.cfg.Agent.Tunnels[i].ID == tunnelID {
+				a.cfg.Agent.Tunnels[i].Paused = paused
+				found = true
+			}
+		}
+		if !found {
+			a.cfgMu.Unlock()
+			return fmt.Errorf("no tunnel with id %q — refresh and try again", tunnelID)
+		}
+	}
+	agentWide := a.cfg.Agent.Paused
+	tunnels := append([]config.Tunnel(nil), a.cfg.Agent.Tunnels...)
+	a.cfgMu.Unlock()
+
+	if fn := a.pausePersister.Load(); fn != nil {
+		if err := (*fn)(agentWide, tunnels); err != nil {
+			a.logger.Warn("persist pause bits", "err", err)
+		}
+	}
+	if s := a.curSession.Load(); s != nil && s.Has(control.CapPause) {
+		if err := s.write(control.TypePauseState, a.localPauseState()); err != nil {
+			a.logger.Debug("pause_state write failed", "err", err)
+		}
+	}
+	if paused && disconnect {
+		a.kickLocal(tunnelID)
+	}
+	return nil
+}
+
+// localPauseState is the agent's complete current pause set in wire form —
+// complete-set semantics keep it idempotent for the connect-time re-assert.
+func (a *Agent) localPauseState() control.PauseState {
+	a.cfgMu.RLock()
+	defer a.cfgMu.RUnlock()
+	ps := control.PauseState{AgentWide: a.cfg.Agent.Paused}
+	for _, t := range a.cfg.Agent.Tunnels {
+		if t.Paused {
+			ps.TunnelIDs = append(ps.TunnelIDs, t.ID)
+		}
+	}
+	return ps
+}
+
+// agentPaused reports the agent-wide bit.
+func (a *Agent) agentPaused() bool {
+	a.cfgMu.RLock()
+	defer a.cfgMu.RUnlock()
+	return a.cfg.Agent.Paused
+}
+
+// PausedByGateway reports whether the gateway's own bits cover a tunnel — the
+// UI's "paused by the gateway" badge. tunnelID "" asks about the agent-wide bit.
+func (a *Agent) PausedByGateway(tunnelID string) bool {
+	p := a.pausedByGateway.Load()
+	if tunnelID == "" {
+		return p != nil && p.all
+	}
+	return p.covers(tunnelID)
+}
+
+// kickLocal closes the local legs of this agent's live proxied connections for
+// one tunnel ("" = all). Closing either leg unwinds the splice, so this drops
+// the players without any wire help — it works against a legacy gateway too.
+func (a *Agent) kickLocal(tunnelID string) {
+	a.liveConns.Range(func(_, v any) bool {
+		lc := v.(*liveConn)
+		if tunnelID == "" || lc.tunnelID == tunnelID {
+			lc.local.Close()
+		}
+		return true
+	})
 }
 
 // enabledTunnelByID resolves a tunnel id the gateway named to a tunnel this agent
