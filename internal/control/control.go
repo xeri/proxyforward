@@ -88,7 +88,7 @@ const (
 // capability joins this list only once BOTH ends honor it end-to-end — the
 // peer acts on the offer, so advertising early is a live protocol bug (the
 // tunnel-udp lesson, CLAUDE.md "Reality check").
-var SupportedCapabilities = []string{CapTunnelSync, CapConnStats, CapPerConn, CapGatewayConfig, CapConfigConsent}
+var SupportedCapabilities = []string{CapTunnelSync, CapConnStats, CapPerConn, CapGatewayConfig, CapConfigConsent, CapPause}
 
 // IntersectCaps returns offered ∩ supported, preserving supported's order.
 // Nil-safe on both arguments; unknown offered strings are simply dropped.
