@@ -161,6 +161,9 @@ func New(cfg *config.Config, configDir, configPath string, logger *slog.Logger) 
 		// The gateway-assigned identity must outlive the process; a GUI host
 		// overrides this with its lock-taking hook (mirrors SetStoppedPersister).
 		e.Agent.SetEnrollmentPersister(e.persistEnrollment)
+		// Same split for the pause bits: hostless runs write their own config,
+		// a GUI host overrides with its lock-taking hook.
+		e.Agent.SetPausePersister(e.persistPause)
 		e.roleRun = e.Agent.Run
 	case config.RoleGateway:
 		e.Gateway = gateway.New(cfg, configDir, logger)
@@ -590,6 +593,7 @@ func (e *Engine) Status() ipc.Status {
 		st.PublicIP = e.Agent.ObservedIP()
 		st.PeerPublicIP = e.cfg.Agent.GatewayHost
 		st.HealthScore = healthScore(st.LinkUp, st.JitterMillis, st.PacketLossPct, st.LinkUpSinceMs)
+		st.PeerHeadless = e.Agent.PeerHeadless()
 		for _, t := range e.Agent.Tunnels() {
 			ts := ipc.TunnelStatus{
 				ID: t.ID, Name: t.Name,
@@ -598,6 +602,9 @@ func (e *Engine) Status() ipc.Status {
 			}
 			ts.PublicPort, _ = e.Agent.TunnelPublicPort(t.ID)
 			ts.LocalUp, ts.LocalKnown = e.Agent.LocalUp(t.ID)
+			// "mine" is this agent's own bits (tunnel or agent-wide); "theirs"
+			// the gateway's reported set, whose all-bit covers() already folds.
+			ts.Paused, ts.PausedBy = pausedBy(t.Paused || e.Agent.AgentWidePaused(), e.Agent.PausedByGateway(t.ID))
 			st.Tunnels = append(st.Tunnels, ts)
 		}
 		setStatusConns(&st, e.Agent.Conns.Snapshot())
@@ -620,14 +627,17 @@ func (e *Engine) Status() ipc.Status {
 			st.PacketLossPct = e.Gateway.PacketLossPct()
 		}
 		st.HealthScore = healthScore(st.AgentConnected, st.JitterMillis, st.PacketLossPct, st.LinkUpSinceMs)
+		st.PeerHeadless = e.Gateway.AgentHeadless()
 		for _, t := range e.Gateway.Tunnels() {
-			st.Tunnels = append(st.Tunnels, ipc.TunnelStatus{
+			ts := ipc.TunnelStatus{
 				AgentID: t.AgentID,
 				ID:      t.ID, Name: t.Name, PublicPort: t.PublicPort,
 				LocalUp: t.LocalUp, LocalKnown: t.LocalKnown,
 				BandwidthLimitMbps:  t.BandwidthLimitMbps,
 				BandwidthLimitScope: t.BandwidthLimitScope,
-			})
+			}
+			ts.Paused, ts.PausedBy = pausedBy(t.PausedMine, t.PausedTheirs)
+			st.Tunnels = append(st.Tunnels, ts)
 		}
 		// Per-agent link records for the multi-agent dashboard. Tunnel counts
 		// come from the flat tunnel list; player counts from conntrack's

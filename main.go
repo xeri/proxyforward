@@ -352,6 +352,12 @@ func runEngineWithIPC(ctx context.Context, cfg *config.Config, configDir, config
 	if err != nil {
 		return err
 	}
+	// Every caller of this function is a GUI-less host (the agent/gateway
+	// subcommands and the Windows service); the hello tells the peer so its
+	// UI can say "nobody may be watching" instead of waiting on a consent
+	// answer that needs a human. The GUI-hosted engine never passes through
+	// here and stays non-headless.
+	e.SetHeadless(true)
 	return e.Run(ctx)
 }
 

@@ -75,6 +75,10 @@ type Gateway struct {
 	cfg    *config.Config
 	dir    string // config dir (certs live here)
 	logger *slog.Logger
+	// headless mirrors into HelloOK.Headless: this gateway runs with no GUI
+	// attached, so nobody may be watching for a consent proposal. Set before
+	// Start, immutable after.
+	headless bool
 
 	fingerprint string
 	controlLn   net.Listener
@@ -484,7 +488,12 @@ type AgentView struct {
 	IssuedAtMs   int64    `json:"issuedAtMs"`
 	// EnrolledVia names the invite that admitted this agent (label or handle) —
 	// the drill-in's provenance line.
-	EnrolledVia   string `json:"enrolledVia"`
+	EnrolledVia string `json:"enrolledVia"`
+	// Headless: the connected agent said no GUI is attached on its side.
+	// PausedAll: an agent-wide pause bit is in force (either side's while
+	// connected; the gateway's own persisted one while offline).
+	Headless      bool   `json:"headless,omitempty"`
+	PausedAll     bool   `json:"pausedAll,omitempty"`
 	Connected     bool   `json:"connected"`
 	Hostname      string `json:"hostname"`
 	RemoteIP      string `json:"remoteIp"`
@@ -532,6 +541,12 @@ func (g *Gateway) ListAgentViews() []AgentView {
 			v.Connected, v.Hostname, v.RemoteIP, v.LinkUpSinceMs = true, l.Hostname, l.RemoteIP, l.LinkUpSinceMs
 			v.Version, v.Transport = l.Version, l.Transport
 			v.PendingInbound, v.PendingOutbound = l.PendingInbound, l.PendingOutbound
+			v.Headless, v.PausedAll = l.Headless, l.PausedAll
+		} else {
+			// Offline: the gateway's own persisted all-bit still shows — a
+			// paused agent that reconnects will come back paused, and the
+			// roster should say so before it does.
+			v.PausedAll = r.PausedAll
 		}
 		out = append(out, v)
 	}
@@ -725,6 +740,20 @@ func (g *Gateway) AgentHostname() string {
 	return ""
 }
 
+// SetHeadless marks this process as running without a GUI; reported in every
+// HelloOK so agents' UIs can temper expectations (a consent proposal may wait).
+// Call before Start.
+func (g *Gateway) SetHeadless(on bool) { g.headless = on }
+
+// AgentHeadless reports whether the connected agent said no GUI is attached on
+// its side; false while no agent is connected.
+func (g *Gateway) AgentHeadless() bool {
+	if sess := g.session(); sess != nil {
+		return sess.headless
+	}
+	return false
+}
+
 // AgentLANIPs reports the connected agent machine's LAN IPv4s, or nil.
 func (g *Gateway) AgentLANIPs() []string {
 	if sess := g.session(); sess != nil {
@@ -780,6 +809,11 @@ type AgentLink struct {
 	// the full proposals ride AgentConfigView.
 	PendingInbound  bool
 	PendingOutbound bool
+	// Headless: the agent said no GUI is attached on its side (Hello.Headless).
+	Headless bool
+	// PausedAll: an agent-wide pause bit is set — the gateway's own or the
+	// agent's reported one. Per-tunnel bits ride the tunnel snapshots.
+	PausedAll bool
 }
 
 // Agents returns every connected agent's link state, sorted by agentID so the
@@ -812,6 +846,8 @@ func (g *Gateway) Agents() []AgentLink {
 			Transport:       s.transport,
 			PendingInbound:  s.pendingInbound.Load() != nil,
 			PendingOutbound: s.pendingOutbound.Load() != nil,
+			Headless:        s.headless,
+			PausedAll:       s.pauseMine.Load().allSet() || s.pauseTheirs.Load().allSet(),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].AgentID < out[j].AgentID })
@@ -1132,6 +1168,7 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 	okMsg.AssignedAgentID = identity.AgentID
 	okMsg.GatewayID = g.gatewayID
 	okMsg.ConfigSeedNeeded = g.needsConfigSeed(identity, negotiated)
+	okMsg.Headless = g.headless
 	if err := control.WriteMsg(ctrl, control.TypeHelloOK, okMsg); err != nil {
 		logger.Debug("hello_ok write failed", "err", err)
 		return
@@ -1254,6 +1291,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthD
 	okMsg.AssignedAgentID = identity.AgentID
 	okMsg.GatewayID = g.gatewayID
 	okMsg.ConfigSeedNeeded = g.needsConfigSeed(identity, negotiated)
+	okMsg.Headless = g.headless
 	if err := control.WriteMsg(conn, control.TypeHelloOK, okMsg); err != nil {
 		logger.Debug("hello_ok write failed", "err", err)
 		conn.Close()

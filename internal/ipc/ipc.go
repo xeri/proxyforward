@@ -128,6 +128,10 @@ type Status struct {
 	// PeerPublicIP is the configured gateway host; on the gateway they swap.
 	PublicIP     string `json:"publicIp,omitempty"`
 	PeerPublicIP string `json:"peerPublicIp,omitempty"`
+	// PeerHeadless reports the peer said no GUI is attached on its side
+	// (Hello/HelloOK Headless), so nobody may be watching for a consent
+	// proposal there. Informational; false against a legacy peer.
+	PeerHeadless bool `json:"peerHeadless,omitempty"`
 
 	// Gateway-side fields.
 	AgentConnected bool `json:"agentConnected,omitempty"`
@@ -210,6 +214,12 @@ type TunnelStatus struct {
 	// unlimited); omitempty keeps uncapped tunnels' frames unchanged.
 	BandwidthLimitMbps  int    `json:"bandwidthLimitMbps,omitempty"`
 	BandwidthLimitScope string `json:"bandwidthLimitScope,omitempty"`
+	// Paused reports the tunnel turns players away while holding its port;
+	// PausedBy names whose bits cover it from the reporting side's view:
+	// "mine" | "theirs" | "both". Both omitempty — a legacy daemon's frames
+	// carry neither and the UI's pause controls stay disabled.
+	Paused   bool   `json:"paused,omitempty"`
+	PausedBy string `json:"pausedBy,omitempty"`
 }
 
 // StatusSource produces the current Status snapshot for each request.

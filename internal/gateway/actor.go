@@ -232,6 +232,9 @@ func (p *pauseSet) covers(tunnelID string) bool {
 	return ok
 }
 
+// allSet reports the agent-wide bit alone (covers would also match per-tunnel).
+func (p *pauseSet) allSet() bool { return p != nil && p.all }
+
 // ids flattens the set back to its wire/store form.
 func (p *pauseSet) ids() []string {
 	if p == nil || len(p.tunnels) == 0 {
@@ -811,6 +814,10 @@ type TunnelSnapshot struct {
 	LocalKnown          bool
 	BandwidthLimitMbps  int    // configured cap (0 = unlimited)
 	BandwidthLimitScope string // combined | per-direction | per-connection
+	// PausedMine / PausedTheirs report whose pause bits cover this tunnel
+	// (mine = this gateway's operator, theirs = the agent's own).
+	PausedMine   bool
+	PausedTheirs bool
 }
 
 // tunnels snapshots every registered tunnel and its bound port, joined with
@@ -832,6 +839,8 @@ func (a *actor) tunnels() []TunnelSnapshot {
 				if v, ok := pl.owner.health.Load(pl.spec.ID); ok {
 					ts.LocalUp, ts.LocalKnown = v.(bool), true
 				}
+				ts.PausedMine = pl.owner.pauseMine.Load().covers(pl.spec.ID)
+				ts.PausedTheirs = pl.owner.pauseTheirs.Load().covers(pl.spec.ID)
 				out = append(out, ts)
 			}
 		}

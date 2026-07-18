@@ -250,6 +250,8 @@ func (a *App) startEngineLocked() {
 		// And land the assigned identity under a.mu — this config is shared with
 		// the 2 Hz status read, so the engine's bare-write default must not run.
 		eng.Agent.SetEnrollmentPersister(a.persistEnrollment)
+		// Same for the pause bits: the app owns the shared config's writes.
+		eng.Agent.SetPausePersister(a.persistPause)
 	}
 	// A lifecycle op over the pipe (an attached GUI, or another GUI driving this
 	// engine) persists the stopped flag through a.mu — this config is shared
@@ -356,6 +358,9 @@ type UIStatus struct {
 	PeerPublicIP string   `json:"peerPublicIp"`
 	LocalLANIPs  []string `json:"localLanIps"`
 	PeerLANIPs   []string `json:"peerLanIps"`
+	// PeerHeadless: the peer said no GUI is attached on its side, so nobody
+	// may be watching for a consent proposal there.
+	PeerHeadless bool `json:"peerHeadless"`
 
 	// Agents is the per-agent link state on a gateway (empty on the agent
 	// role); the Agents screen and drill-in read it. Tunnels/Connections stay
@@ -411,6 +416,11 @@ type TunnelUI struct {
 	LocalKnown          bool   `json:"localKnown"`
 	BandwidthLimitMbps  int    `json:"bandwidthLimitMbps"`  // configured cap (0 = unlimited)
 	BandwidthLimitScope string `json:"bandwidthLimitScope"` // combined | per-direction | per-connection
+	// Paused: the tunnel turns players away while keeping its port. PausedBy
+	// names whose bits ("mine" = this side, "theirs" = the peer, "both");
+	// empty against a daemon that predates pause — the UI's controls disable.
+	Paused   bool   `json:"paused"`
+	PausedBy string `json:"pausedBy"`
 }
 
 // ConnUI is one live connection for the frontend.
@@ -476,6 +486,7 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 	st.PeerPublicIP = s.PeerPublicIP
 	st.LocalLANIPs = s.LocalLANIPs
 	st.PeerLANIPs = s.PeerLANIPs
+	st.PeerHeadless = s.PeerHeadless
 	st.TotalBytesIn = s.TotalBytesIn
 	st.TotalBytesOut = s.TotalBytesOut
 	st.LinkUpSinceMs = s.LinkUpSinceMs
@@ -506,6 +517,8 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 			LocalUp: t.LocalUp, LocalKnown: t.LocalKnown,
 			BandwidthLimitMbps:  t.BandwidthLimitMbps,
 			BandwidthLimitScope: t.BandwidthLimitScope,
+			Paused:              t.Paused,
+			PausedBy:            t.PausedBy,
 		})
 	}
 	st.ConnectionsTruncated = s.ConnectionsTruncated
@@ -825,6 +838,44 @@ func (a *App) StopEngine(force bool) error {
 // stopRunReq is the OpStopRun body; force skips the clean-unwind wait.
 type stopRunReq struct {
 	Force bool `json:"force"`
+}
+
+// SetPause flips one pause bit: the tunnel (or whole agent) keeps its public
+// port and turns players away until resumed; disconnect drops the affected
+// players now. On a gateway agentID names whose tunnel; on an agent it is
+// ignored. tunnelID "" = the whole agent. Attached mode drives the daemon's
+// bit over the pipe — pause is the daemon's state, persisted on its disk.
+func (a *App) SetPause(agentID, tunnelID string, paused, disconnect bool) error {
+	a.mu.Lock()
+	mode, eng := a.mode, a.eng
+	a.mu.Unlock()
+	if mode == ModeAttached {
+		return a.analyticsCall(engine.OpSetPause, setPauseReq{
+			AgentID: agentID, TunnelID: tunnelID, Paused: paused, Disconnect: disconnect,
+		}, nil)
+	}
+	if eng == nil {
+		return errors.New("the engine is not running — start it first")
+	}
+	return eng.SetPause(agentID, tunnelID, paused, disconnect)
+}
+
+// setPauseReq is the OpSetPause body.
+type setPauseReq struct {
+	AgentID    string `json:"agentId,omitempty"`
+	TunnelID   string `json:"tunnelId,omitempty"`
+	Paused     bool   `json:"paused"`
+	Disconnect bool   `json:"disconnect,omitempty"`
+}
+
+// persistPause lands the agent's pause bits under a.mu — this config is shared
+// with the 2 Hz status read, so the engine's bare-write default must not run.
+func (a *App) persistPause(agentWide bool, tunnels []config.Tunnel) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfg.Agent.Paused = agentWide
+	a.cfg.Agent.Tunnels = tunnels
+	return a.cfg.Save(a.configPath)
 }
 
 // StartEngine starts the tunnel run. Usually a resume: the daemon is already

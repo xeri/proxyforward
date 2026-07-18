@@ -60,7 +60,7 @@ func TestSetPauseAndLocalPauseState(t *testing.T) {
 	if ps := a.localPauseState(); !ps.AgentWide {
 		t.Fatal("agent-wide bit must ride the wire form")
 	}
-	if !a.agentPaused() {
+	if !a.AgentWidePaused() {
 		t.Fatal("agent-wide bit must be readable for enforcement")
 	}
 	// Resuming the agent leaves the tunnel bit standing — independent bits.

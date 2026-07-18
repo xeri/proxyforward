@@ -58,6 +58,10 @@ func (e *Engine) analyticsOp(op string, body json.RawMessage) (json.RawMessage, 
 	if isLifecycleOp(op) {
 		return e.lifecycleOp(op)
 	}
+	// The pause op acts on the live role object, not the store.
+	if isPauseOp(op) {
+		return e.pauseOp(body)
+	}
 	// Gateway agent-administration ops act on the live gateway (allowlist, sessions,
 	// event ring), not the analytics store, so they answer even when the DB is down.
 	if isAgentAdminOp(op) {

@@ -1225,7 +1225,7 @@ func (s *session) handleDataStream(st relay.Conn) {
 		s.agent.logger.Warn("open_conn for a tunnel this agent does not serve", "tunnel_id", oc.TunnelID)
 		return
 	}
-	if tun.Paused || s.agent.agentPaused() {
+	if tun.Paused || s.agent.AgentWidePaused() {
 		// Our own pause bits, enforced on our side of the wire too: a paused
 		// tunnel never dials the local server, so it costs no Minecraft slot —
 		// even against a legacy gateway that can't enforce pause at its
@@ -1428,8 +1428,8 @@ func (a *Agent) localPauseState() control.PauseState {
 	return ps
 }
 
-// agentPaused reports the agent-wide bit.
-func (a *Agent) agentPaused() bool {
+// AgentWidePaused reports the agent-wide pause bit.
+func (a *Agent) AgentWidePaused() bool {
 	a.cfgMu.RLock()
 	defer a.cfgMu.RUnlock()
 	return a.cfg.Agent.Paused
