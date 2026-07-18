@@ -13,6 +13,7 @@ import (
 	"proxyforward/internal/config"
 	"proxyforward/internal/ipc"
 	"proxyforward/internal/secureio"
+	"proxyforward/internal/setup"
 )
 
 const (
@@ -199,15 +200,34 @@ func seedServiceConfig() error {
 	}
 	// secureio, not os.MkdirAll: the destination is under %ProgramData%, whose
 	// default ACL grants BUILTIN\Users read and is inherited by everything created
-	// beneath it. What we are about to copy in is the user's config — gateway token,
-	// agent token, enrollment ticket — and the engine will later put gateway.key and
-	// gateway_agents.json beside it. A mode argument would not have helped: Windows
-	// ignores it, so 0o755/0o644 here were never the permissions this ran with.
+	// beneath it. What we are about to copy in is the user's config (it can hold a
+	// live enrollment ticket) and the credential files beside it. A mode argument
+	// would not have helped: Windows ignores it, so 0o755/0o644 here were never the
+	// permissions this ran with.
 	if err := secureio.MkdirAll(filepath.Dir(dst)); err != nil {
 		return fmt.Errorf("create service config dir: %w", err)
 	}
 	if err := os.WriteFile(dst, data, 0o600); err != nil {
 		return fmt.Errorf("seed service config: %w", err)
+	}
+	// The config alone is no longer the setup: since the shared token left it,
+	// each role's real credential is a file beside it — the agent's Ed25519 key,
+	// the gateway's pinned TLS identity, and its enrollment allowlist. A seeded
+	// service without them would mint fresh ones: an agent the gateway refuses,
+	// a cert no agent pins, an empty fleet. Copy whichever exist (role-dependent),
+	// never overwriting.
+	srcDir, dstDir := filepath.Dir(src), filepath.Dir(dst)
+	for _, name := range []string{setup.FileAgentKey, setup.FileCert, setup.FileKey, setup.FileAgents} {
+		b, err := os.ReadFile(filepath.Join(srcDir, name))
+		if err != nil {
+			continue // absent is normal for the other role's files
+		}
+		if _, err := os.Stat(filepath.Join(dstDir, name)); err == nil {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dstDir, name), b, 0o600); err != nil {
+			return fmt.Errorf("seed %s: %w", name, err)
+		}
 	}
 	return nil
 }
