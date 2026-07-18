@@ -46,8 +46,9 @@ type tray struct {
 // wizard becomes an engine mid-session while registration cannot wait (it is
 // main-thread-only). A grey icon during setup beats a missing one after it.
 // Render failure just means no tray: closeDecision sees trayActive false and
-// close falls back to quitting, never to hiding into nowhere.
-func (a *App) RegisterTray(markPNG []byte) {
+// close falls back to quitting, never to hiding into nowhere. A package-level
+// function, not a method: methods on App become frontend bindings.
+func RegisterTray(a *App, markPNG []byte) {
 	t := &tray{a: a, icons: map[trayicon.State][]byte{}}
 	for _, st := range []trayicon.State{trayicon.StateRunning, trayicon.StateStopped, trayicon.StateFatal} {
 		ico, err := trayicon.Render(markPNG, st)

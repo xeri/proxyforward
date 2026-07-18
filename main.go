@@ -468,14 +468,14 @@ func runGUI(deepLink string) error {
 	attached := false
 	if c, err := ipc.Dial(300 * time.Millisecond); err == nil {
 		if err := c.Ping(); err == nil {
-			a.AdoptClient(c)
+			app.AdoptClient(a, c)
 			attached = true
 		} else {
 			c.Close()
 		}
 	}
 	if !attached {
-		a.RegisterTray(appIconPNG)
+		app.RegisterTray(a, appIconPNG)
 	}
 	// A cold start via the OS protocol handler: the frontend isn't listening yet,
 	// so stash the link now for it to pull once it mounts (App.TakePendingDeepLink).

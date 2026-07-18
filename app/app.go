@@ -130,8 +130,10 @@ func New(configPath string, cfg *config.Config, ring *logging.Ring, logger *slog
 // AdoptClient hands Startup an already-verified daemon connection. runGUI
 // probes the pipe before the window exists — the tray must register on the
 // main thread before wails.Run, and whether a tray belongs at all depends on
-// this very answer — so the probe happens once, there, and lands here.
-func (a *App) AdoptClient(c *ipc.Client) {
+// this very answer — so the probe happens once, there, and lands here. A
+// package-level function, not a method: methods on App become frontend
+// bindings (the AvatarHandler precedent).
+func AdoptClient(a *App, c *ipc.Client) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.client = c
@@ -759,6 +761,16 @@ func (a *App) SaveSettings(cfg config.Config) error {
 		return err
 	}
 	*a.cfg = cfg
+	return a.cfg.Save(a.configPath)
+}
+
+// SetMinimizeToTray persists the close-to-tray preference. Like SetTheme it
+// is a narrow UI-preference write, not a settings apply: no validation pass,
+// no engine restart — BeforeClose reads it live on the next close.
+func (a *App) SetMinimizeToTray(on bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfg.UI.MinimizeToTray = on
 	return a.cfg.Save(a.configPath)
 }
 
