@@ -735,6 +735,8 @@ export namespace app {
 	    localKnown: boolean;
 	    bandwidthLimitMbps: number;
 	    bandwidthLimitScope: string;
+	    paused: boolean;
+	    pausedBy: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TunnelUI(source);
@@ -750,6 +752,8 @@ export namespace app {
 	        this.localKnown = source["localKnown"];
 	        this.bandwidthLimitMbps = source["bandwidthLimitMbps"];
 	        this.bandwidthLimitScope = source["bandwidthLimitScope"];
+	        this.paused = source["paused"];
+	        this.pausedBy = source["pausedBy"];
 	    }
 	}
 	export class UIStatus {
@@ -772,6 +776,7 @@ export namespace app {
 	    peerPublicIp: string;
 	    localLanIps: string[];
 	    peerLanIps: string[];
+	    peerHeadless: boolean;
 	    agents: AgentUI[];
 	    tunnels: TunnelUI[];
 	    connections: ConnUI[];
@@ -817,6 +822,7 @@ export namespace app {
 	        this.peerPublicIp = source["peerPublicIp"];
 	        this.localLanIps = source["localLanIps"];
 	        this.peerLanIps = source["peerLanIps"];
+	        this.peerHeadless = source["peerHeadless"];
 	        this.agents = this.convertValues(source["agents"], AgentUI);
 	        this.tunnels = this.convertValues(source["tunnels"], TunnelUI);
 	        this.connections = this.convertValues(source["connections"], ConnUI);
@@ -888,6 +894,7 @@ export namespace config {
 	    LocalAddr: string;
 	    PublicPort: number;
 	    Enabled: boolean;
+	    Paused: boolean;
 	    Options: TunnelOptions;
 	
 	    static createFrom(source: any = {}) {
@@ -902,6 +909,7 @@ export namespace config {
 	        this.LocalAddr = source["LocalAddr"];
 	        this.PublicPort = source["PublicPort"];
 	        this.Enabled = source["Enabled"];
+	        this.Paused = source["Paused"];
 	        this.Options = this.convertValues(source["Options"], TunnelOptions);
 	    }
 	
@@ -931,6 +939,7 @@ export namespace config {
 	    Transport: string;
 	    Tunnels: Tunnel[];
 	    EnrollTicket: string;
+	    Paused: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentConfig(source);
@@ -945,6 +954,7 @@ export namespace config {
 	        this.Transport = source["Transport"];
 	        this.Tunnels = this.convertValues(source["Tunnels"], Tunnel);
 	        this.EnrollTicket = source["EnrollTicket"];
+	        this.Paused = source["Paused"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1270,6 +1280,10 @@ export namespace gateway {
 	    scopeTunnels: string[];
 	    issuedAtMs: number;
 	    enrolledVia: string;
+	    headless?: boolean;
+	    pausedAll?: boolean;
+	    pausedAllBy?: string;
+	    pauseSupported?: boolean;
 	    connected: boolean;
 	    hostname: string;
 	    remoteIp: string;
@@ -1293,6 +1307,10 @@ export namespace gateway {
 	        this.scopeTunnels = source["scopeTunnels"];
 	        this.issuedAtMs = source["issuedAtMs"];
 	        this.enrolledVia = source["enrolledVia"];
+	        this.headless = source["headless"];
+	        this.pausedAll = source["pausedAll"];
+	        this.pausedAllBy = source["pausedAllBy"];
+	        this.pauseSupported = source["pauseSupported"];
 	        this.connected = source["connected"];
 	        this.hostname = source["hostname"];
 	        this.remoteIp = source["remoteIp"];

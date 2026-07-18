@@ -458,6 +458,19 @@ func kickConns(sess *agentSession, tunnelID string) {
 	})
 }
 
+// whose names which side's bit is set, in the reporting side's voice.
+func whose(mine, theirs bool) string {
+	switch {
+	case mine && theirs:
+		return "both"
+	case mine:
+		return "mine"
+	case theirs:
+		return "theirs"
+	}
+	return ""
+}
+
 func equalPauseSets(a, b *pauseSet) bool {
 	aEmpty := a == nil || (!a.all && len(a.tunnels) == 0)
 	bEmpty := b == nil || (!b.all && len(b.tunnels) == 0)
@@ -492,13 +505,19 @@ type AgentView struct {
 	// Headless: the connected agent said no GUI is attached on its side.
 	// PausedAll: an agent-wide pause bit is in force (either side's while
 	// connected; the gateway's own persisted one while offline).
-	Headless      bool   `json:"headless,omitempty"`
-	PausedAll     bool   `json:"pausedAll,omitempty"`
-	Connected     bool   `json:"connected"`
-	Hostname      string `json:"hostname"`
-	RemoteIP      string `json:"remoteIp"`
-	LinkUpSinceMs int64  `json:"linkUpSinceMs"`
-	Tunnels       int    `json:"tunnels"`
+	Headless  bool `json:"headless,omitempty"`
+	PausedAll bool `json:"pausedAll,omitempty"`
+	// PausedAllBy names whose agent-wide bit ("mine" = this gateway, "theirs",
+	// "both") so the control only offers Resume for a bit it can clear.
+	PausedAllBy string `json:"pausedAllBy,omitempty"`
+	// PauseSupported: the live session negotiated CapPause — false means this
+	// agent's build predates pause and will not display a gateway-side one.
+	PauseSupported bool   `json:"pauseSupported,omitempty"`
+	Connected      bool   `json:"connected"`
+	Hostname       string `json:"hostname"`
+	RemoteIP       string `json:"remoteIp"`
+	LinkUpSinceMs  int64  `json:"linkUpSinceMs"`
+	Tunnels        int    `json:"tunnels"`
 	// Version and Transport come from the live session (empty when offline): the
 	// agent build's version, feeding the roster's "Update" badge, and the active
 	// data plane (quic | per-conn | mux) shown in the drill-in.
@@ -541,12 +560,16 @@ func (g *Gateway) ListAgentViews() []AgentView {
 			v.Connected, v.Hostname, v.RemoteIP, v.LinkUpSinceMs = true, l.Hostname, l.RemoteIP, l.LinkUpSinceMs
 			v.Version, v.Transport = l.Version, l.Transport
 			v.PendingInbound, v.PendingOutbound = l.PendingInbound, l.PendingOutbound
-			v.Headless, v.PausedAll = l.Headless, l.PausedAll
+			v.Headless, v.PausedAll, v.PauseSupported = l.Headless, l.PausedAll, l.PauseSupported
+			v.PausedAllBy = l.PausedAllBy
 		} else {
 			// Offline: the gateway's own persisted all-bit still shows — a
 			// paused agent that reconnects will come back paused, and the
 			// roster should say so before it does.
 			v.PausedAll = r.PausedAll
+			if r.PausedAll {
+				v.PausedAllBy = "mine"
+			}
 		}
 		out = append(out, v)
 	}
@@ -812,8 +835,14 @@ type AgentLink struct {
 	// Headless: the agent said no GUI is attached on its side (Hello.Headless).
 	Headless bool
 	// PausedAll: an agent-wide pause bit is set — the gateway's own or the
-	// agent's reported one. Per-tunnel bits ride the tunnel snapshots.
-	PausedAll bool
+	// agent's reported one; PausedAllBy names whose ("mine" = this gateway,
+	// "theirs", "both"). Per-tunnel bits ride the tunnel snapshots.
+	PausedAll   bool
+	PausedAllBy string
+	// PauseSupported: the session negotiated CapPause, so this agent's UI can
+	// display a gateway-side pause. Enforcement never needs it (the gateway's
+	// bit gates the gateway's own listener); the GUI warns when it is false.
+	PauseSupported bool
 }
 
 // Agents returns every connected agent's link state, sorted by agentID so the
@@ -831,6 +860,7 @@ func (g *Gateway) Agents() []AgentLink {
 		if s.quality != nil {
 			jitter, loss = s.quality.JitterMillis(), s.quality.LossPct()
 		}
+		allMine, allTheirs := s.pauseMine.Load().allSet(), s.pauseTheirs.Load().allSet()
 		out = append(out, AgentLink{
 			AgentID:         s.agentID,
 			Hostname:        s.hostname,
@@ -847,7 +877,9 @@ func (g *Gateway) Agents() []AgentLink {
 			PendingInbound:  s.pendingInbound.Load() != nil,
 			PendingOutbound: s.pendingOutbound.Load() != nil,
 			Headless:        s.headless,
-			PausedAll:       s.pauseMine.Load().allSet() || s.pauseTheirs.Load().allSet(),
+			PausedAll:       allMine || allTheirs,
+			PausedAllBy:     whose(allMine, allTheirs),
+			PauseSupported:  s.Has(control.CapPause),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].AgentID < out[j].AgentID })

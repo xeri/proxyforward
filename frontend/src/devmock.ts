@@ -61,6 +61,13 @@
 //                      Minting from Overview/the modal also appends a row, and
 //                      revoke removes it — the real write-then-repoll loop. No
 //                      axis → no invite rows (the roster is agents only).
+//   &pause=mine|theirs|both
+//                    — the default tunnel's pause bits: paused by this side,
+//                      by the peer, or by both. Pause/Resume mutate this side's
+//                      bit live (the peer's is only ever reported — each side
+//                      clears its own). Gateway per-agent pause rides the same
+//                      state; &consent=off doubles as the "peer predates
+//                      pause" axis (roster pauseSupported false).
 //   &tray=off|notice — the close fork (X button). Default: the tray preference
 //                      is on and the one-time notice was already seen, so X
 //                      with players shows the Minimize/Quit fork and X without
@@ -95,6 +102,19 @@ export function installDevMock() {
   const axisInvites = params.get('invites') || '' // '' | friend | single | both
   const axisConsentOff = params.get('consent') === 'off' // peer without config-consent
   const axisTray = params.get('tray') || '' // '' (on, notice seen) | off | notice
+  const axisPause = params.get('pause') || '' // '' | mine | theirs | both
+  // Pause bits, mutable via the SetPause stub: mine/theirs per the default
+  // tunnel, allMine the gateway's per-agent bit. &consent=off doubles as the
+  // "peer predates pause" state (pauseSupported false on the roster).
+  const pauseBits = {
+    mine: axisPause === 'mine' || axisPause === 'both',
+    theirs: axisPause === 'theirs' || axisPause === 'both',
+    allMine: false,
+  }
+  const pauseMineNow = () => pauseBits.mine || pauseBits.allMine
+  const pausedNow = () => pauseMineNow() || pauseBits.theirs
+  const pausedByNow = () =>
+    pauseMineNow() && pauseBits.theirs ? 'both' : pauseMineNow() ? 'mine' : pauseBits.theirs ? 'theirs' : ''
   // Latches when the mock's HideToTray runs, like the persisted flag it fakes.
   let trayNoticeSeen = axisTray !== 'notice'
   const fx = params.get('fx')
@@ -386,6 +406,11 @@ export function installDevMock() {
     // declared below), which is fine — listAgents() only runs on demand.
     pendingInbound: !!o.connected && o.agentId === CONSENT_AGENT && !!gwPendingIn,
     pendingOutbound: !!o.connected && o.agentId === CONSENT_AGENT && !!gwPendingOut,
+    // Pause: the default agent carries the axis-driven bits; a connected peer
+    // supports pause unless &consent=off (which models an old peer generally).
+    pausedAll: o.agentId === 'agt_5w7d2k9rq3v8xj4m' && pauseBits.allMine,
+    pausedAllBy: o.agentId === 'agt_5w7d2k9rq3v8xj4m' && pauseBits.allMine ? 'mine' : '',
+    pauseSupported: !!o.connected && !axisConsentOff,
   })
   // Enrollment metadata for the connected extras (nickname/scope/enrolled age),
   // keyed by the same agentId the live fleet and AGENT_SCALE use.
@@ -662,13 +687,13 @@ export function installDevMock() {
     const rosterOld = gw && axisFleet === 'old'
     const gwTunnels = gw
       ? (state.linkUp
-        ? [{id: tunnelID, name: 'Minecraft', publicPort: 25565, localUp: true, localKnown: true, agentId: 'agt_5w7d2k9rq3v8xj4m', bandwidthLimitMbps: 40, bandwidthLimitScope: 'per-direction'},
+        ? [{id: tunnelID, name: 'Minecraft', publicPort: 25565, localUp: true, localKnown: true, agentId: 'agt_5w7d2k9rq3v8xj4m', bandwidthLimitMbps: 40, bandwidthLimitScope: 'per-direction', paused: pausedNow(), pausedBy: pausedByNow()},
           ...fleetExtras.flatMap(a => a.tunnels.map((t: any) => ({
             id: t.id, name: t.name, publicPort: t.port, localUp: t.localUp, localKnown: true, agentId: a.agentId,
             bandwidthLimitMbps: t.bandwidthLimitMbps ?? 0, bandwidthLimitScope: t.bandwidthLimitScope ?? '',
           })))]
         : [])
-      : [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true}]
+      : [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true, paused: pausedNow(), pausedBy: pausedByNow()}]
     const gwConns = gw
       ? (state.linkUp
         ? [...state.conns.map((c: any) => ({...c, agentId: 'agt_5w7d2k9rq3v8xj4m'})),
@@ -1213,6 +1238,13 @@ export function installDevMock() {
     },
     SetTheme: (t: string) => { config.UI.Theme = t; return ok(undefined) },
     SetMinimizeToTray: (v: boolean) => { config.UI.MinimizeToTray = v; return ok(undefined) },
+    // SetPause flips THIS side's bit (the peer's is only ever reported), so
+    // Pause/Resume round-trips live against the axis-seeded state.
+    SetPause: (_agentId: string, tunnelId: string, paused: boolean, _disconnect: boolean) => {
+      if (tunnelId === '') pauseBits.allMine = paused
+      else pauseBits.mine = paused
+      return ok(undefined)
+    },
     HideToTray: () => { trayNoticeSeen = true; config.UI.TrayNoticeShown = true; console.info('[devmock] HideToTray()'); return ok(undefined) },
     QuitAndDisconnect: () => { console.info('[devmock] QuitAndDisconnect()'); return ok(undefined) },
     RestartEngine: () => gated(() => undefined),

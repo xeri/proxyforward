@@ -411,7 +411,10 @@ expiring in minutes, or both; minting from Overview or the modal appends a row a
 revoke removes it),
 `&tray=off|notice` (the close fork: the mock's X mirrors `closeDecision` — default is
 tray-on with the notice seen; `off` → close quits, confirming when players are on;
-`notice` → an uneventful close shows the one-time tray notice).
+`notice` → an uneventful close shows the one-time tray notice),
+`&pause=mine|theirs|both` (the default tunnel's pause bits — paused by this side, the
+peer, or both; Pause/Resume mutate this side's bit live, and `&consent=off` doubles as
+the "peer predates pause" state).
 The traffic model is deterministic functions of absolute time, so
 chart/tiles/replay all agree at any poll cadence. When you add a binding, add its stub
 here or the mock throws. Role setup mutates the mock's role, so the switcher flips the

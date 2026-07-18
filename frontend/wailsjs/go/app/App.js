@@ -214,6 +214,10 @@ export function SetMinimizeToTray(arg1) {
   return window['go']['app']['App']['SetMinimizeToTray'](arg1);
 }
 
+export function SetPause(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['SetPause'](arg1, arg2, arg3, arg4);
+}
+
 export function SetTheme(arg1) {
   return window['go']['app']['App']['SetTheme'](arg1);
 }

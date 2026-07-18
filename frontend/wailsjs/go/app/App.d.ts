@@ -117,6 +117,8 @@ export function SetAgentScope(arg1:string,arg2:Array<number>,arg3:Array<string>)
 
 export function SetMinimizeToTray(arg1:boolean):Promise<void>;
 
+export function SetPause(arg1:string,arg2:string,arg3:boolean,arg4:boolean):Promise<void>;
+
 export function SetTheme(arg1:string):Promise<void>;
 
 export function SetupAgent(arg1:string,arg2:string,arg3:number):Promise<void>;

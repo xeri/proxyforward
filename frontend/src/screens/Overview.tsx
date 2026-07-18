@@ -129,6 +129,8 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
     status.cumulativeUptimeMs ? `all-time ${fmtUptime(status.cumulativeUptimeMs)}` : null,
   ].filter(Boolean).join(' · ')
 
+  const pausedCount = tunnels.filter(t => t.paused).length
+
   // Deliberately off: the link is down because nothing is dialing, not because
   // a dial is failing. So the pipeline goes neutral grey ('unknown'), never the
   // down-link's red, its conduits stop, and its headlines say so (below) —
@@ -202,6 +204,24 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
         {status.mode === 'attached' && (
           <div className="mb-4">
             <Banner tone="info">The engine runs as a Windows service — this window controls it over the pipe.</Banner>
+          </div>
+        )}
+        {/* Paused ≠ crashed: a quiet warn line in the stack, no red, no ambient
+            change, and the conduits keep reflecting the control link (which is
+            up — that is the point of pause). The controls live where the
+            tunnels do; this only says so and points there. */}
+        {!isEngineOff(status) && pausedCount > 0 && (
+          <div className="mb-4">
+            <Banner
+              tone="warn"
+              action={<Button variant="ghost" size="sm" onClick={() => onNavigate(isAgent ? 'tunnels' : 'agents')}>
+                {isAgent ? 'Open Tunnels' : 'Open Agents'}
+              </Button>}
+            >
+              {pausedCount === 1
+                ? 'A tunnel is paused — players connecting to it see the offline message.'
+                : `${pausedCount} tunnels are paused — players connecting to them see the offline message.`}
+            </Banner>
           </div>
         )}
         {consent.view?.incoming && (

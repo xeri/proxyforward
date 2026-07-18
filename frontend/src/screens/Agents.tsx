@@ -5,6 +5,7 @@ import {
   RevokeAgent, RevokeInvite, SetAgentScope,
 } from '../../wailsjs/go/app/App'
 import {app, control, engine, gateway} from '../../wailsjs/go/models'
+import {PauseControl, PausedBadge, pausedLabel} from '../components/PauseControl'
 import {proposalAge, ProposalDiff, specsOf} from '../consent'
 import {BandwidthPanel} from '../components/BandwidthChart'
 import {Emblem} from '../components/Emblem'
@@ -526,10 +527,11 @@ function StatusMark({view, h, update}: {view: AgentView; h: Seg; update?: boolea
     : isConnected(view)
       ? <StatusDot state={h} label={HEALTH_LABEL[h]} pulse />
       : <StatusDot state="unknown" label="Offline" />
-  if (!update && !fresh && !view.pendingInbound && !view.pendingOutbound) return mark
+  if (!update && !fresh && !view.pendingInbound && !view.pendingOutbound && !view.pausedAll) return mark
   return (
     <span className="inline-flex items-center gap-2">
       {mark}
+      {view.pausedAll && <Badge tone="warn">Paused</Badge>}
       {view.pendingInbound && <Badge tone="warn">Review</Badge>}
       {view.pendingOutbound && !view.pendingInbound && <Badge>Proposed</Badge>}
       {update && <Badge tone="warn">Update</Badge>}
@@ -946,7 +948,7 @@ function AgentDetail({status, row, onBack, onChanged}: {
         <div className="col-span-12 @3xl:col-span-7"><AgentHealth agent={liveOrSynth} /></div>
       </div>
 
-      <AgentManagement view={view} onChanged={onChanged} />
+      <AgentManagement view={view} players={conns.length} onChanged={onChanged} />
 
       <AgentConfigPanel view={view} />
 
@@ -956,7 +958,7 @@ function AgentDetail({status, row, onBack, onChanged}: {
       <BandwidthPanel hero useHistory={source} vtName={null} historyUnsupported={status.historyUnsupported} />
 
       <div className="grid grid-cols-12 gap-[var(--grid-gap)]">
-        <div className="col-span-12 @4xl:col-span-6"><AgentTunnels tunnels={tunnels} /></div>
+        <div className="col-span-12 @4xl:col-span-6"><AgentTunnels tunnels={tunnels} conns={conns} view={view} /></div>
         <div className="col-span-12 @4xl:col-span-6"><AgentSessions conns={conns} /></div>
       </div>
     </div>
@@ -966,7 +968,7 @@ function AgentDetail({status, row, onBack, onChanged}: {
 /** AgentManagement: the gateway's controls over one agent — rename, scope, and
  * revoke. Each write follows the write-then-repoll loop (persist, then re-poll
  * ListAgents so the roster and this view refresh). Revoke is guarded by a Modal. */
-function AgentManagement({view, onChanged}: {view: AgentView; onChanged: () => void}) {
+function AgentManagement({view, players, onChanged}: {view: AgentView; players: number; onChanged: () => void}) {
   const [nickname, setNickname] = useState(view.nickname || '')
   const [ports, setPorts] = useState((view.scopePorts ?? []).join(', '))
   const [tuns, setTuns] = useState((view.scopeTunnels ?? []).join(', '))
@@ -1037,6 +1039,30 @@ function AgentManagement({view, onChanged}: {view: AgentView; onChanged: () => v
           <span className="min-w-0 truncate text-[11px] text-[var(--text-3)]" title={`Scope: ${scopeText(view)}`}>Current scope: {scopeText(view)}</span>
           <Button variant="subtle" onClick={saveScope} disabled={savingScope || !scopeChanged}>{savingScope ? 'Saving…' : 'Update scope'}</Button>
         </div>
+
+        {view.connected && (
+          <div className="flex items-center justify-between gap-4 border-t border-[var(--border)] pt-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-[var(--text)]">
+                {view.pausedAll ? pausedLabel(view.pausedAllBy ?? '', 'the agent') : 'Pause agent'}
+              </div>
+              <div className="mt-0.5 text-xs leading-relaxed text-[var(--text-3)]">
+                {view.pausedAll
+                  ? 'Every tunnel keeps its port but turns players away until resumed.'
+                  : 'Turn players away on every tunnel while keeping the ports. Softer than revoke — one click undoes it.'}
+              </div>
+            </div>
+            <PauseControl
+              agentId={view.agentId}
+              what="this agent"
+              paused={!!view.pausedAll}
+              pausedBy={view.pausedAllBy ?? ''}
+              players={players}
+              unheard={!view.pauseSupported}
+              onDone={onChanged}
+            />
+          </div>
+        )}
 
         <div className="flex items-center justify-between gap-4 border-t border-[var(--border)] pt-3">
           <div className="min-w-0">
@@ -1371,7 +1397,7 @@ function AgentHealth({agent}: {agent: AgentUI}) {
 }
 
 /** AgentTunnels: the ports this agent has bound, with each local server's state. */
-function AgentTunnels({tunnels}: {tunnels: app.TunnelUI[]}) {
+function AgentTunnels({tunnels, conns, view}: {tunnels: app.TunnelUI[]; conns: app.ConnUI[]; view: AgentView}) {
   return (
     <Card label="Tunnels" pad={false}
       action={tunnels.length > 0 ? <div className="pr-1"><Badge>{tunnels.length}</Badge></div> : undefined}>
@@ -1393,9 +1419,20 @@ function AgentTunnels({tunnels}: {tunnels: app.TunnelUI[]}) {
                   <div className="truncate text-sm font-medium">{t.name}</div>
                   <div className="truncate font-mono text-[11px] text-[var(--text-3)]" title={sub}>{sub}</div>
                 </div>
-                <Badge tone={t.localKnown ? (t.localUp ? 'good' : 'bad') : 'neutral'}>
-                  {t.localKnown ? (t.localUp ? 'Server up' : 'Server down') : 'Unknown'}
-                </Badge>
+                {t.paused
+                  ? <PausedBadge pausedBy={t.pausedBy} peer="the agent" />
+                  : <Badge tone={t.localKnown ? (t.localUp ? 'good' : 'bad') : 'neutral'}>
+                      {t.localKnown ? (t.localUp ? 'Server up' : 'Server down') : 'Unknown'}
+                    </Badge>}
+                <PauseControl
+                  agentId={view.agentId}
+                  tunnelId={t.id}
+                  what="this tunnel"
+                  paused={!!t.paused}
+                  pausedBy={t.pausedBy}
+                  players={conns.filter(c => c.tunnelName === t.name).length}
+                  unheard={!view.pauseSupported}
+                />
               </div>
             )
           })}

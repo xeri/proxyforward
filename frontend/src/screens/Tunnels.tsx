@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react'
 import {GetConfig, SaveTunnels, TestReachability} from '../../wailsjs/go/app/App'
 import {config} from '../../wailsjs/go/models'
 import {Column, DataTable} from '../components/DataTable'
+import {PauseControl, PausedBadge} from '../components/PauseControl'
 import {proposalAge, ProposalDiff, specsOf, useAgentConsent} from '../consent'
 import {
   Badge, Banner, Button, Card, Disclosure, EmptyState, ErrorBanner, Field, IconButton,
@@ -197,6 +198,7 @@ export function Tunnels({status}: {status: UIStatus}) {
               <div className="mt-3 flex flex-wrap items-center gap-1.5">
                 {!t.Enabled && <Badge tone="neutral">Disabled</Badge>}
                 {t.Enabled && <Badge tone={bound ? 'good' : 'warn'}>{bound ? 'Bound' : 'Pending'}</Badge>}
+                {l?.paused && <PausedBadge pausedBy={l.pausedBy} peer="the gateway" />}
                 {l?.localKnown && <Badge tone={l.localUp ? 'good' : 'bad'}>{l.localUp ? 'Server up' : 'Server down'}</Badge>}
               </div>
 
@@ -217,7 +219,18 @@ export function Tunnels({status}: {status: UIStatus}) {
 
               <div className="mt-3 flex flex-1 items-end justify-between gap-3 border-t border-[var(--border)] pt-2">
                 <Toggle checked={t.Enabled} onChange={v => onToggle(t.ID, v)} label="Enabled" />
-                <TestPath tunnelID={t.ID} bound={bound} port={l?.publicPort} />
+                <div className="flex items-center gap-1.5">
+                  {t.Enabled && bound && (
+                    <PauseControl
+                      tunnelId={t.ID}
+                      what="this tunnel"
+                      paused={!!l?.paused}
+                      pausedBy={l?.pausedBy ?? ''}
+                      players={(status.connections ?? []).filter(c => c.tunnelName === t.Name).length}
+                    />
+                  )}
+                  <TestPath tunnelID={t.ID} bound={bound} port={l?.publicPort} />
+                </div>
               </div>
             </div>
           )

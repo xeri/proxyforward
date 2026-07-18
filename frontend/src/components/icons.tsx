@@ -66,6 +66,10 @@ export const IconStop = (p: IconProps) => (
 export const IconPlay = (p: IconProps) => (
   <Base {...p}><path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/></Base>
 )
+/** Two filled bars: transport-control "pause", filled like its siblings. */
+export const IconPause = (p: IconProps) => (
+  <Base {...p}><rect x="7" y="5.5" width="3.5" height="13" rx="1" fill="currentColor" stroke="none"/><rect x="13.5" y="5.5" width="3.5" height="13" rx="1" fill="currentColor" stroke="none"/></Base>
+)
 
 /* --- Actions -------------------------------------------------------------- */
 export const IconCopy = (p: IconProps) => (
