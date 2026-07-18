@@ -183,4 +183,6 @@ consent, and typed `tnl_` ids on create); what remains is below.
     by design (no persisted schema), so a disconnect mid-approval drops the edit and the
     author must re-submit. Self-healing and honest (the surfaces go quiet), but a
     long-offline gateway operator can't queue a change. Fix (if wanted): persist pending
-    proposals on `AgentRecord` and re-offer them on connect.
+    proposals on `AgentRecord` and re-offer them on connect. The related "nobody may be
+    watching" gap is now told, not fixed: the hello's `Headless` flag makes both pending
+    surfaces say the peer runs headless, so an approval may wait indefinitely.

@@ -74,6 +74,13 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   single commit point for both — so a rejected edit has nothing to roll back — and an
   edit the gateway cannot see (`LocalAddr`, PP2) applies unproposed. Mechanics in
   `docs/agent/architecture.md`.
+- **Pause is arbitration with two owners** (`CapPause`): each side holds its own bit,
+  clears only its own, and a tunnel serves iff neither covers it — so resume can never
+  expand what the agent exposes. The bits are state, not config: they must never reach
+  `HashTunnels`, `sameListener`, or a push (a pause that rebinds a listener is a bug).
+  Enforcement is local-first (`actor.go refreshPause` → `handleClient`; the agent's
+  own refusal in `handleDataStream`), so a legacy peer loses visibility, never the
+  pause. Wire form is always the complete set (`PauseState`) — re-asserts converge.
 
 ### Security (`internal/link/`, `internal/gateway/`)
 

@@ -1233,7 +1233,10 @@ function AgentConfigPanel({view}: {view: AgentView}) {
                   <div className="space-y-2">
                     <div>
                       <div className="font-medium">Proposed — awaiting the agent’s approval</div>
-                      <div className="text-[12px] text-[var(--text-3)]">Sent {proposalAge(pendingOut.atMs)}. It applies only if the agent accepts.</div>
+                      <div className="text-[12px] text-[var(--text-3)]">
+                        Sent {proposalAge(pendingOut.atMs)}. It applies only if the agent accepts.
+                        {view.headless && ' The agent runs headless — nobody may be watching for this until someone opens its app.'}
+                      </div>
                     </div>
                     <ProposalDiff current={specsOf(server)} proposed={specsOf(pendingOut.tunnels)} />
                   </div>

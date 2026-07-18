@@ -214,6 +214,26 @@ the 15 s budget); passive connection migration follows an agent whose IP changes
 is simpler than per-conn — the session's `Close` (a `*quic.Conn`) tears down every stream,
 so `dataConns` stays empty (`closeAll` nil-guards the absent raw conn).
 
+Pause (cap `pause`): one symmetric message, `pause_state{tunnelIds[], agentWide}` — the
+sender's **complete** current pause set, never a delta, so a reconnect re-assert is
+idempotent and both views converge. Two independent bit sets exist (each side's own,
+each side clears only its own); a tunnel serves players iff neither covers it. The
+bits are state, not config: they never touch `HashTunnels`, `sameListener`, a push, or
+consent — a pause/resume can never rebind a listener (the port is held by
+construction). Enforcement is local-first at each side's own choke point: the gateway
+folds both sets into `publicListener.paused` on the actor (`actor.go refreshPause`,
+the `pl.limiters` pattern) and `handleClient` reads it beside `backendDown` (paused
+players get the offline MOTD treatment); the agent refuses its own local dial for its
+own bits (`handleDataStream`), so a paused tunnel costs no Minecraft slot even against
+a legacy gateway — a legacy pairing loses only cross-side visibility. Persistence is
+local per side (`AgentRecord.PausedTunnels/PausedAll` on the gateway;
+`config.Tunnel.Paused` + the agent-wide `AgentConfig.Paused` on the agent),
+re-asserted after hello in both directions; kicking is a deliberate extra
+(`kickConns` walking `rttConns`; the agent closes its own tracked local legs). Both
+hellos also carry `headless` (presence-driven, not a capability): "no GUI is attached
+here, nobody may be watching for your consent proposal" — surfaced on the pending
+surfaces, never acted on.
+
 Auto transport (agent config `transport = "auto"`, the shipped default): a connect-time
 fallback ladder, best-isolation first — QUIC → per-conn → mux (`transportPreference`).
 `runSessionAuto` tries each non-cooled rung; a rung that *connects* is served (Run backs

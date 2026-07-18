@@ -132,6 +132,7 @@ export function Tunnels({status}: {status: UIStatus}) {
               <div className="font-medium">Waiting for the gateway to approve your change</div>
               <div className="text-[12px] text-[var(--text-3)]">
                 Sent {proposalAge(consent.view.outgoing.atMs)}. Your tunnels keep running as they are until it is accepted.
+                {status.peerHeadless && ' The gateway runs headless — nobody may be watching for this until someone opens its app.'}
               </div>
             </div>
             <ProposalDiff
