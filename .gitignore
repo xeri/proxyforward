@@ -5,3 +5,11 @@ frontend/dist
 build/windows/installer/tmp
 # Agent-session git worktrees live inside the repo; never stage a second checkout.
 .claude/worktrees/
+# design-sync: staged converter scripts + regenerated build output + machine state.
+# The durable set (.design-sync/ everything else: config, notes, previews, ds-root) IS committed.
+.ds-sync/
+ds-bundle/
+frontend/.ds-css/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
