@@ -41,6 +41,14 @@ a victim's name can be searched for (`cred.go agentFingerprintBytes`, floored by
 `TestAgentIDIsWideEnoughToBeUnforgeable`). `AgentStore.Enroll` refuses a colliding
 join besides, so a collision that is somehow found still fails closed.
 
+**A reusable invite is a standing credential**, and it ships honestly as one:
+anyone holding the code can enroll an agent while it lives. What makes that
+acceptable is that it can never be invisible or expensive to kill — every live
+ticket is a roster row (`agentstore.go ListInvites`), revocation deletes the
+nonce in one click (`RevokeInvite`), and revoking a code never disconnects the
+agents it already enrolled, because each holds its own key by then. Contrast the
+shared token this replaced, whose rotation severed the whole fleet at once.
+
 **Identity is the only authenticator** (`gateway/auth.go identityValidator`).
 The legacy fleet-wide shared token is gone, and with it its residual risk: a
 self-asserted `agentID` no longer exists on any path, so supersede, scope,

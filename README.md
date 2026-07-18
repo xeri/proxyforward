@@ -247,19 +247,23 @@ A single gateway fronts a **fleet** of agents. They're told apart not by a share
 but by a per-agent **cryptographic identity**: on first run each agent generates a
 long-term **Ed25519** keypair (PKCS#8, mode `0600`, never leaves the machine). Its public
 ID — `agt_<base32 fingerprint of the public key>` — is *derived*, so it's stable across
-re-pairs and can't be forged by someone who merely holds a token.
+re-pairs and can't be forged by someone who merely holds a pairing code.
 
-Two ways an agent authenticates, told apart by the shape of the token in the pairing code:
+The identity is the **only** authenticator. An agent joins with an **enrollment
+ticket** (`tkt_…`): a nonce the gateway mints and embeds in the pairing code. The agent
+replays it once; the gateway binds that agent's public key into its **allowlist** under
+the derived `agt_` ID. Every later connection is authenticated by an Ed25519 signature
+over a message **bound to the gateway's pinned cert fingerprint** — so a signature made
+for one gateway can't be replayed against another, and the config file holds no live
+credential once enrollment completes (the spent ticket is cleared automatically).
 
-- **Enrollment ticket** (`tkt_…`, the modern path): a **single-use** nonce the gateway
-  mints and embeds in the pairing code. The agent replays it once; the gateway binds that
-  agent's public key into its **allowlist** under the derived `agt_` ID and the ticket is
-  spent. Every later connection is authenticated by an Ed25519 signature over a message
-  **bound to the gateway's pinned cert fingerprint** — so a signature made for one gateway
-  can't be replayed against another.
-- **Shared token** (bare hex, legacy): one token admits many agents; a matching `agentID`
-  *supersedes* (reconnect), a distinct one is admitted *alongside*. Simpler, but with no
-  per-agent revocation.
+Codes come in two flavors, both visible as **invite rows in the Agents roster** for as
+long as they're live:
+
+- **Single-use** (the default): enrolls one agent, expires in 10 minutes or on use.
+- **Reusable** — including the one-click **friend code** on Overview: a standing code
+  for people you trust, valid until you revoke it. Revoking an invite never
+  disconnects the agents it already enrolled — they have their own identities now.
 
 ```mermaid
 flowchart LR
@@ -273,7 +277,7 @@ flowchart LR
     AL -.->|"enroll · revoke · rename · scope"| A1
 ```
 
-Enrolled identities unlock the operations a shared token can't safely offer:
+Per-agent identity is what makes these operations safe to offer at all:
 
 - **Scope** — restrict which public ports and tunnel IDs an agent may bind (empty = any,
   the permissive default). An agent can't squat a port outside its lane.
@@ -286,10 +290,11 @@ Enrolled identities unlock the operations a shared token can't safely offer:
   the agent online and binds a free, policy-valid alternative, recording a `port-reassigned`
   event with a one-click "reclaim it" card, rather than failing the tunnel.
 
-> **Residual risk that ships honestly:** with a *shared* token the model is
-> token + self-asserted ID + first-come-first-served ports and no per-agent revocation — a
-> token-holder can supersede or port-squat, recoverable only by rotating the shared token.
-> Enrollment tickets + per-identity revocation are the mitigation; prefer them.
+> **Residual risk that ships honestly:** a *reusable* invite is a standing credential —
+> anyone who obtains the code can enroll an agent while it lives. The mitigations are
+> visibility and cheap revocation: every live code is a roster row, revoking it is one
+> click, and revocation never touches already-enrolled agents. Prefer single-use codes
+> when you don't need a standing one.
 
 ## Gateway-authoritative config
 
@@ -302,9 +307,8 @@ reports its `configHash`/`configGeneration` in the hello; on any drift the gatew
 A local edit isn't last-write-wins guesswork — it's a `propose_config` the gateway
 **adopts, bumps the generation, and re-pushes** to that agent; a proposal made against a
 stale generation is refused and the authoritative set re-pushed. Deterministic, and
-recoverable from either end. Shared-token agents (which can't carry a stable identity) have
-the capability negotiated away and fall back to the simpler `tunnel-sync` desired-state
-reconcile.
+recoverable from either end. A peer that never learned the capability falls back to the
+simpler `tunnel-sync` desired-state reconcile.
 
 ## 🔁 Built to stay up — self-healing links
 
@@ -359,8 +363,7 @@ the Go→JS boundary is coalesced into one `tick` event so the UI never touches 
   **X25519MLKEM768**.
 - **Per-agent Ed25519 identity** (above): connections are signed proof-of-possession bound
   to the gateway's cert fingerprint, not a bearer secret that can be replayed elsewhere.
-- **Constant-time comparisons** for the auth token and the certificate fingerprint
-  (`crypto/subtle`).
+- **Constant-time comparison** for the pinned certificate fingerprint
 - **Pre-auth hardening** — the entire unauthenticated prologue (accept → TLS handshake →
   hello frame) must finish within **10 s**, and pre-auth frames are capped at **4 KiB**
   (vs 64 KiB post-auth), with the length checked *before* allocation — internet scanners

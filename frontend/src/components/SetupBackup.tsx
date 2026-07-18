@@ -28,7 +28,7 @@ export function ExportSetupRow({disabled}: {disabled?: boolean}) {
         label="Encrypt with passphrase"
         hint={encrypt
           ? 'You will need this passphrase to import the file. There is no recovery if you lose it.'
-          : 'Without a passphrase, anyone who gets this file can join or impersonate your setup — it contains your token and keys.'} />
+          : 'Without a passphrase, anyone who gets this file can join or impersonate your setup — it contains your keys.'} />
       {encrypt && (
         <div className="mt-1">
           <Field label="Passphrase">
