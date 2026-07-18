@@ -53,7 +53,7 @@ type ProposalView struct {
 // need the gateway's approval at all, and either side's proposal in flight.
 type PendingView struct {
 	// ConsentActive is true only on a live session that negotiated config-consent.
-	// False means edits apply the old way (link down, legacy gateway, shared token),
+	// False means edits apply the old way (link down, or a legacy gateway),
 	// which the UI must say honestly rather than imply an approval that never comes.
 	ConsentActive bool `json:"consentActive"`
 	// Incoming is a gateway-authored edit awaiting this machine's decision.

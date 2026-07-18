@@ -96,9 +96,8 @@ type Gateway struct {
 	// unauthenticated set is unbounded for ~10 s at a time.
 	preAuth *preAuthGate
 	// validator authenticates every hello, on the control accept path and (with
-	// the per-conn data plane) the data accept path. It is a compositeValidator:
-	// per-agent Ed25519 identity backed by agents, with the shared token as a
-	// migration fallback.
+	// the per-conn data plane) the data accept path: the identityValidator,
+	// checking per-agent Ed25519 identities against agents.
 	validator Validator
 	// agents is the per-agent identity allowlist + outstanding enrollment tickets;
 	// gatewayID is this gateway's derived gw_ display label (from its cert).
