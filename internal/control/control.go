@@ -72,9 +72,22 @@ const (
 	// authority, not a negotiation. A peer with only CapGatewayConfig keeps
 	// the propose_config auto-adopt path.
 	CapConfigConsent = "config-consent"
+	// CapPause: either side may pause a tunnel (or the whole agent) without
+	// touching config. One symmetric message, TypePauseState, carries the
+	// sender's complete current pause set — idempotent, re-asserted on connect.
+	// Two independent bit sets exist (each side's own); a side clears only its
+	// own, and a tunnel serves players iff neither side covers it. Pause is
+	// arbitration, not consent: it edits no tunnel definition, so it applies
+	// immediately with a notice, and it never reaches HashTunnels or the
+	// config/consent paths — which is also what makes resume safe: clearing a
+	// bit can only ever un-cover a tunnel the agent itself still enables.
+	CapPause = "pause"
 )
 
-// SupportedCapabilities is everything this build implements, both roles.
+// SupportedCapabilities is everything this build implements, both roles. A
+// capability joins this list only once BOTH ends honor it end-to-end — the
+// peer acts on the offer, so advertising early is a live protocol bug (the
+// tunnel-udp lesson, CLAUDE.md "Reality check").
 var SupportedCapabilities = []string{CapTunnelSync, CapConnStats, CapPerConn, CapGatewayConfig, CapConfigConsent}
 
 // IntersectCaps returns offered ∩ supported, preserving supported's order.
@@ -150,6 +163,8 @@ const (
 	// both directions: whoever authored the edit proposes, the other side decides.
 	TypeConfigProposal = "config_proposal" // proposer → approver: authored tunnel-set edit
 	TypeConfigDecision = "config_decision" // approver → proposer: the verdict
+
+	TypePauseState = "pause_state" // either direction: sender's complete pause set (CapPause)
 )
 
 // Hello error codes.
@@ -220,6 +235,11 @@ type Hello struct {
 	// authoritative set.
 	ConfigHash       string `json:"configHash,omitempty"`
 	ConfigGeneration uint64 `json:"configGeneration,omitempty"`
+	// Headless reports that this side runs with no GUI attached (service or
+	// CLI run), so nobody may be watching for a consent proposal or a pause
+	// notice. Informational, acted on by presence like the identity fields —
+	// not a capability; omitempty keeps legacy frames byte-identical.
+	Headless bool `json:"headless,omitempty"`
 }
 
 type HelloOK struct {
@@ -250,6 +270,9 @@ type HelloOK struct {
 	// of truth and pushes; the agent never volunteers a set. omitempty keeps legacy
 	// and steady-state hello_ok frames byte-identical.
 	ConfigSeedNeeded bool `json:"configSeedNeeded,omitempty"`
+	// Headless mirrors Hello.Headless for the gateway's side: no GUI may be
+	// watching for a consent proposal. Same rules — presence-driven, omitempty.
+	Headless bool `json:"headless,omitempty"`
 }
 
 type HelloErr struct {
@@ -434,6 +457,16 @@ type ConfigDecision struct {
 	Reason     string `json:"reason,omitempty"`
 	Generation uint64 `json:"generation,omitempty"`
 	Hash       string `json:"hash,omitempty"`
+}
+
+// PauseState is the sender's complete current pause set, replacing the
+// receiver's view of the sender's bits (never a delta — deltas drift across
+// reconnects). TunnelIDs lists the sender's paused tunnels; AgentWide pauses
+// everything regardless of the list. Bounded by the per-agent tunnel cap, so
+// it always fits one frame. Requires CapPause on the session.
+type PauseState struct {
+	TunnelIDs []string `json:"tunnelIds,omitempty"`
+	AgentWide bool     `json:"agentWide,omitempty"`
 }
 
 // MaxConnStatsPerFrame bounds one conn_stats frame. Each entry is a short id

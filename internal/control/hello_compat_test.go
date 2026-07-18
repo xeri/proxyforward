@@ -18,7 +18,7 @@ func TestHelloWireBackCompat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"hostname", "localIps"} {
+	for _, f := range []string{"hostname", "localIps", "headless"} {
 		if strings.Contains(string(b), f) {
 			t.Errorf("empty Hello.%s leaked onto the wire: %s", f, b)
 		}
@@ -36,21 +36,42 @@ func TestHelloWireBackCompat(t *testing.T) {
 	}
 
 	// New fields round-trip.
-	h2 := control.Hello{Hostname: "DESKTOP", LocalIPs: []string{"192.168.1.5"}}
+	h2 := control.Hello{Hostname: "DESKTOP", LocalIPs: []string{"192.168.1.5"}, Headless: true}
 	b2, _ := json.Marshal(h2)
 	var g2 control.Hello
 	if err := json.Unmarshal(b2, &g2); err != nil {
 		t.Fatal(err)
 	}
-	if g2.Hostname != "DESKTOP" || len(g2.LocalIPs) != 1 || g2.LocalIPs[0] != "192.168.1.5" {
+	if g2.Hostname != "DESKTOP" || len(g2.LocalIPs) != 1 || g2.LocalIPs[0] != "192.168.1.5" || !g2.Headless {
 		t.Errorf("Hello identity round-trip failed: %+v", g2)
+	}
+}
+
+// PauseState is a complete-set message: an empty one must marshal to {} (no
+// keys — a legacy peer that somehow receives one sees nothing surprising), and
+// a populated one round-trips.
+func TestPauseStateOmitsEmpty(t *testing.T) {
+	b, err := json.Marshal(control.PauseState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "{}" {
+		t.Errorf("empty PauseState marshals to %s, want {}", b)
+	}
+	b2, _ := json.Marshal(control.PauseState{TunnelIDs: []string{"tnl_a"}, AgentWide: true})
+	var g control.PauseState
+	if err := json.Unmarshal(b2, &g); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.TunnelIDs) != 1 || g.TunnelIDs[0] != "tnl_a" || !g.AgentWide {
+		t.Errorf("PauseState round-trip failed: %+v", g)
 	}
 }
 
 func TestHelloOKAndPongOmitEmpty(t *testing.T) {
 	ok := control.HelloOK{ProtocolVersion: 1, SessionGeneration: 3}
 	b, _ := json.Marshal(ok)
-	for _, f := range []string{"hostname", "localIps", "observedIp", "assignedAgentId", "gatewayId", "configSeedNeeded"} {
+	for _, f := range []string{"hostname", "localIps", "observedIp", "assignedAgentId", "gatewayId", "configSeedNeeded", "headless"} {
 		if strings.Contains(string(b), f) {
 			t.Errorf("empty HelloOK.%s leaked onto the wire: %s", f, b)
 		}
