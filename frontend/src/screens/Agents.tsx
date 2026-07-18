@@ -1,10 +1,10 @@
 import {ReactNode, useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {
   AgentBandwidthHistory, AgentDesiredConfig, ApproveAgentProposal, GatewayEvents, IssuePairingCode,
-  ListAgents, ProposeAgentConfig, ReclaimPort, RejectAgentProposal, RenameAgent, RevokeAgent,
-  SetAgentScope,
+  ListAgents, ListInvites, ProposeAgentConfig, ReclaimPort, RejectAgentProposal, RenameAgent,
+  RevokeAgent, RevokeInvite, SetAgentScope,
 } from '../../wailsjs/go/app/App'
-import {app, control, gateway} from '../../wailsjs/go/models'
+import {app, control, engine, gateway} from '../../wailsjs/go/models'
 import {proposalAge, ProposalDiff, specsOf} from '../consent'
 import {BandwidthPanel} from '../components/BandwidthChart'
 import {Emblem} from '../components/Emblem'
@@ -13,7 +13,7 @@ import {
   Field, Modal, MonoChip, Overline, PageHeader, SegmentedControl, Skeleton, StatusDot, TextInput,
 } from '../components/ui'
 import {
-  IconActivity, IconAgents, IconArrowRight, IconChevronRight, IconClock, IconLogs,
+  IconActivity, IconAgents, IconArrowRight, IconChevronRight, IconClock, IconKey, IconLogs,
   IconSearch, IconServer, IconShield, IconTunnels, IconUsers,
 } from '../components/icons'
 import {HistoryResult, RANGES, RangeKey} from '../history'
@@ -22,6 +22,7 @@ import {fmtBytes, fmtUptime, hasRtt, scopeLabel, TRANSPORT_LABEL, UIStatus, wors
 
 type AgentUI = app.AgentUI
 type AgentView = gateway.AgentView
+type InviteView = engine.InviteView
 type GwEvent = gateway.GatewayEvent
 type Seg = 'good' | 'warn' | 'bad' | 'unknown'
 
@@ -47,6 +48,22 @@ const EVENT_BADGE: Record<string, {label: string; tone: 'warn' | 'bad' | 'good'}
   'clone-suspected': {label: 'clone', tone: 'bad'},
   'port-reclaimed': {label: 'reclaim', tone: 'good'},
   'proposal-declined': {label: 'declined', tone: 'warn'},
+  'agent-enrolled': {label: 'enrolled', tone: 'good'},
+}
+
+// NEW_AGENT_MS is the roster's "New" badge window: a freshly-enrolled agent wears
+// it this long after its IssuedAt, so a machine that joined while nobody was
+// watching still announces itself on the next look.
+const NEW_AGENT_MS = 24 * 60 * 60 * 1000
+const isFresh = (v: AgentView): boolean => !v.revoked && v.issuedAtMs > 0 && Date.now() - v.issuedAtMs < NEW_AGENT_MS
+
+// A single-use invite's remaining lifetime, as a countdown phrase.
+const fmtTtl = (ms: number): string => {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 90) return `${s} s`
+  const m = Math.round(s / 60)
+  if (m < 90) return `${m} min`
+  return `${Math.round(m / 60)} h`
 }
 
 const jitterTone = (v: number): Seg => (v < 0 ? 'unknown' : v > 100 ? 'bad' : v > 30 ? 'warn' : 'good')
@@ -86,8 +103,9 @@ const tier = (r: Row): number => (r.view.revoked ? 2 : r.view.connected ? 0 : 1)
 // else the raw id — never blank.
 const displayName = (v: AgentView): string => v.nickname || v.hostname || v.agentId
 
-// Scope as a human phrase. Both empty = the agent may bind anything.
-function scopeText(v: AgentView): string {
+// Scope as a human phrase. Both empty = the holder may bind anything. Widened
+// past AgentView so invite rows share the exact wording (one concept, one term).
+function scopeText(v: {scopePorts?: number[]; scopeTunnels?: string[]}): string {
   const ports = v.scopePorts ?? []
   const tuns = v.scopeTunnels ?? []
   if (ports.length === 0 && tuns.length === 0) return 'Unrestricted'
@@ -103,8 +121,10 @@ const loadSort = (): SortKey => (localStorage.getItem('pf-agents-sort') as SortK
 const loadDensity = (): Density => (localStorage.getItem('pf-agents-density') as Density) || 'grid'
 
 // Roster cache for usePolled: keyed by a nonce so a mutation can force an
-// immediate re-poll (the key changes) without waiting out the interval.
+// immediate re-poll (the key changes) without waiting out the interval. The
+// invites cache mirrors it — invite rows live in the same wall.
 const rosterCache = new Map<string, AgentView[]>()
+const invitesCache = new Map<string, InviteView[]>()
 
 // Per-agent bandwidth source: a hook bound to one agentId, keyed so each agent
 // keeps its own cached history. Fed to BandwidthPanel so the drill-in draws the
@@ -204,12 +224,14 @@ export function Agents({status}: {status: UIStatus}) {
   const isGateway = status.role === 'gateway'
   const rosterKey = isGateway ? `roster:${nonce}` : null
   const roster = usePolled(rosterCache, rosterKey, () => ListAgents(), 4000)
+  const invites = usePolled(invitesCache, isGateway ? `invites:${nonce}` : null, () => ListInvites(), 4000)
   const events = useGatewayEvents(isGateway)
 
   // A mutation re-polls at once: carry the current data into the next key so the
   // poll refreshes without flashing the skeleton, then bump the nonce.
   const refreshRoster = () => {
     if (roster && rosterKey) rosterCache.set(`roster:${nonce + 1}`, roster)
+    if (invites && rosterKey) invitesCache.set(`invites:${nonce + 1}`, invites)
     setNonce(n => n + 1)
   }
 
@@ -289,11 +311,14 @@ export function Agents({status}: {status: UIStatus}) {
   const pickDensity = (v: Density) => { setDensity(v); localStorage.setItem('pf-agents-density', v) }
   const dismiss = (seq: number) => setDismissed(prev => new Set(prev).add(seq))
   const n = rows.length
+  // A single-use invite that just expired drops out client-side between polls,
+  // so a dead code never lingers as a live-looking row.
+  const liveInvites = (invites ?? []).filter(iv => iv.expiresAtMs === 0 || iv.expiresAtMs > Date.now())
 
   return (
     <div className="pf-stagger space-y-8">
       <Header action={<Button size="sm" onClick={() => setIssuing(true)}>Issue pairing code</Button>} />
-      {issuing && <IssuePairingModal onClose={() => setIssuing(false)} />}
+      {issuing && <IssuePairingModal onClose={() => { setIssuing(false); refreshRoster() }} />}
 
       <ConflictCards
         conflicts={conflicts} roster={roster ?? []} tunnels={status.tunnels ?? []} rosterIds={rosterIds}
@@ -302,12 +327,16 @@ export function Agents({status}: {status: UIStatus}) {
 
       {roster === null ? (
         <RosterSkeleton density={density} />
-      ) : n === 0 ? (
+      ) : n === 0 && liveInvites.length === 0 ? (
         <Card><EmptyState icon={<IconAgents size={28} />} title="No agents enrolled yet"
-          hint="Issue a pairing code (Overview, or the setup wizard) and share it with a machine. Every agent that enrolls with it appears here — online or off." /></Card>
+          hint="Issue a pairing code (here, on Overview, or in the setup wizard) and share it with a machine. Every agent that enrolls with it appears here — online or off." /></Card>
+      ) : n === 0 ? (
+        <div className="pf-stagger grid grid-cols-1 gap-[var(--grid-gap)] @min-[52rem]:grid-cols-2 @min-[80rem]:grid-cols-3">
+          {liveInvites.map(iv => <InviteCard key={iv.handle} invite={iv} onChanged={refreshRoster} />)}
+        </div>
       ) : (
         <>
-          <FleetSummary rows={rows} />
+          <FleetSummary rows={rows} invites={liveInvites.length} />
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <SegmentedControl<SortKey>
@@ -339,9 +368,17 @@ export function Agents({status}: {status: UIStatus}) {
           ) : density === 'grid' ? (
             <div className="pf-stagger grid grid-cols-1 gap-[var(--grid-gap)] @min-[52rem]:grid-cols-2 @min-[80rem]:grid-cols-3">
               {sorted.map(r => <AgentCard key={r.view.agentId} row={r} gwVersion={status.version} onOpen={() => setSelected(r.view.agentId)} />)}
+              {liveInvites.map(iv => <InviteCard key={iv.handle} invite={iv} onChanged={refreshRoster} />)}
             </div>
           ) : (
-            <Card pad={false}><AgentList rows={sorted} gwVersion={status.version} onOpen={setSelected} /></Card>
+            <>
+              <Card pad={false}><AgentList rows={sorted} gwVersion={status.version} onOpen={setSelected} /></Card>
+              {liveInvites.length > 0 && (
+                <div className="pf-stagger grid grid-cols-1 gap-[var(--grid-gap)] @min-[52rem]:grid-cols-2 @min-[80rem]:grid-cols-3">
+                  {liveInvites.map(iv => <InviteCard key={iv.handle} invite={iv} onChanged={refreshRoster} />)}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
@@ -364,6 +401,7 @@ function Header({action}: {action?: ReactNode}) {
  * pre-issue form, generating, issued code, and an issue error (honest unavailable). */
 function IssuePairingModal({onClose}: {onClose: () => void}) {
   const [reusable, setReusable] = useState(false)
+  const [label, setLabel] = useState('')
   const [ports, setPorts] = useState('')
   const [tuns, setTuns] = useState('')
   const [code, setCode] = useState('')
@@ -373,14 +411,14 @@ function IssuePairingModal({onClose}: {onClose: () => void}) {
   const parsePorts = (s: string): number[] => s.split(',').map(x => parseInt(x.trim(), 10)).filter(nu => nu > 0 && nu < 65536)
   const parseTuns = (s: string): string[] => s.split(',').map(x => x.trim()).filter(Boolean)
 
-  // Any setting change drops the shown code: it was minted with the old mode/scope,
-  // so keeping it visible would misdescribe its lifetime or restrictions.
-  useEffect(() => { setCode(''); setErr('') }, [reusable, ports, tuns])
+  // Any setting change drops the shown code: it was minted with the old
+  // mode/scope/label, so keeping it visible would misdescribe how it was issued.
+  useEffect(() => { setCode(''); setErr('') }, [reusable, label, ports, tuns])
 
   const issue = async () => {
     setBusy(true); setErr(''); setCode('')
     // Single-use expires in 10 min; a reusable code lives until revoked (ttl 0).
-    try { setCode(await IssuePairingCode(reusable, reusable ? 0 : 600, parsePorts(ports), parseTuns(tuns), '')) }
+    try { setCode(await IssuePairingCode(reusable, reusable ? 0 : 600, parsePorts(ports), parseTuns(tuns), label.trim())) }
     catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
@@ -403,6 +441,10 @@ function IssuePairingModal({onClose}: {onClose: () => void}) {
           />
         </Field>
 
+        <Field label="Label" hint="Names this code in the roster — who it's for, or what it's for.">
+          <TextInput value={label} onChange={setLabel} placeholder="e.g. friends" onEnter={issue} />
+        </Field>
+
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Allowed ports" hint="Comma-separated public ports this agent may bind. Empty = unrestricted.">
             <TextInput value={ports} onChange={setPorts} placeholder="e.g. 25565, 25566" mono onEnter={issue} />
@@ -420,7 +462,7 @@ function IssuePairingModal({onClose}: {onClose: () => void}) {
             <div className="flex items-center justify-between gap-3">
               <span className="min-w-0 text-xs text-[var(--text-3)]">
                 {reusable
-                  ? 'Reusable — this code stays valid for more machines until you revoke it.'
+                  ? 'Reusable — a standing code, listed in the roster below until you revoke it.'
                   : 'Single-use — expires once one agent enrolls, or after 10 minutes.'}
               </span>
               <Button variant="ghost" size="sm" onClick={issue} disabled={busy}>New code</Button>
@@ -439,7 +481,7 @@ function IssuePairingModal({onClose}: {onClose: () => void}) {
 /** FleetSummary: the page's one hero figure (agent count) with the connected
  * fleet's worst-of health and the rolled-up totals — type on whitespace, never
  * another card (DESIGN rule 5). Only rendered for a non-empty roster. */
-function FleetSummary({rows}: {rows: Row[]}) {
+function FleetSummary({rows, invites}: {rows: Row[]; invites: number}) {
   const n = rows.length
   const online = rows.filter(r => isConnected(r.view)).length
   const revoked = rows.filter(r => r.view.revoked).length
@@ -461,6 +503,7 @@ function FleetSummary({rows}: {rows: Row[]}) {
       {revoked > 0 && <span className="text-sm tabular-nums text-[var(--text-3)]">{revoked} revoked</span>}
       <span className="text-sm tabular-nums text-[var(--text-3)]">{tunnels} tunnel{tunnels === 1 ? '' : 's'}</span>
       <span className="text-sm tabular-nums text-[var(--text-3)]">{plrs} player{plrs === 1 ? '' : 's'} online</span>
+      {invites > 0 && <span className="text-sm tabular-nums text-[var(--text-3)]">{invites} live invite{invites === 1 ? '' : 's'}</span>}
     </div>
   )
 }
@@ -477,18 +520,20 @@ function FleetSummary({rows}: {rows: Row[]}) {
  * fleet case consent exists for. Both are false for an offline agent (pending state
  * is session-scoped), so neither can go stale. */
 function StatusMark({view, h, update}: {view: AgentView; h: Seg; update?: boolean}) {
+  const fresh = isFresh(view)
   const mark = view.revoked
     ? <Badge tone="bad">Revoked</Badge>
     : isConnected(view)
       ? <StatusDot state={h} label={HEALTH_LABEL[h]} pulse />
       : <StatusDot state="unknown" label="Offline" />
-  if (!update && !view.pendingInbound && !view.pendingOutbound) return mark
+  if (!update && !fresh && !view.pendingInbound && !view.pendingOutbound) return mark
   return (
     <span className="inline-flex items-center gap-2">
       {mark}
       {view.pendingInbound && <Badge tone="warn">Review</Badge>}
       {view.pendingOutbound && !view.pendingInbound && <Badge>Proposed</Badge>}
       {update && <Badge tone="warn">Update</Badge>}
+      {fresh && !update && !view.pendingInbound && <Badge tone="good">New</Badge>}
     </span>
   )
 }
@@ -572,6 +617,66 @@ function AgentCard({row, gwVersion, onOpen}: {row: Row; gwVersion: string; onOpe
         <span className="ml-auto text-[var(--text-3)] opacity-0 transition-opacity duration-200 group-hover:opacity-100"><IconChevronRight size={14} /></span>
       </div>
     </button>
+  )
+}
+
+/** InviteCard: a live pairing code holding a seat in the wall — the machine it
+ * will admit isn't here yet, so the card wears the invite variant of the frost
+ * (dashed rim, no Signal Glass; the roster stays the screen's one identity
+ * surface). A single-use invite shows its countdown and vanishes when consumed —
+ * the enrolled agent's card takes its place on the next poll (the swap rides the
+ * roster's pf-stagger/pf-fade CSS, which the reduced-motion kill switch zeroes).
+ * Reusable invites persist until revoked, wearing their enrolled count. */
+function InviteCard({invite, onChanged}: {invite: InviteView; onChanged: () => void}) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const left = invite.expiresAtMs > 0 ? invite.expiresAtMs - Date.now() : 0
+  const scope = scopeText(invite)
+  const revoke = () => {
+    setBusy(true); setErr('')
+    RevokeInvite(invite.handle).then(onChanged)
+      .catch(e => setErr(String(e?.message ?? e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <div className="pf-card pf-invite flex flex-col gap-4 p-4">
+      <div className="flex items-start gap-3">
+        <div className="pf-control grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-2)]"><IconKey size={17} /></div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold">{invite.label || 'Pairing code'}</div>
+          <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--text-3)]">invite {invite.handle}</div>
+        </div>
+        <div className="shrink-0">{invite.reusable ? <Badge>Reusable</Badge> : <Badge tone="warn">Single-use</Badge>}</div>
+      </div>
+
+      <div className="min-w-0 border-l border-[var(--hairline)] pl-3">
+        <Overline>Waiting to enroll</Overline>
+        <div className="mt-1 truncate text-sm text-[var(--text-2)]">
+          {invite.reusable
+            ? invite.uses > 0
+              ? `${invite.uses} agent${invite.uses === 1 ? '' : 's'} enrolled · stays valid until revoked`
+              : 'Any machine with this code can join, until you revoke it'
+            : left > 0 ? `Expires in ${fmtTtl(left)}, or when one agent enrolls` : 'Expires when one agent enrolls'}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--border)] pt-3 text-[11px] text-[var(--text-3)]">
+        <span className="inline-flex min-w-0 items-center gap-1.5"><IconShield size={13} /> <span className="truncate">{scope}</span></span>
+        <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
+          <CopyButton text={invite.code} size="sm" label="Copy code" />
+          {confirming ? (
+            <span className="pf-fade inline-flex items-center gap-1.5">
+              <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>Keep</Button>
+              <Button variant="danger" size="sm" disabled={busy} onClick={revoke}>{busy ? 'Revoking…' : 'Revoke'}</Button>
+            </span>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={() => setConfirming(true)}>Revoke</Button>
+          )}
+        </span>
+      </div>
+      {err && <div className="text-[11px] text-[var(--bad)]">{err}</div>}
+    </div>
   )
 }
 
@@ -946,7 +1051,7 @@ function AgentManagement({view, onChanged}: {view: AgentView; onChanged: () => v
         </div>
 
         <div className="text-[11px] text-[var(--text-3)]">
-          Enrolled {fmtDate(view.issuedAtMs)} · Ed25519 identity
+          Enrolled {fmtDate(view.issuedAtMs)}{view.enrolledVia ? <> · via invite “{view.enrolledVia}”</> : null} · Ed25519 identity
         </div>
       </div>
 

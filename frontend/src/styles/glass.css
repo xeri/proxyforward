@@ -240,6 +240,16 @@ aside.pf-sheet {
   transition: opacity 0.25s ease;
 }
 
+/* Pending-invite variant: the same frost, but the rim is a dashed hairline
+   instead of the lit gradient ring — a reserved seat in the wall, not yet a
+   machine. Material only (positioning stays with the consumer), and never
+   Signal Glass: an invite is not live network activity. */
+.pf-card.pf-invite::before {
+  border: 1px dashed color-mix(in oklab, var(--text-3) 55%, transparent);
+  background: none;
+  opacity: 0.9;
+}
+
 /* Material hover response; .pf-lift still owns the timing. The edge brightens
    instead of a border-color swap — the border is a gradient ring now. */
 .pf-card.pf-lift:hover {

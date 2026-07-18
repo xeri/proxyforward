@@ -122,6 +122,7 @@ persisted to config.
 | Enrollment ticket | `tkt_` + 128-bit nonce; single-use default, reusable optional; TTL caller-set, 0 = never (UI single-use default 10 min) | `link/cred.go NewEnrollTicket`, `gateway/agentstore.go IssueEnrollment` |
 | Bootstrap pairing code | headless first start, empty roster only: one single-use ticket, TTL 60 min, printed to the console | `gateway.go bootstrapTicketTTL RunStarted` |
 | Invite retention | dead (consumed/expired) tickets keep their honest error for 7 d, then prune at the next issue | `agentstore.go inviteRetention` |
+| "New" agent badge | 24 h after enrollment | `Agents.tsx NEW_AGENT_MS` |
 | Agent allowlist | `gateway_agents.json` (`0600`, atomic write + AV-retry): identity + scope + desired config per agent | `gateway/agentstore.go AgentStore` |
 | Pairing code | `pxf://host:port/v1/pair/<tkt>#sha256:<64hex>`, ≤ 512 B before parse | `link/pairing.go ParsePairingCode` |
 | Agent auth | Ed25519 proof-of-possession over `proxyforward-agent-auth-v1` + gateway cert FP — no bearer token in steady state | `link/cred.go AgentAuthMessage` |
@@ -402,7 +403,11 @@ honest-unavailable state), `&conflict=port|clone|both` (seeds the gateway event 
 the conflict cards + event log have data), `&deeplink=1` (a clicked `pxf://` invite),
 `&pending=in|out|both` (config-consent: a proposal awaiting this side, awaiting the
 peer, or both — the approval surfaces on either role), `&consent=off` (the peer predates
-config-consent, so edits apply the old way and the surfaces must say so honestly).
+config-consent, so edits apply the old way and the surfaces must say so honestly),
+`&invites=friend|single|both` (gateway only — live pairing codes as roster rows: a
+reusable labeled "friends" invite with two enrollments, a pending single-use code
+expiring in minutes, or both; minting from Overview or the modal appends a row and
+revoke removes it).
 The traffic model is deterministic functions of absolute time, so
 chart/tiles/replay all agree at any poll cadence. When you add a binding, add its stub
 here or the mock throws. Role setup mutates the mock's role, so the switcher flips the

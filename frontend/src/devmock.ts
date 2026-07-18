@@ -54,6 +54,13 @@
 //   &geo=off|empty|error|pending
 //                    — GeoIP axes: unconfigured / configured-but-no-locations /
 //                      database failed to open / picked but engine not restarted
+//   &invites=friend|single|both
+//                    — gateway only. Live pairing codes as roster rows: friend →
+//                      a reusable labeled invite (2 enrolled); single → a
+//                      pending single-use code expiring in ~7 min; both → both.
+//                      Minting from Overview/the modal also appends a row, and
+//                      revoke removes it — the real write-then-repoll loop. No
+//                      axis → no invite rows (the roster is agents only).
 
 type AnyFn = (...a: any[]) => any
 
@@ -78,6 +85,7 @@ export function installDevMock() {
   const axisConflict = params.get('conflict') || '' // '' | port | clone | both
   const axisDeepLink = params.get('deeplink') === '1' // simulate a clicked pxf:// invite
   const axisPending = params.get('pending') || '' // '' | in | out | both
+  const axisInvites = params.get('invites') || '' // '' | friend | single | both
   const axisConsentOff = params.get('consent') === 'off' // peer without config-consent
   const fx = params.get('fx')
   if (fx) document.documentElement.dataset.fx = fx // &fx=high | &fx=low
@@ -396,6 +404,23 @@ export function installDevMock() {
     'agt_5w7d2k9rq3v8xj4m', ...extraAgents.map(a => a.agentId),
     ...offlineViews.map(v => v.agentId), ...revokedViews.map(v => v.agentId),
   ])
+  // Live pairing codes (ListInvites / RevokeInvite / IssuePairingCode): a plain
+  // mutable array so mint and revoke land on the next poll, mirroring the real
+  // write-then-repoll loop. Handles are fixed fakes; codes carry a fake ticket.
+  const mkInvite = (o: any) => ({
+    handle: o.handle, label: o.label || '', reusable: !!o.reusable,
+    issuedAtMs: o.issuedAtMs || now0, expiresAtMs: o.expiresAtMs || 0, uses: o.uses || 0,
+    scopePorts: o.scopePorts || [], scopeTunnels: o.scopeTunnels || [],
+    code: `pxf://play.example.com:8474/v1/pair/tkt_${o.handle}f00d600df00d600d#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08`,
+  })
+  const invites: any[] = []
+  if (axisInvites === 'friend' || axisInvites === 'both') {
+    invites.push(mkInvite({handle: 'a3f81c2e', label: 'friends', reusable: true, uses: 2, issuedAtMs: now0 - 12 * 86_400_000}))
+  }
+  if (axisInvites === 'single' || axisInvites === 'both') {
+    invites.push(mkInvite({handle: '7b90d4e6', expiresAtMs: now0 + 7 * 60_000, issuedAtMs: now0 - 3 * 60_000}))
+  }
+
   // Mutations from the write bindings, applied over the composed roster.
   const agentOverrides = new Map<string, any>()
   const applyOverride = (v: any) => {
@@ -1092,18 +1117,26 @@ export function installDevMock() {
       agPendingIn = null
       return undefined
     }),
-    IssuePairingCode: (_reusable: boolean, _ttlSecs: number, _ports: number[], _tunnels: string[], _label: string) =>
+    IssuePairingCode: (reusable: boolean, ttlSecs: number, ports: number[], tunnels: string[], label: string) =>
       gated(() => {
         // Each call mints a fresh enrollment ticket → a different token segment,
-        // so "New code" and the reusable toggle visibly change the shown code.
-        const tok = Array.from({length: 16}, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('')
-        return `pxf://play.example.com:8474/v1/pair/${tok}#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08`
+        // so "New code" and the reusable toggle visibly change the shown code —
+        // and a live invite row appears in the roster, like the real store.
+        const handle = Array.from({length: 8}, () => Math.floor(Math.random() * 16).toString(16)).join('')
+        const iv = mkInvite({
+          handle, label, reusable, uses: 0, issuedAtMs: Date.now(),
+          expiresAtMs: ttlSecs > 0 ? Date.now() + ttlSecs * 1000 : 0,
+          scopePorts: ports, scopeTunnels: tunnels,
+        })
+        invites.unshift(iv)
+        return iv.code
       }),
-    // Invite rows arrive with the roster UI; until then the list is empty and a
-    // revoke is a clean not-found.
-    ListInvites: () => Promise.resolve([]),
-    RevokeInvite: (_handle: string) => gated(() => {
-      throw new Error('that invite is no longer live — it may have been used up or already revoked')
+    ListInvites: () => Promise.resolve(state.role === 'gateway' && axisFleet !== 'old' ? invites.map(iv => ({...iv})) : []),
+    RevokeInvite: (handle: string) => gated(() => {
+      const i = invites.findIndex(iv => iv.handle === handle)
+      if (i < 0) throw new Error('that invite is no longer live — it may have been used up or already revoked')
+      invites.splice(i, 1)
+      return undefined
     }),
     RenameAgent: (agentId: string, nickname: string) => gated(() => {
       const o = agentOverrides.get(agentId) ?? {}

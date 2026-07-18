@@ -614,93 +614,57 @@ function PlayerAddressStrip({status, onNavigate}: {status: UIStatus; onNavigate:
   )
 }
 
-/** GatewayPairingStrip: enrollment front and centre. The primary code is a
- * single-use enrollment ticket (IssuePairingCode) enrolling one agent's Ed25519
- * identity; below it, one click mints a reusable "friend code" for the
- * two-people-who-know-each-other case. Both rest masked (screen-share safe);
- * copy works without revealing. Nothing standing is created until the click —
- * and the minted code immediately appears as a roster row under Agents, where
- * it can be revoked. */
+/** GatewayPairingStrip: enrollment front and centre — but nothing standing until
+ * asked. Both rows mint on click: the strict single-use code (the default), and
+ * the one-click reusable "friend code" for the two-people-who-know-each-other
+ * case. Minting is a real act now — every live code is a visible, revocable
+ * invite row in the Agents roster — so a code must never be minted as a side
+ * effect of merely looking at this screen. Codes rest masked (screen-share
+ * safe); copy works without revealing. */
 function GatewayPairingStrip() {
   return (
     <Card pad={false}>
       <div className="space-y-3 px-5 py-3.5">
         <PairingCodeRow
           label="Pairing code" hint="Single-use · enrolls one agent, expires in 10 min"
-          fetch={() => IssuePairingCode(false, 600, [], [], '')} reissuable />
-        <FriendCodeRow />
+          cta="Generate code" reissuable
+          fetch={() => IssuePairingCode(false, 600, [], [], '')} />
+        <div className="border-t border-[var(--border)] pt-3">
+          <PairingCodeRow
+            label="Friend code" hint="Reusable · never expires · for people you trust"
+            hintAfter="Reusable · manage or revoke it under Agents"
+            cta="Mint friend code"
+            fetch={() => IssuePairingCode(true, 0, [], [], 'friend')} />
+        </div>
       </div>
     </Card>
   )
 }
 
-/** FriendCodeRow: the one-click standing invite. Until clicked it is only an
- * offer (nothing is minted, nothing stands); after, the reusable never-expiring
- * code shows masked with copy, plus the honest pointer to where it lives on
- * from now: the Agents roster, as a revocable invite row. */
-function FriendCodeRow() {
-  const [code, setCode] = useState('')
-  const [shown, setShown] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  const mint = () => {
-    setBusy(true); setErr('')
-    IssuePairingCode(true, 0, [], [], 'friend')
-      .then(setCode)
-      .catch(e => setErr(String(e)))
-      .finally(() => setBusy(false))
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[var(--border)] pt-3">
-      <div className="w-44 shrink-0">
-        <Overline>Friend code</Overline>
-        <div className="mt-0.5 text-[11px] text-[var(--text-3)]">
-          {code ? 'Reusable · manage or revoke it under Agents' : 'Reusable · never expires · for people you trust'}
-        </div>
-      </div>
-      <div className="min-w-56 flex-1">
-        {code ? (
-          <div className="pf-fade">
-            <Codebox
-              text={shown ? code : '•'.repeat(28)} selectable={shown}
-              action={
-                <div className="flex items-center gap-1.5">
-                  <IconButton title={shown ? 'Hide friend code' : 'Reveal friend code'} onClick={() => setShown(s => !s)}>
-                    {shown ? <IconEyeOff size={16} /> : <IconEye size={16} />}
-                  </IconButton>
-                  <CopyButton text={code} label="Copy" />
-                </div>
-              }
-            />
-          </div>
-        ) : err ? (
-          <ErrorBanner message={err} onDismiss={() => setErr('')} />
-        ) : (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={mint}>{busy ? 'Minting…' : 'Mint friend code'}</Button>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/** PairingCodeRow: a masked, copyable pairing/enrollment code. `reissuable` adds a
- * refresh that mints a fresh code (single-use enrollment tickets expire); `stacked`
- * lays the hint above the code instead of beside it (the disclosure is narrower). */
-function PairingCodeRow({label, hint, fetch, reissuable, stacked}: {
-  label: string; hint: string; fetch: () => Promise<string>; reissuable?: boolean; stacked?: boolean
+/** PairingCodeRow: a mint-on-click, masked, copyable pairing code. The `cta`
+ * button is the only thing that mints — a mount must never issue a ticket,
+ * because every ticket is now a live invite row in the Agents roster (a mount
+ * effect here once ghost-minted an invite per Overview visit). `reissuable`
+ * adds a refresh that mints a fresh code; `hintAfter` swaps the hint once a
+ * code exists (e.g. to say where the standing code now lives). A click while
+ * the engine is still starting retries briefly before reporting the error. */
+function PairingCodeRow({label, hint, hintAfter, cta, fetch, reissuable}: {
+  label: string; hint: string; hintAfter?: string; cta: string
+  fetch: () => Promise<string>; reissuable?: boolean
 }) {
   const [code, setCode] = useState('')
   const [err, setErr] = useState('')
   const [shown, setShown] = useState(false)
-  const [gen, setGen] = useState(0)
+  const [gen, setGen] = useState(0) // 0 = not asked yet; each mint bumps it
   const fetchRef = useRef(fetch)
   fetchRef.current = fetch
   useEffect(() => {
+    if (gen === 0) return // nothing minted until the user asks
     let cancelled = false
     setCode(''); setErr(''); setShown(false)
     const poll = (n: number) => {
       fetchRef.current().then(c => { if (!cancelled) setCode(c) })
-        .catch(e => { if (!cancelled) { if (n < 12) setTimeout(() => poll(n + 1), 300); else setErr(String(e)) } })
+        .catch(e => { if (!cancelled) { if (n < 12) setTimeout(() => poll(n + 1), 300); else setErr(String((e as Error)?.message ?? e)) } })
     }
     poll(0)
     return () => { cancelled = true }
@@ -723,21 +687,15 @@ function PairingCodeRow({label, hint, fetch, reissuable, stacked}: {
         />
       </div>
     : err
-      ? <ErrorBanner message={err} />
-      : <span className="text-sm text-[var(--text-3)]">Generating…</span>
-  if (stacked) {
-    return (
-      <div className="space-y-1.5">
-        <div className="text-[11px] text-[var(--text-3)]">{hint}</div>
-        {box}
-      </div>
-    )
-  }
+      ? <ErrorBanner message={err} onDismiss={() => { setErr(''); setGen(0) }} />
+      : gen === 0
+        ? <Button size="sm" variant="ghost" onClick={() => setGen(1)}>{cta}</Button>
+        : <span className="text-sm text-[var(--text-3)]">Generating…</span>
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
       <div className="w-44 shrink-0">
         <Overline>{label}</Overline>
-        <div className="mt-0.5 text-[11px] text-[var(--text-3)]">{hint}</div>
+        <div className="mt-0.5 text-[11px] text-[var(--text-3)]">{code && hintAfter ? hintAfter : hint}</div>
       </div>
       <div className="min-w-56 flex-1">{box}</div>
     </div>
