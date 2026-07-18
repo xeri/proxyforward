@@ -38,13 +38,26 @@ func gatewayDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for name, data := range map[string]string{
-		FileCert:  "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n",
-		FileKey:   "-----BEGIN EC PRIVATE KEY-----\nfake\n-----END EC PRIVATE KEY-----\n",
-		FileStats: `{"v":2}`,
+		FileCert:   "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n",
+		FileKey:    "-----BEGIN EC PRIVATE KEY-----\nfake\n-----END EC PRIVATE KEY-----\n",
+		FileAgents: `{"agents":[{"agentId":"agt_one","pubKey":"AQI="}],"nonces":{}}`,
+		FileStats:  `{"v":2}`,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+	return dir
+}
+
+// agentDir seeds a config dir with the agent's identity key — since the shared
+// token left the config, the key is the credential a backup exists to carry.
+func agentDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, FileAgentKey),
+		[]byte("-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	return dir
 }
@@ -57,14 +70,14 @@ func TestRoundTrip(t *testing.T) {
 		passphrase string
 		wantFiles  []string
 	}{
-		{"agent plaintext no stats", agentConfig(), func(t *testing.T) string { return t.TempDir() }, "", []string{FileConfig}},
+		{"agent plaintext no stats", agentConfig(), agentDir, "", []string{FileConfig, FileAgentKey}},
 		{"agent encrypted", agentConfig(), func(t *testing.T) string {
-			dir := t.TempDir()
+			dir := agentDir(t)
 			os.WriteFile(filepath.Join(dir, FileStats), []byte(`{"v":2}`), 0o600)
 			return dir
-		}, "hunter2", []string{FileConfig, FileStats}},
-		{"gateway plaintext", gatewayConfig(), gatewayDir, "", []string{FileConfig, FileCert, FileKey, FileStats}},
-		{"gateway encrypted", gatewayConfig(), gatewayDir, "correct horse battery staple", []string{FileConfig, FileCert, FileKey, FileStats}},
+		}, "hunter2", []string{FileConfig, FileAgentKey, FileStats}},
+		{"gateway plaintext", gatewayConfig(), gatewayDir, "", []string{FileConfig, FileCert, FileKey, FileAgents, FileStats}},
+		{"gateway encrypted", gatewayConfig(), gatewayDir, "correct horse battery staple", []string{FileConfig, FileCert, FileKey, FileAgents, FileStats}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -144,7 +157,7 @@ func keys(m map[string][]byte) []string {
 }
 
 func TestWrongPassphrase(t *testing.T) {
-	data, err := Export(agentConfig(), t.TempDir(), "1.2.3", "right")
+	data, err := Export(agentConfig(), agentDir(t), "1.2.3", "right")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +170,7 @@ func TestWrongPassphrase(t *testing.T) {
 }
 
 func TestTamperedCiphertext(t *testing.T) {
-	data, err := Export(agentConfig(), t.TempDir(), "1.2.3", "pass")
+	data, err := Export(agentConfig(), agentDir(t), "1.2.3", "pass")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +205,7 @@ func TestTamperedHeader(t *testing.T) {
 }
 
 func TestNewerFormatRejected(t *testing.T) {
-	data, err := Export(agentConfig(), t.TempDir(), "1.2.3", "")
+	data, err := Export(agentConfig(), agentDir(t), "1.2.3", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +227,7 @@ func TestNotASetupFile(t *testing.T) {
 }
 
 func TestMissingConfigRejected(t *testing.T) {
-	data, err := Export(agentConfig(), t.TempDir(), "1.2.3", "")
+	data, err := Export(agentConfig(), agentDir(t), "1.2.3", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +243,7 @@ func TestMissingConfigRejected(t *testing.T) {
 // A container listing a path-traversal name must be rejected before any
 // filesystem write.
 func TestTraversalNameRejected(t *testing.T) {
-	data, err := Export(agentConfig(), t.TempDir(), "1.2.3", "")
+	data, err := Export(agentConfig(), agentDir(t), "1.2.3", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +271,7 @@ func TestUnsetRoleRefused(t *testing.T) {
 
 // Crafted KDF parameters must not turn Decode into a memory bomb.
 func TestOutOfRangeKDFRejected(t *testing.T) {
-	data, err := Export(agentConfig(), t.TempDir(), "1.2.3", "pass")
+	data, err := Export(agentConfig(), agentDir(t), "1.2.3", "pass")
 	if err != nil {
 		t.Fatal(err)
 	}

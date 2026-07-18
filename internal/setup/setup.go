@@ -1,7 +1,9 @@
 // Package setup implements the .pfsetup portable-setup container: a single
 // file carrying everything needed to reproduce a machine's proxyforward
-// setup on another install (dual-boot, reinstall, migration) — config with
-// secrets, the gateway's TLS identity, and collected statistics.
+// setup on another install (dual-boot, reinstall, migration) — the config,
+// the credential files beside it (the agent's Ed25519 identity key; the
+// gateway's TLS identity and its enrollment allowlist), and collected
+// statistics.
 //
 // The container is one JSON document with a plaintext header (so a file can
 // be inspected without a passphrase) and either a plaintext files map or an
@@ -38,6 +40,14 @@ const (
 	FileCert   = "gateway.crt"
 	FileKey    = "gateway.key"
 	FileStats  = "stats.json"
+	// FileAgentKey is the agent's Ed25519 identity (link.LoadOrCreateIdentity)
+	// — since the shared token left the config, it is the agent's ONLY
+	// credential, so a backup without it could never re-authenticate.
+	FileAgentKey = "agent_identity.key"
+	// FileAgents is the gateway's enrollment allowlist (gateway.AgentStore) —
+	// the entire fleet's trust. A restored gateway without it would refuse
+	// every agent it had enrolled.
+	FileAgents = "gateway_agents.json"
 )
 
 var (
@@ -79,8 +89,11 @@ type Info struct {
 // Export builds a setup container for cfg's role. The config is marshaled
 // from memory (secrets included — this is a backup, not a diagnostic);
 // role-specific files are read from configDir: a gateway must have its
-// cert + key (agents pin that identity), stats are included when present.
-// An empty passphrase produces a plaintext container.
+// cert + key (agents pin that identity) and includes its enrollment
+// allowlist when one exists; an agent must have its identity key (its only
+// credential) unless the config still carries an unspent enrollment ticket.
+// Stats are included when present. An empty passphrase produces a plaintext
+// container.
 func Export(cfg *config.Config, configDir, appVersion, passphrase string) ([]byte, error) {
 	if cfg.Role != config.RoleAgent && cfg.Role != config.RoleGateway {
 		return nil, errors.New("no role configured — nothing to export")
@@ -101,6 +114,22 @@ func Export(cfg *config.Config, configDir, appVersion, passphrase string) ([]byt
 				return nil, fmt.Errorf("gateway identity file %s: %w (agents pin this certificate — a gateway export without it would break every pairing)", name, err)
 			}
 			files[name] = data
+		}
+		// The allowlist is the fleet: absent only when nothing has enrolled yet.
+		if data, err := os.ReadFile(filepath.Join(configDir, FileAgents)); err == nil {
+			files[FileAgents] = data
+		}
+	}
+	if cfg.Role == config.RoleAgent {
+		data, err := os.ReadFile(filepath.Join(configDir, FileAgentKey))
+		switch {
+		case err == nil:
+			files[FileAgentKey] = data
+		case cfg.Agent.EnrollTicket != "":
+			// Never connected: no key minted yet, but the live ticket in the
+			// config can still enroll the restored install's fresh key.
+		default:
+			return nil, fmt.Errorf("agent identity file %s: %w (it is this agent's only credential — a backup without it could never re-authenticate)", FileAgentKey, err)
 		}
 	}
 	if data, err := os.ReadFile(filepath.Join(configDir, FileStats)); err == nil {
@@ -194,7 +223,7 @@ func WriteFiles(files map[string][]byte, destDir string) error {
 	if err := secureio.MkdirAll(destDir); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	order := []string{FileCert, FileKey, FileStats, FileConfig}
+	order := []string{FileCert, FileKey, FileAgents, FileAgentKey, FileStats, FileConfig}
 	for _, name := range order {
 		data, ok := files[name]
 		if !ok {
@@ -210,7 +239,7 @@ func WriteFiles(files map[string][]byte, destDir string) error {
 
 func allowedFile(name string) bool {
 	switch name {
-	case FileConfig, FileCert, FileKey, FileStats:
+	case FileConfig, FileCert, FileKey, FileStats, FileAgentKey, FileAgents:
 		return true
 	}
 	return false

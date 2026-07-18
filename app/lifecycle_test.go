@@ -226,6 +226,7 @@ func TestImportRefusesOverAnUncleanStop(t *testing.T) {
 		t.Skip("waits out engineStopGrace")
 	}
 	src := newTestAppDir(t, testAgentConfig())
+	seedAgentIdentity(t, src)
 	exported := t.TempDir() + "/backup.pfsetup"
 	if err := src.exportSetupToPath(exported, "swordfish"); err != nil {
 		t.Fatal(err)

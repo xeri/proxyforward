@@ -42,8 +42,19 @@ func testAgentConfig() *config.Config {
 // TestImportSetupRoundTrip is the dual-boot simulation: export one install's
 // agent setup, import it into a second App with a fresh config dir, and the
 // second install must carry the identical identity.
+// seedAgentIdentity plants a fake identity key in a's config dir. The key is
+// the agent's only credential, so Export refuses an agent dir without one.
+func seedAgentIdentity(t *testing.T, a *App) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(a.configDir, setup.FileAgentKey),
+		[]byte("-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestImportSetupRoundTrip(t *testing.T) {
 	src := newTestAppDir(t, testAgentConfig())
+	seedAgentIdentity(t, src)
 	exported := filepath.Join(t.TempDir(), "backup"+setup.FileExt)
 	if err := src.exportSetupToPath(exported, "swordfish"); err != nil {
 		t.Fatal(err)
@@ -64,6 +75,9 @@ func TestImportSetupRoundTrip(t *testing.T) {
 	if _, err := os.Stat(dst.configPath); err != nil {
 		t.Fatalf("imported config not on disk: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(dst.configDir, setup.FileAgentKey)); err != nil {
+		t.Fatalf("imported identity key not on disk — the restored agent could never authenticate: %v", err)
+	}
 	// The imported config must survive an independent reload.
 	loaded, err := config.Load(dst.configPath)
 	if err != nil {
@@ -79,6 +93,7 @@ func TestImportSetupRoundTrip(t *testing.T) {
 
 func TestImportSetupWrongPassphrase(t *testing.T) {
 	src := newTestAppDir(t, testAgentConfig())
+	seedAgentIdentity(t, src)
 	exported := filepath.Join(t.TempDir(), "backup"+setup.FileExt)
 	if err := src.exportSetupToPath(exported, "right"); err != nil {
 		t.Fatal(err)
@@ -94,6 +109,7 @@ func TestImportSetupWrongPassphrase(t *testing.T) {
 
 func TestImportRefusedInAttachedMode(t *testing.T) {
 	src := newTestAppDir(t, testAgentConfig())
+	seedAgentIdentity(t, src)
 	exported := filepath.Join(t.TempDir(), "backup"+setup.FileExt)
 	if err := src.exportSetupToPath(exported, ""); err != nil {
 		t.Fatal(err)
