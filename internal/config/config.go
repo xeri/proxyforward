@@ -172,6 +172,9 @@ type UIConfig struct {
 	Theme          string `toml:"theme"` // dark|light|system
 	MinimizeToTray bool   `toml:"minimize_to_tray"`
 	Autostart      bool   `toml:"autostart"`
+	// TrayNoticeShown is set after the user has seen the one-time "closing
+	// minimizes to the tray" notice; it is never shown twice.
+	TrayNoticeShown bool `toml:"tray_notice_shown"`
 }
 
 // AnalyticsConfig governs the local analytics store (SQLite next to the

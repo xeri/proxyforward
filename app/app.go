@@ -95,6 +95,16 @@ type App struct {
 	anMu     sync.Mutex
 	anClient *ipc.Client
 
+	// tray is non-nil once RegisterTray ran; trayActive (under a.mu) means the
+	// icon really exists — systray's onReady set it — and is the only licence
+	// to hide the window instead of quitting. Hiding without an icon would
+	// strand the app invisible.
+	tray       *tray
+	trayActive bool
+	// quitConfirmed (under a.mu) records that the user answered a disconnect
+	// confirm; the next BeforeClose lets the quit through instead of re-asking.
+	quitConfirmed bool
+
 	// avatarMu serializes creator-avatar cache reads/refreshes.
 	avatarMu sync.Mutex
 
@@ -117,22 +127,22 @@ func New(configPath string, cfg *config.Config, ring *logging.Ring, logger *slog
 	}
 }
 
-// Startup is wired to Wails OnStartup: pick a mode, start the engine if this
-// process owns it, and begin the status ticker.
+// AdoptClient hands Startup an already-verified daemon connection. runGUI
+// probes the pipe before the window exists — the tray must register on the
+// main thread before wails.Run, and whether a tray belongs at all depends on
+// this very answer — so the probe happens once, there, and lands here.
+func (a *App) AdoptClient(c *ipc.Client) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.client = c
+	a.mode = ModeAttached
+	a.logger.Info("attached to running daemon over ipc pipe")
+}
+
+// Startup is wired to Wails OnStartup: start the engine if this process owns
+// it (runGUI already decided attached-vs-not), and begin the status ticker.
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
-
-	if c, err := ipc.Dial(300 * time.Millisecond); err == nil {
-		if err := c.Ping(); err == nil {
-			a.mu.Lock()
-			a.client = c
-			a.mode = ModeAttached
-			a.mu.Unlock()
-			a.logger.Info("attached to running daemon over ipc pipe")
-		} else {
-			c.Close()
-		}
-	}
 
 	a.mu.Lock()
 	if a.mode != ModeAttached && a.cfg.Role != config.RoleUnset && a.cfg.Validate() == nil {
@@ -589,7 +599,9 @@ func (a *App) tickLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			runtime.EventsEmit(a.ctx, "tick", a.Status())
+			st := a.Status()
+			a.trayUpdate(st)
+			runtime.EventsEmit(a.ctx, "tick", st)
 		}
 	}
 }

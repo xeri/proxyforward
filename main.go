@@ -23,6 +23,7 @@ import (
 	"proxyforward/app"
 	"proxyforward/internal/config"
 	"proxyforward/internal/engine"
+	"proxyforward/internal/ipc"
 	"proxyforward/internal/link"
 	"proxyforward/internal/logging"
 	"proxyforward/internal/secureio"
@@ -33,6 +34,12 @@ import (
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+// appIconPNG is the app mark the tray icon is rendered from — the same asset
+// wails build stamps into the exe, so the tray and taskbar always match.
+//
+//go:embed build/appicon.png
+var appIconPNG []byte
 
 func main() {
 	// Cobra's Windows "mousetrap" exits any Explorer-launched process after a
@@ -453,6 +460,23 @@ func runGUI(deepLink string) error {
 	}
 
 	a := app.New(configPath, cfg, ring, logger)
+	// One probe decides engine-vs-attached before the window exists: the tray
+	// below must register on the main thread before wails.Run (its window is
+	// serviced by Wails' message pump), and whether a tray belongs at all
+	// depends on this very answer — a daemon's run outlives this window on its
+	// own, so an attached GUI gets no tray and close is a plain quit.
+	attached := false
+	if c, err := ipc.Dial(300 * time.Millisecond); err == nil {
+		if err := c.Ping(); err == nil {
+			a.AdoptClient(c)
+			attached = true
+		} else {
+			c.Close()
+		}
+	}
+	if !attached {
+		a.RegisterTray(appIconPNG)
+	}
 	// A cold start via the OS protocol handler: the frontend isn't listening yet,
 	// so stash the link now for it to pull once it mounts (App.TakePendingDeepLink).
 	if deepLink != "" {
@@ -489,6 +513,7 @@ func runGUI(deepLink string) error {
 			Theme: wailswin.SystemDefault,
 		},
 		OnStartup:          a.Startup,
+		OnBeforeClose:      a.BeforeClose,
 		OnShutdown:         a.Shutdown,
 		Bind:               []interface{}{a},
 		Logger:             wailsLog,
