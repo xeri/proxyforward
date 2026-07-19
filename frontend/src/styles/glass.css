@@ -1,51 +1,57 @@
 /* ---------------------------------------------------------------------------
-   Surface materials. See frontend/DESIGN.md — the Visual Charter.
+   Surface materials — Abyssal Bloom. See frontend/DESIGN.md, the Visual
+   Charter.
 
-   Everything in this app is glass. What distinguishes the identity surface is
-   not that it is the only glass — it is that it is the only glass that
-   ANSWERS YOU (DESIGN.md rule 2):
+   Everything in this app is water. Panels are trench glass — translucent
+   volumes of deeper water you look into, not milled slabs. What distinguishes
+   the identity surface is not that it is the only glass — it is that it is
+   the only surface that ANSWERS YOU (DESIGN.md rule 2):
 
-   .pf-card    — FROST: heavy backdrop blur, low transmission, a milled rim.
-                 It refracts what passes behind it and does nothing else. No
-                 caustics, no streak, no arc, no pointer-wake. It is the
-                 workhorse panel and it still recedes.
-   .pf-signal  — SIGNAL GLASS, the product's own material: thin, high
-                 transmission, a directional reflection streak, the curved-
-                 acrylic arc, a chromatic edge, drifting caustics, and light
-                 that follows the pointer (rim glow + surface bloom on
-                 approach). It ignites when the network does. Only on surfaces
+   .pf-card    — QUIET TRENCH GLASS: trench water at ~60%, a ridge rim, a
+                 whisper of blur (the plankton smear behind it like light
+                 through water). It rests. No caustics, no bloom, no
+                 pointer-wake. The workhorse panel; it recedes.
+   .pf-signal  — THE BLOOM FRAME, the product's own material: the one
+                 asymmetric frame per screen (28/10 — the sheet's
+                 asymmetry-is-importance rule), an accent bloom gradient
+                 feeding it from one corner, an outer glow standing off the
+                 rim, caustic shimmer while someone is there, and light that
+                 follows the pointer (rim glow + surface bloom on approach).
+                 It ignites when the network does. Only on surfaces
                  representing live network activity — one per screen.
-   .pf-control — the input tier: a thin frosted film + rim, for anything the
-                 user types into, toggles, or presses (inputs, selects,
-                 switches, kbd chips, segmented tracks, icon tiles).
+   .pf-control — the input tier: recessed wells of deeper water for anything
+                 the user types into, toggles, or presses. Focus blooms the
+                 rim in accent.
 
    Chrome and floats (.pf-sheet / .pf-island / .pf-glass / .pf-menu) keep
-   true backdrop-filter, tiered by blur radius (--blur-chrome → --blur-pop).
-   `data-fx="low"` on <html> strips card/signal/control/menu blur for weak
-   GPUs — cards are numerous, so that escape hatch is load-bearing, not
-   cosmetic.
+   true backdrop-filter, tiered by blur radius (--blur-chrome → --blur-pop —
+   all thin now; water, not frost). `data-fx="low"` on <html> strips
+   card/signal/control/menu blur for weak GPUs — cards are numerous, so that
+   escape hatch is load-bearing, not cosmetic.
 
-   One light source for everything: top-left, along --light-angle. Rims are
-   bright where they face it, dark where they don't; the glare layers are
-   frozen reflections that move only on events (motion.css).
+   One light source high above the surface, along --light-angle: rims catch a
+   foam highlight facing it and sink to ridge away from it; the moving light
+   (glare sweeps, caustics) plays only on events or presence (motion.css).
 --------------------------------------------------------------------------- */
 
-/* The sidebar chrome: a full-height pane of heavy smoked glass. Sheen pools
-   at the window's top-left corner. */
+/* The sidebar chrome: a column of water deepening toward the floor — trench
+   at the surface, abyss at the bottom, one thin blur so the glow fields and
+   plankton smear behind it. */
 .pf-sheet {
   position: relative;
-  background:
-    var(--noise-glass),
-    radial-gradient(120% 90% at 0% 0%, var(--sheen), transparent 60%),
-    linear-gradient(var(--light-angle), color-mix(in oklab, var(--glass) 100%, white 3%), var(--glass) 45%);
-  backdrop-filter: blur(var(--blur-chrome)) saturate(170%) brightness(1.08);
-  -webkit-backdrop-filter: blur(var(--blur-chrome)) saturate(170%) brightness(1.08);
-  box-shadow: inset 0 1px 0 var(--bevel-top), 8px 0 32px -16px rgba(0, 0, 0, 0.3);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel) 62%, transparent),
+    color-mix(in srgb, var(--bg-base) 92%, transparent)
+  );
+  backdrop-filter: blur(var(--blur-chrome)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--blur-chrome)) saturate(140%);
+  box-shadow: inset 0 1px 0 var(--bevel-top), 8px 0 32px -16px rgba(2, 9, 15, 0.5);
 }
 
-/* The pane's inner edge carries the light model: a catch of light near the
-   top corner that lets go well before mid-height, so the sidebar reads as a
-   tint shift against the canvas, not a walled-off column. */
+/* The pane's inner edge: a catch of light near the surface that lets go well
+   before mid-depth, so the sidebar reads as a shift in the water, not a
+   walled-off column. */
 aside.pf-sheet {
   border-right: 1px solid transparent;
   border-image: linear-gradient(180deg, var(--edge-mid), var(--edge-lo) 40%, transparent) 1;
@@ -63,44 +69,44 @@ aside.pf-sheet {
   mix-blend-mode: screen;
 }
 
-/* The titlebar island: a detached slab of the thickest chrome glass floating
-   inside the top gutter, with the deep soft shadow that sells the float.
-   Shell.tsx owns its size and placement. */
+/* The titlebar island: a slab of trench glass floating in the top gutter,
+   wearing the subtle organic swell (14/6). Shell.tsx owns its size and
+   placement. */
 .pf-island {
   position: relative;
-  border-radius: var(--r-lg);
+  border-radius: var(--r-btn);
   background:
-    var(--noise-glass),
     radial-gradient(140% 100% at 50% -55%, var(--arc) 0 60%, transparent 61%),
-    linear-gradient(120deg, var(--streak), transparent 18%),
-    linear-gradient(var(--light-angle), color-mix(in oklab, var(--glass) 100%, white 4%), var(--glass) 45%);
-  backdrop-filter: blur(var(--blur-island)) saturate(180%) brightness(1.08);
-  -webkit-backdrop-filter: blur(var(--blur-island)) saturate(180%) brightness(1.08);
+    linear-gradient(var(--light-angle), color-mix(in srgb, var(--panel) 66%, transparent), color-mix(in srgb, var(--panel) 52%, transparent) 45%);
+  backdrop-filter: blur(var(--blur-island)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur-island)) saturate(150%);
   box-shadow:
     var(--shadow-contact),
-    0 2px 8px rgba(0, 0, 0, 0.35),
-    0 20px 48px -16px rgba(0, 0, 0, 0.65);
+    0 2px 8px rgba(2, 9, 15, 0.45),
+    0 20px 48px -16px rgba(2, 9, 15, 0.8);
 }
 
-/* Floating glass: modals, command palette, save bar. Consumers set their own
+/* Floating glass: modals, command palette, save bar. Near-opaque trench —
+   things that surface from the deep must stay legible over anything — with
+   an accent depth-gradient feeding in from above. Consumers set their own
    position (relative / fixed) — both anchor the rim + glare pseudos; setting
    it here would override the save bar's `fixed`. */
 .pf-glass {
   background:
-    var(--noise-glass),
-    radial-gradient(120% 60% at 50% 0%, var(--sheen), transparent 60%),
-    linear-gradient(var(--light-angle), color-mix(in oklab, var(--glass-tint) 100%, white 3%), var(--glass-tint) 45%);
-  backdrop-filter: blur(var(--blur-float)) saturate(170%) brightness(1.1);
-  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(170%) brightness(1.1);
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 55%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, transparent), color-mix(in srgb, var(--bg-base) 88%, transparent));
+  backdrop-filter: blur(var(--blur-float)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(150%);
   box-shadow:
     var(--shadow-contact),
     var(--shadow-key),
-    var(--shadow-ambient);
+    var(--shadow-ambient),
+    0 0 40px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
-/* THE RIM PRIMITIVE — every milled edge in this file is one of these.
-   A 1px gradient ring: brightest facing the light, picking up a whisper of the
-   role accent at the far corner. Replaces the flat border.
+/* THE RIM PRIMITIVE — every lit edge in this file is one of these.
+   A 1px gradient ring: a foam catch facing the light, ridge elsewhere, and
+   the accent bleeding in at the far corner. Replaces the flat border.
 
    The ring is carved by `background-clip: border-area` — the background paints
    in the border region ONLY, following border-radius. That is the same
@@ -113,17 +119,16 @@ aside.pf-sheet {
    Windows DPI the band dropped a speck at the tangent points and the arcs read
    stair-stepped. A `filter: blur(0.4px)` feather used to smear that; it is gone
    with the cause. Do not reintroduce a mask here — see the @supports fallback
-   at the bottom of this section for what it cost.
+   at the bottom of this file for what it cost.
 
    THE BEVEL PAIR RIDES IN THIS RING TOO, for the same reason. An
    `inset 0 1px 0` on the surface paints its shape minus its own shape offset
    1px: along a straight edge a clean band, but around a corner a crescent that
    thins along the arc and stops dead where the arc turns vertical. At
    fractional Windows DPI that blunt end lands on the rim and reads as a speck —
-   two per side, at the tangent points, which is exactly what they looked like.
-   As ring layers the bevels fade out over the corner (--r-lg) instead of
-   terminating on it, and the whole milled edge is one annulus, anti-aliased
-   once. Do not move them back out to box-shadow.
+   two per side, at the tangent points. As ring layers the bevels fade out over
+   the corner (--r-lg) instead of terminating on it, and the whole edge is one
+   annulus, anti-aliased once. Do not move them back out to box-shadow.
 
    --fringe-cool / --fringe-warm are opt-in: only .pf-fringe sets them. */
 .pf-glass::before,
@@ -138,10 +143,10 @@ aside.pf-sheet {
   background:
     linear-gradient(
       var(--light-angle),
-      var(--edge-hi),
-      var(--edge-mid) 28%,
-      var(--edge-lo) 55%,
-      color-mix(in oklab, var(--accent) 30%, transparent) 100%
+      color-mix(in srgb, var(--accent) 45%, var(--edge-hi)),
+      color-mix(in srgb, var(--accent) 22%, var(--edge-mid)) 35%,
+      var(--edge-mid) 60%,
+      color-mix(in oklab, var(--accent) 35%, transparent) 100%
     ),
     linear-gradient(180deg, var(--bevel-top), transparent var(--r-lg)),
     linear-gradient(0deg, var(--bevel-bot), transparent var(--r-lg)),
@@ -165,35 +170,36 @@ aside.pf-sheet {
   mix-blend-mode: screen;
 }
 
-/* Palette garnish: a 1px chromatic fringe — cool light entering one edge,
-   warm leaving the other — suggests dispersion in the thickest glass. It rides
-   the rim ring (the two --fringe-* slots above), so this modifier only names
-   the colors and the deeper blur — no shadow stack to restate. */
+/* Palette garnish: a 1px dispersion fringe — the current entering one edge,
+   jade leaving the other — light split by the thickest water. It rides the
+   rim ring (the two --fringe-* slots above), so this modifier only names the
+   colors and the deeper blur — no shadow stack to restate. */
 .pf-glass.pf-fringe {
-  --fringe-cool: rgba(140, 190, 255, 0.05);
-  --fringe-warm: rgba(255, 130, 160, 0.05);
-  backdrop-filter: blur(var(--blur-pop)) saturate(170%) brightness(1.1);
-  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(170%) brightness(1.1);
+  --fringe-cool: rgba(28, 139, 255, 0.07);
+  --fringe-warm: rgba(47, 255, 192, 0.07);
+  backdrop-filter: blur(var(--blur-pop)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(150%);
 }
 
 /* High-fx mode (devmock &fx=high): genuine refraction through the palette via
    the #pf-refract displacement filter (index.html). The only expensive trick
    in the file — flagged, isolated, deletable. */
 :root[data-fx="high"] .pf-glass.pf-fringe {
-  backdrop-filter: blur(var(--blur-pop)) saturate(170%) url(#pf-refract);
-  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(170%) url(#pf-refract);
+  backdrop-filter: blur(var(--blur-pop)) saturate(150%) url(#pf-refract);
+  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(150%) url(#pf-refract);
 }
 
-/* FROST: the workhorse panel. Heavy blur, low transmission — the atmosphere
-   arrives diffused, never legible, so text stays crisp over it and the eye
-   still passes over the panel on its way to the identity surface. It refracts;
-   it does not react: no caustics, no streak, no arc, no pointer-wake — those
-   stay exclusive to .pf-signal, and that exclusivity is what keeps one
-   identity surface per screen (DESIGN.md rules 1 and 2).
+/* QUIET TRENCH GLASS: the workhorse panel. Trench water at ~60% over a
+   whisper of blur — the atmosphere arrives smeared, never legible, so text
+   stays crisp and the eye still passes over the panel on its way to the
+   bloom frame. It rests; it does not react: no caustics, no bloom, no
+   pointer-wake — those stay exclusive to .pf-signal, and that exclusivity is
+   what keeps one identity surface per screen (DESIGN.md rules 1 and 2).
 
    The edge is the rim ring (see the primitive above), not a border: a flat
-   1px border can't carry the bevel pair without specking, and every other
-   milled surface here is one annulus already.
+   1px border can't carry the bevel pair without specking at fractional DPI.
+   Symmetric --r-lg on purpose — resting depth; asymmetry is spent on things
+   that matter.
 
    position:relative is the documented exception to "material only": consumers
    anchor headers/overlays to it. backdrop-filter makes each card a stacking
@@ -203,15 +209,9 @@ aside.pf-sheet {
 .pf-card {
   position: relative;
   border-radius: var(--r-lg);
-  background:
-    var(--noise-glass),
-    linear-gradient(
-      var(--light-angle),
-      color-mix(in oklab, var(--card-2-bg) 100%, white 3%),
-      var(--card-2-bg) 55%
-    );
-  backdrop-filter: blur(var(--blur-frost)) saturate(150%) brightness(1.04);
-  -webkit-backdrop-filter: blur(var(--blur-frost)) saturate(150%) brightness(1.04);
+  background: var(--card-2-bg);
+  backdrop-filter: blur(var(--blur-frost)) saturate(130%);
+  -webkit-backdrop-filter: blur(var(--blur-frost)) saturate(130%);
   box-shadow: var(--shadow-contact), var(--shadow-card-2);
   /* No contain:paint here — Select dropdowns escape card bounds. */
 }
@@ -224,14 +224,14 @@ aside.pf-sheet {
   border: 1px solid transparent;
   pointer-events: none;
   z-index: 1;
-  opacity: var(--card-rim-o, 0.75);
+  opacity: var(--card-rim-o, 0.9);
   background:
     linear-gradient(
       var(--light-angle),
       var(--edge-hi),
       var(--edge-mid) 30%,
-      var(--edge-lo) 58%,
-      color-mix(in oklab, var(--accent) 18%, transparent) 100%
+      var(--edge-lo) 70%,
+      var(--edge-mid) 100%
     ),
     linear-gradient(180deg, var(--bevel-top), transparent var(--r-lg)),
     linear-gradient(0deg, var(--bevel-bot), transparent var(--r-lg));
@@ -240,12 +240,13 @@ aside.pf-sheet {
   transition: opacity 0.25s ease;
 }
 
-/* Pending-invite variant: the same frost, but the rim is a dashed hairline
-   instead of the lit gradient ring — a reserved seat in the wall, not yet a
-   machine. Material only (positioning stays with the consumer), and never
-   Signal Glass: an invite is not live network activity. */
+/* Pending-invite variant: the same trench, but the rim is a dashed silt
+   hairline instead of the lit ring — a dormant frame, a reserved seat in the
+   water column, not yet an organism. Material only (positioning stays with
+   the consumer), and never the bloom frame: an invite is not live network
+   activity. */
 .pf-card.pf-invite::before {
-  border: 1px dashed color-mix(in oklab, var(--text-3) 55%, transparent);
+  border: 1px dashed color-mix(in oklab, var(--text-3) 65%, transparent);
   background: none;
   opacity: 0.9;
 }
@@ -258,57 +259,42 @@ aside.pf-sheet {
 }
 .pf-card.pf-lift:hover::before { --card-rim-o: 1; }
 
-/* SIGNAL GLASS — the product's own material, and a reward: reserved for the
-   one surface per screen that represents live network activity. A
-   translucent tint over real backdrop blur; the light model (specular rim,
-   bevel pair, layered shadows), the signature arc, the 120° reflection
-   streak, and a faint chromatic edge (cool light entering one side, warm
-   leaving the other) make it read as curved acrylic over live electronics. */
+/* THE BLOOM FRAME — the product's own material, and a reward: reserved for
+   the one surface per screen that represents live network activity. The 28/10
+   asymmetric frame (top-left and bottom-right swell — nothing important is
+   symmetric), fed by an accent bloom from its upper corner, standing in its
+   own glow. The pointer is answered twice: the rim brightens where the hand
+   is (::before), and the light shines faintly INTO the water (::after). */
 .pf-signal {
-  /* The rim runs at full strength — this is the shiniest edge in the app, and
-     it has to stay distinguishable now that the quiet cards are glass too. The
-     dim lives in the ring's own color stops, not in an `opacity` on the pseudo:
-     the pseudo also carries the bevel pair, which must stay full (see below). */
-  --card-rim-dim: 100%;
-  --card-rim-hi: color-mix(in srgb, var(--edge-crisp) var(--card-rim-dim), transparent);
-  --card-rim-mid: color-mix(in srgb, var(--edge-mid) var(--card-rim-dim), transparent);
-  --card-rim-lo: color-mix(in srgb, var(--edge-lo) var(--card-rim-dim), transparent);
-  --card-rim-accent: color-mix(in srgb, color-mix(in oklab, var(--accent) 40%, transparent) var(--card-rim-dim), transparent);
-  --card-rim-glow: color-mix(in srgb, color-mix(in oklab, var(--accent) 70%, white 25%) var(--card-rim-dim), transparent);
-  --card-bevel-top: color-mix(in srgb, var(--bevel-top) 40%, white);
-  /* Wet-look garnishes, hotter than the ambient --arc/--streak the chrome uses:
-     a top gloss, the curved-acrylic softbox, and the 120° reflection. */
-  --signal-arc: rgba(255, 255, 255, 0.1);
-  --signal-streak: rgba(255, 255, 255, 0.13);
-  --signal-gloss: rgba(255, 255, 255, 0.09);
   position: relative;
+  border-radius: var(--r-bloom);
   background:
-    var(--noise-glass),
-    linear-gradient(180deg, var(--signal-gloss), transparent 45%),
-    radial-gradient(140% 95% at 50% -52%, var(--signal-arc) 0 60%, transparent 61%),
-    linear-gradient(120deg, var(--signal-streak), transparent 20%),
-    linear-gradient(var(--light-angle), color-mix(in oklab, var(--glass-card) 100%, white 5%), var(--glass-card) 50%);
-  backdrop-filter: blur(var(--blur-card)) saturate(195%) brightness(1.1);
-  -webkit-backdrop-filter: blur(var(--blur-card)) saturate(195%) brightness(1.1);
-  border-radius: var(--r-lg);
+    radial-gradient(
+      130% 90% at 78% 0%,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      transparent 55%
+    ),
+    linear-gradient(
+      165deg,
+      color-mix(in srgb, var(--panel) 72%, transparent),
+      color-mix(in srgb, var(--bg-base) 85%, transparent)
+    );
+  backdrop-filter: blur(var(--blur-card)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--blur-card)) saturate(160%);
   box-shadow:
     var(--shadow-contact),
     var(--shadow-key),
-    var(--shadow-ambient-card);
+    var(--shadow-ambient-card),
+    0 0 34px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-/* Signal rim: specular ring + pointer-tracked accent glow. The static ring
-   is always present (it is the material's edge); the accent layer parks
-   offscreen until the Shell lamp writes --mx/--my on approach.
+/* Bloom rim: an accent ring at ~40% — the lit frame of the sheet's hero —
+   plus the pointer-tracked glow. The static ring is always present (it is
+   the material's edge); the glow layer parks offscreen until the Shell lamp
+   writes --mx/--my on approach.
 
-   The bevel pair and the chromatic fringe are LAYERS OF THIS RING, not inset
-   box-shadows on the card. An `inset 0 1px 0` paints the card's shape minus
-   its own shape offset 1px — around a corner that difference is a crescent
-   that thins along the arc and stops dead where the arc turns vertical. At
-   fractional Windows DPI its last pixel lands on the rim's own and reads as a
-   speck: two per side, at the tangent points. Folded in here, every milled
-   edge is one annulus, anti-aliased once, and the bevels fade out over the
-   corner (--r-lg) instead of terminating on it. Do not move them back out. */
+   The bevel pair and the dispersion fringe are LAYERS OF THIS RING, not inset
+   box-shadows on the card — see the rim primitive. Do not move them out. */
 .pf-signal::before {
   content: "";
   position: absolute;
@@ -320,26 +306,27 @@ aside.pf-sheet {
   background:
     radial-gradient(
       220px circle at var(--mx, -999px) var(--my, -999px),
-      var(--card-rim-glow),
+      color-mix(in oklab, var(--accent) 80%, white 12%),
       transparent 70%
     ),
     linear-gradient(
       var(--light-angle),
-      var(--card-rim-hi),
-      var(--card-rim-mid) 28%,
-      var(--card-rim-lo) 55%,
-      var(--card-rim-accent) 100%
+      color-mix(in srgb, var(--accent) 55%, var(--edge-hi)),
+      color-mix(in srgb, var(--accent) 38%, transparent) 40%,
+      color-mix(in srgb, var(--accent) 22%, var(--edge-mid)) 75%,
+      color-mix(in srgb, var(--accent) 45%, transparent) 100%
     ),
-    linear-gradient(180deg, var(--card-bevel-top), transparent var(--r-lg)),
+    linear-gradient(180deg, var(--bevel-top), transparent var(--r-lg)),
     linear-gradient(0deg, var(--bevel-bot), transparent var(--r-lg)),
-    linear-gradient(90deg, rgba(140, 190, 255, 0.04) 0 1px, transparent 1px),
-    linear-gradient(270deg, rgba(255, 130, 160, 0.04) 0 1px, transparent 1px);
+    linear-gradient(90deg, rgba(28, 139, 255, 0.05) 0 1px, transparent 1px),
+    linear-gradient(270deg, rgba(47, 255, 192, 0.05) 0 1px, transparent 1px);
   background-origin: border-box;
   background-clip: border-area;
 }
 
-/* Surface bloom: the pointer shines faintly INTO the glass (dark theme only —
-   screen blend whites out over ice). Offscreen at rest, like the rim glow. */
+/* Surface bloom: the pointer shines faintly INTO the water (dark theme only —
+   screen blend whites out over the shallows). Offscreen at rest, like the
+   rim glow. */
 .pf-signal::after {
   content: "";
   position: absolute;
@@ -348,7 +335,7 @@ aside.pf-sheet {
   pointer-events: none;
   background: radial-gradient(
     240px circle at var(--mx, -999px) var(--my, -999px),
-    rgba(255, 255, 255, 0.08),
+    color-mix(in srgb, var(--accent) 16%, transparent),
     transparent 70%
   );
   mix-blend-mode: screen;
@@ -357,10 +344,10 @@ aside.pf-sheet {
   display: none;
 }
 
-/* Hidden magic: Signal Glass rests when untouched. The Shell lamp stamps
+/* Hidden magic: the bloom frame rests when untouched. The Shell lamp stamps
    data-awake on pointer approach and clears it ~5s after the last move, so
-   the caustic drift exists only while someone is there — the light catches
-   the glass, then stops. */
+   the caustic shimmer exists only while someone is there — the water stirs,
+   then settles. */
 .pf-signal .pf-caustic {
   opacity: 0;
   transition: opacity 0.6s ease;
@@ -375,9 +362,10 @@ aside.pf-sheet {
   animation-play-state: running;
 }
 
-/* Inset well inside a card (code boxes, terminals, checklists): pressed INTO
-   the glass — a translucent shade so the card's own blur keeps showing
-   through, with the bevel pair inverted (dark seat on top, lit lip below).
+/* Inset well inside a card (code boxes, terminals, checklists): a pocket of
+   deeper water pressed into the panel — darker than its host, with the bevel
+   pair inverted (dark seat on top, lit lip below) and the organic input
+   radius (10/4).
 
    The lit lip is a background BAND clipped to the padding box, not an
    `inset 0 -1px 0`: an offset inset shadow rounds each corner as a crescent
@@ -386,24 +374,24 @@ aside.pf-sheet {
    speck. The fill is a layer too, so the band can clip to the padding box while
    the fill still runs under the translucent border. */
 .pf-well {
-  --well-fill: rgba(0, 0, 0, 0.24);
+  --well-fill: rgba(2, 9, 15, 0.5);
   background-image:
     linear-gradient(0deg, var(--bevel-top) 0 1px, transparent 1px),
     linear-gradient(var(--well-fill), var(--well-fill));
   background-clip: padding-box, border-box;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: var(--r-input);
   box-shadow: inset 0 2px 4px -1px var(--bevel-bot);
 }
 
 /* Flush well: same pressed-in read for regions that run edge-to-edge inside
    a card (the log tail). Square, so the inset lip has no corner to speck. */
 .pf-well-flush {
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(2, 9, 15, 0.45);
   box-shadow: inset 0 2px 4px -1px var(--bevel-bot), inset 0 -1px 0 var(--bevel-top);
 }
-:root[data-theme="light"] .pf-well { --well-fill: rgba(60, 70, 110, 0.08); }
-:root[data-theme="light"] .pf-well-flush { background: rgba(60, 70, 110, 0.1); }
+:root[data-theme="light"] .pf-well { --well-fill: rgba(24, 84, 92, 0.07); }
+:root[data-theme="light"] .pf-well-flush { background: rgba(24, 84, 92, 0.09); }
 
 /* Toolbar band: a slightly raised control strip inside a card. Appearance
    only — the consumer owns positioning and borders. */
@@ -423,9 +411,9 @@ aside.pf-sheet {
   background: linear-gradient(180deg, transparent, var(--sep) 50%, transparent);
 }
 
-/* Light bleed: a huge, soft ambient glow escaping from behind a surface.
-   Consumer sets position:relative and tunes --bleed / --bleed-strength.
-   Softness is baked into the stops (no filter). */
+/* Light bleed: a huge, soft glow escaping past a surface's border — the
+   sheet's bleed banners. Consumer sets position:relative and tunes --bleed /
+   --bleed-strength. Softness is baked into the stops (no filter). */
 .pf-bleed::before {
   content: "";
   position: absolute;
@@ -440,23 +428,24 @@ aside.pf-sheet {
   );
 }
 
-/* Nav active indicator: light lives INSIDE the glass — an internal accent
-   glow instead of a solid pill. */
+/* Nav active indicator: the lit lure — an accent tint inside the glass with
+   its own internal glow, never a solid pill. Everything else waits in the
+   dark. */
 .pf-nav-glow {
   --nav-fill: color-mix(in srgb, var(--accent) 9%, transparent);
   /* Catch-light as a padding-box band, not an inset shadow — see .pf-well. */
   background-image:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 14%, transparent) 0 1px, transparent 1px),
     linear-gradient(var(--nav-fill), var(--nav-fill));
   background-clip: padding-box, border-box;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
   box-shadow: inset 0 0 14px 1px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
-/* Caustic drift: near-subliminal reflection bands crossing the card over
-   ~90s. A clipped overlay whose oversized child translates (GPU-only; the
-   keyframes live in motion.css). Nobody notices it consciously — the surface
-   just feels alive. */
+/* Caustic shimmer: near-subliminal bands of underwater light crossing the
+   bloom frame over ~90s. A clipped overlay whose oversized child translates
+   (GPU-only; the keyframes live in motion.css). Nobody notices it
+   consciously — the water just feels alive. */
 .pf-caustic {
   position: absolute;
   inset: 0;
@@ -488,28 +477,30 @@ aside.pf-sheet {
 }
 :root[data-motion="off"] .pf-caustic { display: none; }
 
-/* Milled glass buttons: a thin frosted film riding the card glass, machined
-   under the app's one light source — an angled catch-light film crossing the
-   face and a specular ring that brightens toward the light corner. Each
-   variant's fill, text, and glow stay Tailwind utilities in ui.tsx: this
-   recipe owns only material (blur, film, rim) — background-image composites
-   over any background-color, and positioning stays with the consumer (ui.tsx
-   sets `relative`).
+/* Buttons SHOUT IN CAPS — the one place type raises its voice (0.14em
+   tracking, bold, uppercase; the recipe carries it so no consumer restates
+   it). Material: a thin foam film over whatever water the button sits on;
+   each variant's fill, text, and glow stay Tailwind utilities in ui.tsx —
+   background-image composites over any background-color, and positioning
+   stays with the consumer (ui.tsx sets `relative`).
 
    THE CATCH-LIGHT IS A LAYER OF THE RING (--btn-lip). ui.tsx used to restate
-   `inset 0 1px 0 rgba(255,255,255,.28)` on the same element that already wore
-   this ring — the exact pattern the rim primitive above says specks at the
-   corners. The hot variant just turns --btn-lip up instead. */
+   `inset 0 1px 0` on the same element that already wore this ring — the
+   exact pattern the rim primitive above says specks at the corners. The hot
+   variant just turns --btn-lip up instead. */
 .pf-btn {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 700;
   background-image: linear-gradient(
     var(--light-angle),
-    rgba(255, 255, 255, 0.14),
-    rgba(255, 255, 255, 0.04) 38%,
-    rgba(255, 255, 255, 0) 60%,
-    rgba(255, 255, 255, 0.06)
+    rgba(189, 251, 230, 0.1),
+    rgba(189, 251, 230, 0.03) 38%,
+    rgba(189, 251, 230, 0) 60%,
+    rgba(189, 251, 230, 0.04)
   );
-  backdrop-filter: blur(var(--blur-control)) saturate(150%);
-  -webkit-backdrop-filter: blur(var(--blur-control)) saturate(150%);
+  backdrop-filter: blur(var(--blur-control)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--blur-control)) saturate(140%);
 }
 .pf-btn::before {
   content: "";
@@ -522,7 +513,7 @@ aside.pf-sheet {
   background:
     linear-gradient(
       180deg,
-      rgba(255, 255, 255, var(--btn-lip, 0.1)),
+      rgba(189, 251, 230, var(--btn-lip, 0.1)),
       transparent var(--r-md)
     ),
     linear-gradient(
@@ -541,8 +532,9 @@ aside.pf-sheet {
 
 /* THE CONTROL TIER — every surface the hand touches: text inputs, the Select
    trigger, checkboxes, the switch track, kbd chips, the segmented track and
-   its thumb, icon tiles. A thin frosted film over whatever glass it sits on,
-   plus the rim ring with the bevel pair folded in.
+   its thumb, icon tiles. A recessed film of deeper water over whatever glass
+   it sits on, plus the rim ring with the bevel pair folded in. Focus blooms
+   the ring in accent.
 
    Material only. Size, padding, fill, and focus glow stay with the consumer —
    and the consumer must NOT carry a `border`: this ring IS the edge (it sits
@@ -558,13 +550,13 @@ aside.pf-sheet {
 .pf-control {
   background-image: linear-gradient(
     var(--light-angle),
-    rgba(255, 255, 255, 0.1),
-    rgba(255, 255, 255, 0.03) 40%,
-    rgba(255, 255, 255, 0) 62%,
-    rgba(255, 255, 255, 0.05)
+    rgba(189, 251, 230, 0.06),
+    rgba(189, 251, 230, 0.02) 40%,
+    rgba(189, 251, 230, 0) 62%,
+    rgba(2, 9, 15, 0.12)
   );
-  backdrop-filter: blur(var(--blur-control)) saturate(140%);
-  -webkit-backdrop-filter: blur(var(--blur-control)) saturate(140%);
+  backdrop-filter: blur(var(--blur-control)) saturate(130%);
+  -webkit-backdrop-filter: blur(var(--blur-control)) saturate(130%);
 }
 .pf-control::before {
   content: "";
@@ -604,7 +596,7 @@ aside.pf-sheet {
 .pf-control:disabled::before,
 .pf-control[data-disabled="true"]::before { --control-rim-o: 0.35; }
 
-/* The switch knob: a milled cap riding inside a .pf-control track. Its
+/* The switch knob: a small organism riding inside a .pf-control track. Its
    catch-light is a background BAND, clipped by the knob's own corner radius in
    the same anti-aliasing pass as the fill — an `inset 0 1px 0` would paint the
    knob's shape minus its shape offset 1px and speck at the tangent points (see
@@ -612,33 +604,35 @@ aside.pf-sheet {
    has no crisp end. Fill and geometry come from the consumer (ui.tsx Switch,
    tokens.css --switch-*). */
 .pf-knob {
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0 1px, transparent 1px);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  background-image: linear-gradient(180deg, rgba(189, 251, 230, 0.4) 0 1px, transparent 1px);
+  box-shadow: 0 1px 2px rgba(2, 9, 15, 0.5);
 }
 :root[data-theme="light"] .pf-knob {
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0 1px, transparent 1px);
-  box-shadow: 0 1px 2px rgba(30, 34, 58, 0.25);
+  box-shadow: 0 1px 2px rgba(8, 40, 45, 0.25);
 }
 
-/* Menu glass: floating option lists (Select). Far more opaque than the other
-   floats — options must stay legible over whatever surface they cover — but
-   still milled: angled fill, bevel pair, deep pop shadow. */
+/* Menu glass: floating option lists (Select). Menus never go translucent —
+   opaque trench so options stay legible over whatever they cover — with a
+   ridge border and a faint accent glow standing off the shadow. */
 .pf-menu {
   /* Bevel pair as padding-box bands, not inset shadows — see .pf-well. */
   background:
     linear-gradient(180deg, var(--bevel-top) 0 1px, transparent 1px),
     linear-gradient(0deg, var(--bevel-bot) 0 1px, transparent 1px),
-    var(--noise-glass),
     linear-gradient(
       var(--light-angle),
-      color-mix(in oklab, var(--panel-2) 96%, white),
-      color-mix(in srgb, var(--panel) 96%, transparent) 55%
+      color-mix(in oklab, var(--panel-2) 98%, white),
+      var(--panel) 55%
     );
-  background-clip: padding-box, padding-box, border-box, border-box;
-  backdrop-filter: blur(var(--blur-float)) saturate(150%);
-  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(150%);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-key), var(--shadow-pop);
+  background-clip: padding-box, padding-box, border-box;
+  backdrop-filter: blur(var(--blur-float)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(140%);
+  border: 1px solid var(--border);
+  box-shadow:
+    var(--shadow-key),
+    var(--shadow-pop),
+    0 0 24px color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
 /* Frozen glare on menu glass, same optics as the other floats; motion.css
@@ -655,24 +649,25 @@ aside.pf-sheet {
   mix-blend-mode: screen;
 }
 
-/* Accent-filled buttons read as pressed glass jewels: the card softbox arc
-   at button scale over the angled film, so the fill curves under the light
-   instead of sitting flat. Rides pf-btn (same element, later declaration). */
+/* Accent-filled buttons are the lit lure: a soft top gloss curving the fill
+   under the light, so the jade reads as a glowing body, not flat paint.
+   Rides pf-btn (same element, later declaration); the glow shadow stays with
+   the consumer. */
 .pf-btn-hot {
   background-image:
-    radial-gradient(130% 90% at 50% -45%, rgba(255, 255, 255, 0.28) 0 55%, transparent 56%),
+    radial-gradient(130% 90% at 50% -45%, rgba(255, 255, 255, 0.22) 0 55%, transparent 56%),
     linear-gradient(
       var(--light-angle),
-      rgba(255, 255, 255, 0.2),
-      rgba(255, 255, 255, 0.05) 40%,
+      rgba(255, 255, 255, 0.14),
+      rgba(255, 255, 255, 0.04) 40%,
       rgba(255, 255, 255, 0) 62%,
-      rgba(255, 255, 255, 0.08)
+      rgba(2, 9, 15, 0.1)
     );
 }
 
-/* Role word: an outlined glass token naming a role — cyan agent, violet
+/* Role word: an outlined glass token naming a role — jade agent, current
    gateway (consumer sets --role-c). The 1px ring is lit along --light-angle
-   like every other milled edge; the fill is a whisper of the role hue. */
+   like every other edge; the fill is a whisper of the role hue. */
 .pf-role-chip {
   position: relative;
   display: inline-flex;
@@ -705,14 +700,14 @@ aside.pf-sheet {
   background-clip: border-area;
 }
 
-/* Chart line bloom: tiny per-series glow (consumed by BandwidthChart via
-   currentColor). Kept small — instrumentation, not gamer RGB. */
+/* Chart line bloom: per-series bioluminescence (consumed by BandwidthChart
+   via currentColor). Kept tight — a lit organism, not gamer RGB. */
 .pf-chart-glow {
   filter: drop-shadow(0 0 4px color-mix(in srgb, currentColor 55%, transparent));
 }
 
-/* Headline chart series: neon bloom — a tight core plus a wide soft halo, so
-   the glass glows under the line. Light runs cooler; low-fx kills it. */
+/* Headline chart series: the full glow — a tight core plus a wide soft halo,
+   so the water lights under the line. Light runs cooler; low-fx kills it. */
 .pf-chart-glow-hot {
   filter:
     drop-shadow(0 0 3px color-mix(in srgb, currentColor 85%, transparent))
@@ -722,70 +717,67 @@ aside.pf-sheet {
    of the bloom that survives busy tween frames. */
 .pf-chart-halo { opacity: 0.18; }
 
-/* Light glass is ice: gentler transmission (the backdrop is already bright)
-   and glare soft-lights instead of screening (screen whites out). */
+/* The shallows: bright water needs gentler saturation boosts (the backdrop is
+   already pale) and glare that soft-lights instead of screening. */
 :root[data-theme="light"] .pf-sheet {
-  backdrop-filter: blur(var(--blur-chrome)) saturate(120%) brightness(1.03);
-  -webkit-backdrop-filter: blur(var(--blur-chrome)) saturate(120%) brightness(1.03);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel) 72%, transparent),
+    color-mix(in srgb, var(--bg-2) 88%, transparent)
+  );
+  backdrop-filter: blur(var(--blur-chrome)) saturate(115%);
+  -webkit-backdrop-filter: blur(var(--blur-chrome)) saturate(115%);
 }
 :root[data-theme="light"] .pf-island {
-  backdrop-filter: blur(var(--blur-island)) saturate(120%) brightness(1.03);
-  -webkit-backdrop-filter: blur(var(--blur-island)) saturate(120%) brightness(1.03);
+  backdrop-filter: blur(var(--blur-island)) saturate(115%);
+  -webkit-backdrop-filter: blur(var(--blur-island)) saturate(115%);
 }
 :root[data-theme="light"] .pf-glass {
-  backdrop-filter: blur(var(--blur-float)) saturate(120%) brightness(1.04);
-  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(120%) brightness(1.04);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 55%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 97%, transparent), color-mix(in srgb, var(--bg) 92%, transparent));
+  backdrop-filter: blur(var(--blur-float)) saturate(115%);
+  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(115%);
 }
 :root[data-theme="light"] .pf-glass.pf-fringe {
-  backdrop-filter: blur(var(--blur-pop)) saturate(120%) brightness(1.04);
-  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(120%) brightness(1.04);
+  backdrop-filter: blur(var(--blur-pop)) saturate(115%);
+  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(115%);
 }
 :root[data-theme="light"] .pf-signal {
-  /* Ice catches hotter whites: the gloss/arc/streak need far more strength to
-     read over a bright backdrop (same reasoning as the --arc/--streak tokens). */
-  --signal-arc: rgba(255, 255, 255, 0.8);
-  --signal-streak: rgba(255, 255, 255, 0.55);
-  --signal-gloss: rgba(255, 255, 255, 0.55);
-  backdrop-filter: blur(var(--blur-card)) saturate(135%) brightness(1.04);
-  -webkit-backdrop-filter: blur(var(--blur-card)) saturate(135%) brightness(1.04);
+  backdrop-filter: blur(var(--blur-card)) saturate(120%);
+  -webkit-backdrop-filter: blur(var(--blur-card)) saturate(120%);
 }
-/* Frosted ice: the backdrop is already bright, so transmission drops and the
-   saturation boost stays gentle — a hot one turns the aurora into stained
-   glass under every card on the page. */
 :root[data-theme="light"] .pf-card {
-  backdrop-filter: blur(var(--blur-frost)) saturate(115%) brightness(1.02);
-  -webkit-backdrop-filter: blur(var(--blur-frost)) saturate(115%) brightness(1.02);
+  backdrop-filter: blur(var(--blur-frost)) saturate(110%);
+  -webkit-backdrop-filter: blur(var(--blur-frost)) saturate(110%);
 }
-/* Ice controls: white-on-white won't read, so the film keeps a hot catch at the
-   light corner and exits through a faint dark seat — same trick as .pf-btn. */
+/* Sunlit controls: pale water films — the catch stays white, the exit seat
+   goes teal so the edge reads on a bright panel. */
 :root[data-theme="light"] .pf-control {
   background-image: linear-gradient(
     var(--light-angle),
     rgba(255, 255, 255, 0.5),
     rgba(255, 255, 255, 0.14) 40%,
     rgba(255, 255, 255, 0) 62%,
-    rgba(25, 28, 38, 0.05)
+    rgba(8, 40, 45, 0.05)
   );
-  backdrop-filter: blur(var(--blur-control)) saturate(115%);
-  -webkit-backdrop-filter: blur(var(--blur-control)) saturate(115%);
+  backdrop-filter: blur(var(--blur-control)) saturate(110%);
+  -webkit-backdrop-filter: blur(var(--blur-control)) saturate(110%);
 }
-/* Ice buttons: white-on-white won't read, so the film keeps a hot catch at
-   the light corner but exits through a faint dark seat — the shadow side
-   does the talking. The rim ring flips automatically via the edge tokens. */
 :root[data-theme="light"] .pf-btn {
   background-image: linear-gradient(
     var(--light-angle),
     rgba(255, 255, 255, 0.45),
     rgba(255, 255, 255, 0.12) 38%,
     rgba(255, 255, 255, 0) 60%,
-    rgba(25, 28, 38, 0.05)
+    rgba(8, 40, 45, 0.05)
   );
-  backdrop-filter: blur(10px) saturate(115%);
-  -webkit-backdrop-filter: blur(10px) saturate(115%);
+  backdrop-filter: blur(var(--blur-control)) saturate(110%);
+  -webkit-backdrop-filter: blur(var(--blur-control)) saturate(110%);
 }
 :root[data-theme="light"] .pf-menu {
-  backdrop-filter: blur(var(--blur-float)) saturate(120%);
-  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(120%);
+  backdrop-filter: blur(var(--blur-float)) saturate(115%);
+  -webkit-backdrop-filter: blur(var(--blur-float)) saturate(115%);
 }
 :root[data-theme="light"] .pf-menu::after {
   mix-blend-mode: soft-light;
@@ -798,7 +790,7 @@ aside.pf-sheet {
       rgba(255, 255, 255, 0.5),
       rgba(255, 255, 255, 0.14) 40%,
       rgba(255, 255, 255, 0) 62%,
-      rgba(25, 28, 38, 0.06)
+      rgba(8, 40, 45, 0.06)
     );
 }
 :root[data-theme="light"] .pf-chart-glow-hot {
@@ -814,24 +806,25 @@ aside.pf-sheet {
 
 /* ---------------------------------------------------------------------------
    Low-fx (Settings → Appearance → "Reduce glass effects", or &fx=low in dev):
-   the content tiers fall back to a solid look — zero blur, light model only —
-   and the moving/filtered garnishes switch off. Chrome keeps its blur (the old
-   four-surface budget).
+   the content tiers fall back to a solid look — zero blur, flat trench — and
+   the moving/filtered garnishes switch off. Chrome keeps its (now thin) blur.
 
-   Cards matter most here and this is why the hatch exists: .pf-card is now
-   frosted, and a Players wall or an Analytics page puts DOZENS of blurred
-   surfaces on screen at once. Every backdrop-filter is a separate backdrop
-   rasterization; a weak GPU falls off a cliff. Stripping card blur is the
-   single biggest win in this block — never let it rot.
+   Cards matter most here and this is why the hatch exists: a Players wall or
+   an Analytics page puts DOZENS of blurred surfaces on screen at once. Every
+   backdrop-filter is a separate backdrop rasterization; a weak GPU falls off
+   a cliff. Stripping card blur is the single biggest win in this block —
+   never let it rot.
 --------------------------------------------------------------------------- */
 :root[data-fx="low"] .pf-signal {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  background: linear-gradient(
-    var(--light-angle),
-    color-mix(in oklab, var(--panel) 100%, white 2.5%),
-    var(--panel) 50%
-  );
+  background:
+    radial-gradient(
+      130% 90% at 78% 0%,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 55%
+    ),
+    linear-gradient(165deg, var(--panel), var(--bg-base));
 }
 :root[data-fx="low"] .pf-card {
   backdrop-filter: none;

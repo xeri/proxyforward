@@ -124,8 +124,6 @@
   /* Trench-glass fill ladder. Panels are trench water at ~60% so the abyss
      and its plankton read through; inputs invert the old white-film idea —
      they are wells of deeper water, darker than the panel they sit in. */
-  --glass: rgba(4, 22, 29, 0.72);
-  --glass-card: rgba(6, 34, 43, 0.55);
   --input-bg: rgba(2, 9, 15, 0.55);
   --input-bg-hover: rgba(2, 9, 15, 0.72);
   --btn-bg: rgba(189, 251, 230, 0.07);
@@ -159,7 +157,6 @@
   /* Water-light layers: the faint foam sheen chrome carries, and the caustic
      shimmer that drifts through the bloom frame while someone is there. */
   --arc: rgba(189, 251, 230, 0.05);
-  --streak: rgba(189, 251, 230, 0.06);
   --caustic: rgba(47, 255, 192, 0.05);
 
   /* Atmosphere: contrast hue + app-state tint (see @property blocks above). */
@@ -176,22 +173,14 @@
   --edge-hi: rgba(140, 220, 208, 0.34);
   --edge-mid: rgba(18, 68, 80, 0.9);
   --edge-lo: rgba(13, 43, 51, 0.8);
-  --edge-crisp: rgba(189, 251, 230, 0.5); /* foam catch on the brightest edges */
   --bevel-top: rgba(189, 251, 230, 0.09);
   --bevel-bot: rgba(2, 9, 15, 0.55);
   --sheen: rgba(189, 251, 230, 0.05);
   --glare: rgba(189, 251, 230, 0.07);
-  --glass-tint: color-mix(in oklab, var(--panel) 78%, transparent);
   --shadow-key: 0 1px 2px rgba(2, 9, 15, 0.6);
   --shadow-ambient: 0 18px 44px -14px rgba(2, 9, 15, 0.85);
   --shadow-ambient-card: 0 10px 28px -12px rgba(2, 9, 15, 0.7);
   --shadow-contact: 0 0 0 1px rgba(2, 9, 15, 0.45);
-
-  /* Shared grain. --noise is full-strength (layers set their own opacity);
-     --noise-glass has its alpha baked in (feFuncA slope) so it can ride as a
-     plain background layer inside glass fills. */
-  --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
-  --noise-glass: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.015'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 
   /* Radii. Two families:
 
@@ -387,8 +376,6 @@
   --conn: #a86a00;
   --rtt: #8a4bd0;
 
-  --glass: rgba(244, 251, 248, 0.7);
-  --glass-card: rgba(244, 251, 248, 0.55);
   --input-bg: rgba(255, 255, 255, 0.6);
   --input-bg-hover: rgba(255, 255, 255, 0.8);
   --btn-bg: rgba(8, 38, 43, 0.06);
@@ -402,7 +389,6 @@
   /* Shallow water catches white light: the caustic shimmer runs hot and
      white here, the way sun ripples the floor of a pool. */
   --arc: rgba(255, 255, 255, 0.5);
-  --streak: rgba(255, 255, 255, 0.35);
   --caustic: rgba(255, 255, 255, 0.22);
   --contrast-glow: #00c896;
   --ambient: rgba(168, 106, 0, 0);
@@ -414,7 +400,6 @@
   --edge-hi: rgba(255, 255, 255, 0.95);
   --edge-mid: rgba(147, 191, 185, 0.85);
   --edge-lo: rgba(8, 40, 45, 0.14);
-  --edge-crisp: rgba(255, 255, 255, 1);
   --bevel-top: rgba(255, 255, 255, 0.9);
   --bevel-bot: rgba(24, 84, 92, 0.2);
   --sheen: rgba(255, 255, 255, 0.55);
@@ -423,7 +408,6 @@
   --shadow-ambient: 0 16px 40px -16px rgba(8, 40, 45, 0.24);
   --shadow-ambient-card: 0 8px 24px -12px rgba(8, 40, 45, 0.24);
   --shadow-contact: 0 0 0 1px rgba(8, 40, 45, 0.1);
-  --noise-glass: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.03'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 :root[data-theme="light"][data-ambient="warn"] { --ambient: rgba(168, 106, 0, 0.24); }
