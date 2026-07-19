@@ -1,10 +1,12 @@
 /* ---------------------------------------------------------------------------
-   Design tokens. Dark is the default set; [data-theme="light"] swaps surfaces;
+   Design tokens — Abyssal Bloom. Deep-sea bioluminescence: the page is the
+   abyss, panels are trench water, and color is a life-signal. Dark is the
+   default set; [data-theme="light"] surfaces to the sunlit shallows;
    [data-role] swaps the accent ramp so the whole app re-tints per mode:
 
-     gateway  → violet  (the public beacon)
-     agent    → cyan    (the machine room)
-     unset    → violet  (wizard / not yet configured)
+     gateway  → current blue  (the open water players arrive through)
+     agent    → jade          (the living organism beside the server)
+     unset    → current blue  (wizard / not yet configured)
 
    Accent is signal, not branding (see frontend/DESIGN.md): active nav,
    primary buttons, live status, and each screen's identity surface consume
@@ -18,31 +20,31 @@
 @property --accent {
   syntax: "<color>";
   inherits: true;
-  initial-value: #8b5cf6;
+  initial-value: #1c8bff;
 }
 @property --accent-2 {
   syntax: "<color>";
   inherits: true;
-  initial-value: #a78bfa;
+  initial-value: #6ab4ff;
 }
 @property --mode-glow {
   syntax: "<color>";
   inherits: true;
-  initial-value: #8b5cf6;
+  initial-value: #1c8bff;
 }
 @property --mode-glow-2 {
   syntax: "<color>";
   inherits: true;
-  initial-value: #4f46e5;
+  initial-value: #1552d0;
 }
 /* Second atmosphere hue: each role's backdrop carries a counterweight color
-   (violet gateway gets cyan-blue, cyan agent gets violet) so the background
-   reads as atmosphere, not a single-color wash. Registered so it cross-fades
-   with the rest of the ramp on role swaps. */
+   (the gateway's current-blue water gets a jade bloom, the agent's jade gets
+   the blue current) so the background reads as a water column, not a
+   single-color wash. Registered so it cross-fades on role swaps. */
 @property --contrast-glow {
   syntax: "<color>";
   inherits: true;
-  initial-value: #0891b2;
+  initial-value: #2fffc0;
 }
 /* App-state ambient tint (the fifth backdrop blob). Alpha is baked into the
    value so the ok state is invisible and a warn/bad fade-in interpolates
@@ -50,7 +52,7 @@
 @property --ambient {
   syntax: "<color>";
   inherits: true;
-  initial-value: rgba(251, 191, 36, 0);
+  initial-value: rgba(255, 196, 107, 0);
 }
 
 /* The switch's travel is REGISTERED so it resolves to px in getComputedStyle —
@@ -70,118 +72,120 @@
 :root {
   color-scheme: dark;
 
-  /* Surface ladder, deepest → most raised. */
-  --bg-base: #07090e;
-  --bg: #0b0d13;
-  --bg-2: #07090e; /* legacy alias */
-  --panel: #10131b;
-  --panel-2: #161a24;
-  --panel-3: #1c2130;
+  /* Surface ladder, deepest → most raised: abyss floor, then trench water.
+     The named stops of the sheet: abyss #02090f, trench #06222b, ridge
+     #124450, silt #3e6a74, foam #bdfbe6. */
+  --bg-base: #02090f;
+  --bg: #04141c;
+  --bg-2: #02090f; /* legacy alias */
+  --panel: #06222b;
+  --panel-2: #0a2f3b;
+  --panel-3: #0e3c4a;
 
-  --border: #1f2534;
-  --border-strong: #313a52;
-  --hairline: rgba(255, 255, 255, 0.06);
+  --border: #124450;
+  --border-strong: #1d5a6b;
+  --hairline: rgba(189, 251, 230, 0.07);
 
-  --text: #edeff7;
-  --text-2: #9aa3ba;
-  --text-3: #7e88a5;
+  --text: #bdfbe6;
+  --text-2: #7fb3ac;
+  --text-3: #3e6a74;
 
-  /* Accent ramp (violet by default; role selectors below re-map it). */
-  --accent: #8b5cf6;
-  --accent-2: #a78bfa;
-  --accent-hover: #9d73f8;
-  --accent-contrast: #ffffff;
-  --mode-glow: #8b5cf6;
-  --mode-glow-2: #4f46e5;
+  /* Accent ramp (current blue by default; role selectors below re-map it).
+     Both role hues are bright over the abyss, so filled controls take dark
+     abyss text, not white. */
+  --accent: #1c8bff;
+  --accent-2: #6ab4ff;
+  --accent-hover: #46a1ff;
+  --accent-contrast: #02090f;
+  --mode-glow: #1c8bff;
+  --mode-glow-2: #1552d0;
 
   /* Role swatches — fixed per-role hues for surfaces that must show a role
      that is NOT the active one (wizard role cards, identity strip, emblems).
      The active role's ramp still comes from var(--accent). */
-  --role-agent: #22d3ee;
-  --role-gateway: #8b5cf6;
+  --role-agent: #2fffc0;
+  --role-gateway: #1c8bff;
 
-  /* Semantic status. Color is reserved for these + chart series. */
-  --good: #34d399;
-  --warn: #fbbf24;
-  --bad: #f87171;
+  /* Semantic status. Color is reserved for these + chart series.
+     Jade is the life-signal; coral is distress, never decoration. */
+  --good: #2fffc0;
+  --warn: #ffc46b;
+  --bad: #ff5d73;
 
-  /* Chart series — CVD-validated (deutan/protan-safe). Do not rename. */
-  --dl: #ec4899;
-  --ul: #3b82f6;
-  --conn: #d7a13b;
-  --rtt: #2dd4bf;
+  /* Chart series — jade carries the primary flow (download, server→player),
+     the current carries the return leg. CVD-checked: the four separate on
+     lightness as well as hue (jade ≫ violet > blue ≫ amber in luminance
+     ordering stays distinct under deutan/protan simulation). Do not rename. */
+  --dl: #2fffc0;
+  --ul: #1c8bff;
+  --conn: #ffc46b;
+  --rtt: #c98bff;
 
-  /* Glass fill ladder: every layer gets its own translucency so depth reads
-     through opacity, not shadows — background 0, chrome ~0.52, cards ~0.45,
-     inputs/buttons are thin white films over whatever glass they sit on. */
-  --glass: rgba(13, 16, 24, 0.52);
-  --glass-card: rgba(16, 19, 27, 0.38);
-  --input-bg: rgba(255, 255, 255, 0.05);
-  --input-bg-hover: rgba(255, 255, 255, 0.08);
-  --btn-bg: rgba(255, 255, 255, 0.08);
-  --btn-bg-hover: rgba(255, 255, 255, 0.13);
-  /* Primary buttons are accent glass, not solid accent — translucent enough
-     for the backdrop to frost through, opaque enough for --accent-contrast. */
-  --btn-accent-fill: color-mix(in srgb, var(--accent) 80%, transparent);
-  --btn-accent-fill-hover: color-mix(in srgb, var(--accent-hover) 88%, transparent);
-  --sep: rgba(255, 255, 255, 0.08);
-  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.55);
-  --shadow-pop: 0 24px 64px -16px rgba(0, 0, 0, 0.65);
+  /* Trench-glass fill ladder. Panels are trench water at ~60% so the abyss
+     and its plankton read through; inputs invert the old white-film idea —
+     they are wells of deeper water, darker than the panel they sit in. */
+  --glass: rgba(4, 22, 29, 0.72);
+  --glass-card: rgba(6, 34, 43, 0.55);
+  --input-bg: rgba(2, 9, 15, 0.55);
+  --input-bg-hover: rgba(2, 9, 15, 0.72);
+  --btn-bg: rgba(189, 251, 230, 0.07);
+  --btn-bg-hover: rgba(189, 251, 230, 0.12);
+  /* Primary buttons are the lit lure: near-solid accent so the dark abyss
+     text always clears contrast, with the glow living in box-shadow. */
+  --btn-accent-fill: color-mix(in srgb, var(--accent) 88%, transparent);
+  --btn-accent-fill-hover: color-mix(in srgb, var(--accent-hover) 96%, transparent);
+  --sep: rgba(189, 251, 230, 0.1);
+  --shadow-soft: 0 1px 2px rgba(2, 9, 15, 0.5), 0 10px 28px -12px rgba(2, 9, 15, 0.8);
+  --shadow-pop: 0 30px 80px -16px rgba(2, 9, 15, 0.9);
 
-  /* Tier-2 "quiet panel": frosted glass. Transmission is deliberately low —
-     the fill carries most of the surface and the heavy blur (--blur-frost)
-     only diffuses what passes behind, so body text stays crisp and the panel
-     still recedes. Signal Glass is the thin, clear, reactive material; this is
-     the frost that refracts and stays put. Its edge is the rim ring
-     (glass.css .pf-card::before), so there is no border token. */
-  --card-2-bg: color-mix(in srgb, var(--panel) 72%, transparent);
-  --shadow-card-2: 0 1px 2px rgba(0, 0, 0, 0.25), 0 6px 20px -12px rgba(0, 0, 0, 0.4);
+  /* Tier-2 "quiet card": trench water at 60% — the sheet's resting panel.
+     Its edge is the rim ring (glass.css .pf-card::before), so there is no
+     border token. */
+  --card-2-bg: rgba(6, 34, 43, 0.6);
+  --shadow-card-2: 0 1px 2px rgba(2, 9, 15, 0.35), 0 8px 24px -14px rgba(2, 9, 15, 0.6);
 
-  /* Blur ladder: physical hierarchy through backdrop depth. Controls are the
-     thinnest film; Signal Glass is thin and clear (it transmits — you are
-     meant to see the network living behind it); quiet cards are FROSTED, so
-     they blur hardest of the content tiers and let the least through; chrome
-     is heavier still and floats are the thickest. */
-  --blur-control: 10px;
-  --blur-card: 20px;  /* Signal Glass — thin and transmissive */
-  --blur-frost: 30px; /* .pf-card — heavy frost, low transmission */
-  --blur-chrome: 36px;
-  --blur-island: 40px;
-  --blur-float: 48px;
-  --blur-pop: 56px;
+  /* Blur ladder. Water, not milled glass: panels blur just enough that the
+     plankton and glow fields smear behind them like light through water
+     (4–5px), chrome a touch heavier, floats heavier still. Radii kept small
+     on purpose — dozens of cheap blurs beat a handful of expensive ones. */
+  --blur-control: 4px;
+  --blur-card: 5px;  /* bloom frame — the clearest live surface */
+  --blur-frost: 4px; /* .pf-card — quiet trench panel */
+  --blur-chrome: 8px;
+  --blur-island: 8px;
+  --blur-float: 10px;
+  --blur-pop: 12px;
 
-  /* Aero layers: the signature curved-acrylic highlight arc over each card's
-     upper third, the 120° directional reflection streak, and the near-
-     subliminal drifting caustic bands. */
-  --arc: rgba(255, 255, 255, 0.05);
-  --streak: rgba(255, 255, 255, 0.07);
-  --caustic: rgba(255, 255, 255, 0.02);
+  /* Water-light layers: the faint foam sheen chrome carries, and the caustic
+     shimmer that drifts through the bloom frame while someone is there. */
+  --arc: rgba(189, 251, 230, 0.05);
+  --streak: rgba(189, 251, 230, 0.06);
+  --caustic: rgba(47, 255, 192, 0.05);
 
   /* Atmosphere: contrast hue + app-state tint (see @property blocks above). */
-  --contrast-glow: #0891b2;
-  --ambient: rgba(251, 191, 36, 0);
+  --contrast-glow: #2fffc0;
+  --ambient: rgba(255, 196, 107, 0);
 
-  /* Light model. One source, top-left along --light-angle: rims brighten
-     facing it, bevels pair a catch-light with a seat, shadows stack
-     contact + key + ambient. Consumed by glass.css; chart tokens above are
-     untouched. */
+  /* Light model. One source, high above the water along --light-angle: rims
+     catch a foam highlight facing it and sink to ridge/hairline away from it;
+     shadows are depth, not smoke. Consumed by glass.css. */
   --titlebar-h: 44px;
   --titlebar-inset: 10px; /* gutter around the floating titlebar island */
   --chrome-top: calc(var(--titlebar-h) + var(--titlebar-inset) * 2);
   --light-angle: 135deg;
-  --edge-hi: rgba(255, 255, 255, 0.45);
-  --edge-mid: rgba(255, 255, 255, 0.11);
-  --edge-lo: rgba(255, 255, 255, 0.02);
-  --edge-crisp: rgba(255, 255, 255, 0.55); /* hairline top-catch on milled edges */
-  --bevel-top: rgba(255, 255, 255, 0.15);
-  --bevel-bot: rgba(0, 0, 0, 0.4);
-  --sheen: rgba(255, 255, 255, 0.06);
-  --glare: rgba(255, 255, 255, 0.09);
-  --glass-tint: color-mix(in oklab, var(--panel) 62%, transparent);
-  --shadow-key: 0 1px 2px rgba(0, 0, 0, 0.45);
-  --shadow-ambient: 0 16px 40px -16px rgba(0, 0, 0, 0.55);
-  --shadow-ambient-card: 0 8px 24px -12px rgba(0, 0, 0, 0.55);
-  --shadow-contact: 0 0 0 1px rgba(0, 0, 0, 0.28);
+  --edge-hi: rgba(140, 220, 208, 0.34);
+  --edge-mid: rgba(18, 68, 80, 0.9);
+  --edge-lo: rgba(13, 43, 51, 0.8);
+  --edge-crisp: rgba(189, 251, 230, 0.5); /* foam catch on the brightest edges */
+  --bevel-top: rgba(189, 251, 230, 0.09);
+  --bevel-bot: rgba(2, 9, 15, 0.55);
+  --sheen: rgba(189, 251, 230, 0.05);
+  --glare: rgba(189, 251, 230, 0.07);
+  --glass-tint: color-mix(in oklab, var(--panel) 78%, transparent);
+  --shadow-key: 0 1px 2px rgba(2, 9, 15, 0.6);
+  --shadow-ambient: 0 18px 44px -14px rgba(2, 9, 15, 0.85);
+  --shadow-ambient-card: 0 10px 28px -12px rgba(2, 9, 15, 0.7);
+  --shadow-contact: 0 0 0 1px rgba(2, 9, 15, 0.45);
 
   /* Shared grain. --noise is full-strength (layers set their own opacity);
      --noise-glass has its alpha baked in (feFuncA slope) so it can ride as a
@@ -189,14 +193,26 @@
   --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
   --noise-glass: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.015'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 
-  /* Precision-milled glass: tightly constrained corners — just enough round
-     to kill the jaggies, never bubble-soft. rounded-full still survives only
-     on status dots; even the toggle knob is milled (--switch-knob-r below). */
+  /* Radii. Two families:
+
+     The --r-* ladder stays SINGLE-VALUED — these tokens feed calc() (the
+     switch knob) and gradient stop positions (the bevel fade in glass.css),
+     where a two-value radius would invalidate the whole declaration.
+
+     The organic pairs are the sheet's asymmetry-is-importance system: two
+     values means top-left+bottom-right swell / top-right+bottom-left tuck.
+     Nothing important is symmetric; quiet resting surfaces stay --r-lg. */
   --r-xs: 4px;
   --r-sm: 6px;
-  --r-md: 10px; /* inputs, buttons, nav items */
-  --r-lg: 14px; /* cards, the titlebar island */
-  --r-xl: 18px; /* modals, command palette */
+  --r-md: 10px; /* single-value consumers: switch geometry, focus ring */
+  --r-lg: 14px; /* quiet cards, the titlebar island — symmetric resting depth */
+  --r-xl: 18px;
+  --r-bloom: 28px 10px; /* the bloom frame, modals, the command palette */
+  --r-btn: 14px 6px;    /* buttons, nav items, menus, toolbars */
+  --r-input: 10px 4px;  /* inputs, selects, wells, toasts */
+  --r-chip: 8px 3px;    /* mono chips, kbd pebbles, tags */
+  --r-seg: 12px 5px;    /* segmented track */
+  --r-seg-item: 9px 3px;
 
   /* Resolution scale. One knob: the root em is calc(13.5px * --ui-scale)
      (base.css), and every type/rhythm token below multiplies by the same
@@ -209,20 +225,21 @@
 
   /* Type scale. Values are the 13.5px-root design sizes; --ui-scale carries
      them across resolutions. These are the only sizes new UI should use.
-     Contrast BETWEEN levels is the point — metrics dominate, labels recede.
-     The label recipe: --fs-caption + uppercase + --tracking-label +
-     weight 600 + --text-3. */
-  --fs-hero: calc(26px * var(--ui-scale));        /* page titles */
-  --fs-title: calc(18px * var(--ui-scale));       /* section titles, card headlines that ARE sections */
-  --fs-metric-hero: calc(36px * var(--ui-scale)); /* the one hero figure per page */
+     Display sizes (hero/title/metrics) are set in Cormorant Unicase via
+     font-display; everything else is the mono working voice, a step smaller
+     than the old sans because mono is wider per glyph. The label recipe:
+     --fs-caption + uppercase + --tracking-label + weight 600 + --text-3. */
+  --fs-hero: calc(30px * var(--ui-scale));        /* page titles (unicase) */
+  --fs-title: calc(19px * var(--ui-scale));       /* section titles (unicase) */
+  --fs-metric-hero: calc(34px * var(--ui-scale)); /* the one hero figure per page */
   --fs-metric: calc(26px * var(--ui-scale));      /* standard headline metrics */
-  --fs-body: calc(13.5px * var(--ui-scale));      /* default */
-  --fs-sub: calc(12.5px * var(--ui-scale));       /* secondary rows, hints */
-  --fs-caption: calc(11px * var(--ui-scale));     /* labels, metadata, table headers */
+  --fs-body: calc(12.5px * var(--ui-scale));      /* default (mono) */
+  --fs-sub: calc(11.5px * var(--ui-scale));       /* secondary rows, hints */
+  --fs-caption: calc(10.5px * var(--ui-scale));   /* labels, metadata, table headers */
   --fs-micro: calc(10px * var(--ui-scale));       /* kbd chips, overlines */
-  --tracking-label: 0.08em;
-  --lh-tight: 1.15;
-  --lh-body: 1.45;
+  --tracking-label: 0.16em;
+  --lh-tight: 1.1;
+  --lh-body: 1.5;
 
   /* 4px spatial rhythm + shared layout geometry, on the same --ui-scale so
      whitespace keeps its proportion to type. Page rhythm: --sp-12 between
@@ -259,7 +276,8 @@
      The rim ring is 1px of the track's own edge (glass.css .pf-control), so the
      knob's offset from the outer edge is rim + seat, and the same gap has to
      come off the knob's height twice. Knob radius stays concentric with the
-     track: 10px − 1px rim − 2px seat = 7px. Travel then falls out as w − h. */
+     track: 10px − 1px rim − 2px seat = 7px. Travel then falls out as w − h.
+     --switch-r stays a single value — the knob radius is a calc() off it. */
   --switch-w: calc(40px * var(--ui-scale));
   --switch-h: calc(22px * var(--ui-scale));
   --switch-pad: calc(2px * var(--ui-scale));               /* seat gap inside the rim */
@@ -269,9 +287,9 @@
   --switch-knob-r: calc(var(--switch-r) - var(--switch-seat));
   --switch-travel: calc(var(--switch-w) - var(--switch-h)); /* seat to seat */
 
-  /* Halo clearance: .pf-halo breathes a 5px box-shadow ring out of a status
-     dot, so a label sitting a hair closer than that wears the ring. Every
-     haloed dot keeps this much air between itself and its text. */
+  /* Halo clearance: .pf-halo breathes a 5px ring out of a status dot, so a
+     label sitting a hair closer than that wears the ring. Every haloed dot
+     keeps this much air between itself and its text. */
   --halo-gap: var(--sp-3);
 
   /* The Overview pipeline is the app's one deliberate grid break (DESIGN.md
@@ -286,16 +304,18 @@
      viewport — the sidebar's width is already accounted for. */
   --hero-bleed: clamp(0px, (100cqw - 640px) * 0.0455, var(--page-pad) - 8px);
 
-  /* Motion. Fast/base stay tight — press and hover feedback must feel
-     immediate; the slow tier is where the luxurious glide lives. */
-  --dur-fast: 120ms;
-  --dur: 200ms;
-  --dur-slow: 420ms;
+  /* Motion — water physics. The current ease carries arrivals, hovers, and
+     glow; propulsion carries presses and toggles (a push through water, small
+     overshoot). Nothing moves linearly, ever. Fast stays tight so presses
+     feel immediate; the base tier is the deliberate 0.4s water lag. */
+  --dur-fast: 150ms;
+  --dur: 400ms;
+  --dur-slow: 700ms;     /* births bloom at 0.7s */
   --dur-page-out: 280ms; /* nav VT outgoing pane */
   --dur-page-in: 500ms;  /* nav VT incoming pane — VTs block input, cap ~0.5s */
-  --dur-theme: 1050ms;   /* relight sweep/glare/reglaze — THEME_SWEEP_MS (theme.ts) */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --dur-theme: 1050ms;   /* relight sweep — THEME_SWEEP_MS (theme.ts) */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);      /* the current */
+  --ease-spring: cubic-bezier(0.3, 1.7, 0.4, 1);   /* propulsion */
 }
 
 /* --ui-scale steps. Roots land on clean sizes: 12.5 / 13.5 / 15 / 16.5 / 18px.
@@ -306,116 +326,115 @@
 @media (min-width: 2300px) { :root { --ui-scale: 1.2222; } }
 @media (min-width: 3200px) { :root { --ui-scale: 1.3333; } }
 
-/* Agent mode: cyan ramp. Cyan is bright — primary buttons flip to dark text.
-   The atmosphere counterweight flips warm (violet) against the cyan wash. */
+/* Agent mode: jade ramp — the life-signal. Jade is the brightest thing in
+   the app, so filled controls keep dark abyss text. The atmosphere
+   counterweight flips to the blue current against the jade wash. */
 :root[data-role="agent"] {
-  --accent: #22d3ee;
-  --accent-2: #67e8f9;
-  --accent-hover: #52dcf3;
-  --accent-contrast: #04222b;
-  --mode-glow: #06b6d4;
-  --mode-glow-2: #0ea5e9;
-  --contrast-glow: #8b5cf6;
+  --accent: #2fffc0;
+  --accent-2: #a4ffdd;
+  --accent-hover: #5fffcf;
+  --accent-contrast: #02090f;
+  --mode-glow: #2fffc0;
+  --mode-glow-2: #0fd39a;
+  --contrast-glow: #1c8bff;
 }
 
 /* App-state ambient tint: App.tsx stamps data-ambient from the live status
    (debounced). The registered --ambient cross-fades the backdrop's status
-   blob — amber for degraded, red for down. */
-:root[data-ambient="warn"] { --ambient: rgba(251, 191, 36, 0.5); }
-:root[data-ambient="bad"] { --ambient: rgba(248, 113, 113, 0.55); }
+   blob — lure amber for degraded, coral for down. */
+:root[data-ambient="warn"] { --ambient: rgba(255, 196, 107, 0.45); }
+:root[data-ambient="bad"] { --ambient: rgba(255, 93, 115, 0.5); }
 
 /* ---------------------------------------------------------------------------
-   Light theme — frosted ice, not blinding white. Tinted shadows, layered
-   grey-blue depths, crisp near-black type.
+   Light theme — the shallows. The same ocean at midday: sea-glass surfaces,
+   white caustic light, deep-water ink for type. Signal hues sink a few
+   fathoms darker so they hold contrast on foam-pale panels.
 --------------------------------------------------------------------------- */
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --bg-base: #d8dde9;
-  --bg: #eceef6;
-  --bg-2: #e3e6f1;
-  --panel: #f7f8fc;
-  --panel-2: #eef0f8;
+  --bg-base: #cde6e2;
+  --bg: #e6f4f0;
+  --bg-2: #d9ede9;
+  --panel: #f4fbf8;
+  --panel-2: #e9f5f1;
   --panel-3: #ffffff;
 
-  --border: #dde1ec;
-  --border-strong: #c3cadd;
-  --hairline: rgba(255, 255, 255, 0.7);
+  --border: #bcd9d4;
+  --border-strong: #93bfb9;
+  --hairline: rgba(8, 40, 45, 0.08);
 
-  --text: #191c26;
-  --text-2: #4b5266;
-  --text-3: #5f6880;
+  --text: #08262b;
+  --text-2: #3c5e60;
+  --text-3: #587f7f;
 
-  --accent: #7048e8;
-  --accent-2: #9775fa;
-  --accent-hover: #5f3dc4;
+  --accent: #0a66d6;
+  --accent-2: #3f8ce8;
+  --accent-hover: #0857b8;
   --accent-contrast: #ffffff;
-  --mode-glow: #7048e8;
-  --mode-glow-2: #4f46e5;
+  --mode-glow: #2f8ded;
+  --mode-glow-2: #1552d0;
 
-  --role-agent: #0e7490;
-  --role-gateway: #7048e8;
+  --role-agent: #068f66;
+  --role-gateway: #0a66d6;
 
-  --good: #0c9f6e;
-  --warn: #b47607;
-  --bad: #dc4d4d;
+  --good: #068f66;
+  --warn: #a86a00;
+  --bad: #d13a55;
 
-  --dl: #db2777;
-  --ul: #2563eb;
-  --conn: #b45309;
-  --rtt: #0d9488;
+  --dl: #068f66;
+  --ul: #1467d2;
+  --conn: #a86a00;
+  --rtt: #8a4bd0;
 
-  --glass: rgba(247, 248, 252, 0.6);
-  --glass-card: rgba(247, 248, 252, 0.48);
-  --input-bg: rgba(255, 255, 255, 0.5);
-  --input-bg-hover: rgba(255, 255, 255, 0.7);
-  --btn-bg: rgba(25, 28, 38, 0.06);
-  --btn-bg-hover: rgba(25, 28, 38, 0.1);
+  --glass: rgba(244, 251, 248, 0.7);
+  --glass-card: rgba(244, 251, 248, 0.55);
+  --input-bg: rgba(255, 255, 255, 0.6);
+  --input-bg-hover: rgba(255, 255, 255, 0.8);
+  --btn-bg: rgba(8, 38, 43, 0.06);
+  --btn-bg-hover: rgba(8, 38, 43, 0.1);
   /* Bright backdrops wash translucent accent out fast — run nearly opaque. */
   --btn-accent-fill: color-mix(in srgb, var(--accent) 92%, transparent);
   --btn-accent-fill-hover: color-mix(in srgb, var(--accent-hover) 96%, transparent);
-  --sep: rgba(25, 28, 38, 0.12);
-  /* Tier-2 frosted panel, ice edition. Ice needs a touch more fill than the
-     dark theme: a bright backdrop reads straight through a thin white frost. */
-  --card-2-bg: rgba(247, 248, 252, 0.76);
-  --shadow-card-2: 0 1px 2px rgba(30, 34, 58, 0.05), 0 6px 20px -12px rgba(30, 34, 58, 0.12);
-  /* Ice catches hotter whites: the arc/streak/caustics need far more strength
-     to read over a bright backdrop. */
+  --sep: rgba(8, 38, 43, 0.12);
+  --card-2-bg: rgba(244, 251, 248, 0.72);
+  --shadow-card-2: 0 1px 2px rgba(8, 40, 45, 0.05), 0 6px 20px -12px rgba(8, 40, 45, 0.12);
+  /* Shallow water catches white light: the caustic shimmer runs hot and
+     white here, the way sun ripples the floor of a pool. */
   --arc: rgba(255, 255, 255, 0.5);
   --streak: rgba(255, 255, 255, 0.35);
-  --caustic: rgba(255, 255, 255, 0.18);
-  --contrast-glow: #0284c7;
-  --ambient: rgba(180, 118, 7, 0);
-  --shadow-soft: 0 1px 2px rgba(30, 34, 58, 0.06), 0 8px 24px -12px rgba(30, 34, 58, 0.14);
-  --shadow-pop: 0 24px 64px -16px rgba(30, 34, 58, 0.28);
+  --caustic: rgba(255, 255, 255, 0.22);
+  --contrast-glow: #00c896;
+  --ambient: rgba(168, 106, 0, 0);
+  --shadow-soft: 0 1px 2px rgba(8, 40, 45, 0.06), 0 8px 24px -12px rgba(8, 40, 45, 0.14);
+  --shadow-pop: 0 24px 64px -16px rgba(8, 40, 45, 0.26);
 
-  /* Light model, inverted: frosted ice is lit from within, so the rim facing
-     the light stays white-hot but the shadow side goes DARKER than the fill.
-     Shadows are tinted navy (never gray) at roughly half the dark alphas. */
+  /* Light model, surfaced: rims stay white-hot facing the sun and exit
+     through a teal seat. Shadows are tinted deep-water teal, never gray. */
   --edge-hi: rgba(255, 255, 255, 0.95);
-  --edge-mid: rgba(255, 255, 255, 0.35);
-  --edge-lo: rgba(25, 28, 38, 0.14);
+  --edge-mid: rgba(147, 191, 185, 0.85);
+  --edge-lo: rgba(8, 40, 45, 0.14);
   --edge-crisp: rgba(255, 255, 255, 1);
   --bevel-top: rgba(255, 255, 255, 0.9);
-  --bevel-bot: rgba(60, 70, 110, 0.22);
+  --bevel-bot: rgba(24, 84, 92, 0.2);
   --sheen: rgba(255, 255, 255, 0.55);
-  --glare: rgba(255, 255, 255, 0.05);
-  --shadow-key: 0 1px 2px rgba(30, 34, 58, 0.2);
-  --shadow-ambient: 0 16px 40px -16px rgba(30, 34, 58, 0.26);
-  --shadow-ambient-card: 0 8px 24px -12px rgba(30, 34, 58, 0.26);
-  --shadow-contact: 0 0 0 1px rgba(30, 34, 58, 0.12);
+  --glare: rgba(255, 255, 255, 0.06);
+  --shadow-key: 0 1px 2px rgba(8, 40, 45, 0.18);
+  --shadow-ambient: 0 16px 40px -16px rgba(8, 40, 45, 0.24);
+  --shadow-ambient-card: 0 8px 24px -12px rgba(8, 40, 45, 0.24);
+  --shadow-contact: 0 0 0 1px rgba(8, 40, 45, 0.1);
   --noise-glass: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.03'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-:root[data-theme="light"][data-ambient="warn"] { --ambient: rgba(180, 118, 7, 0.26); }
-:root[data-theme="light"][data-ambient="bad"] { --ambient: rgba(220, 77, 77, 0.28); }
+:root[data-theme="light"][data-ambient="warn"] { --ambient: rgba(168, 106, 0, 0.24); }
+:root[data-theme="light"][data-ambient="bad"] { --ambient: rgba(209, 58, 85, 0.26); }
 
 :root[data-theme="light"][data-role="agent"] {
-  --accent: #0e7490;
-  --accent-2: #06b6d4;
-  --accent-hover: #0c647c;
+  --accent: #068f66;
+  --accent-2: #00b583;
+  --accent-hover: #05795a;
   --accent-contrast: #ffffff;
-  --mode-glow: #0891b2;
-  --mode-glow-2: #0284c7;
-  --contrast-glow: #7048e8;
+  --mode-glow: #00c896;
+  --mode-glow-2: #068f66;
+  --contrast-glow: #0a66d6;
 }
