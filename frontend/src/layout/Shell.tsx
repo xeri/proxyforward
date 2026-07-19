@@ -1,4 +1,5 @@
 import {ReactNode, useEffect, useRef} from 'react'
+import {Plankton} from '../components/Plankton'
 import {useMotion} from '../motion'
 import {useRubberBand} from '../rubberband'
 
@@ -101,6 +102,9 @@ export function Shell({sidebar, titlebar, children}: {
         gridTemplateColumns: sidebar ? 'var(--sidebar-w) 1fr' : '1fr',
       }}
     >
+      {/* The swarm layer: fixed and first, so everything else paints over it
+          and the trench glass smears it (base.css atmosphere stack). */}
+      <Plankton />
       {sidebar && (
         <aside className="pf-sheet relative z-10 row-span-2 min-h-0">
           {sidebar}
