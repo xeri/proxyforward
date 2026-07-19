@@ -1,12 +1,17 @@
 /* ---------------------------------------------------------------------------
-   Motion library. Every animation gets a pf- prefix; reduced-motion users get
-   none of it (kill switch at the bottom zeroes all durations) unless the
-   in-app Animations preference overrides the OS signal (data-motion on <html>,
+   Motion library — water physics. Two curves carry everything: the CURRENT
+   (--ease-out) for arrivals, hovers, and glow; PROPULSION (--ease-spring) for
+   presses and toggles — a push through water with a small overshoot. Births
+   bloom, deaths sink, nothing moves linearly, ever.
+
+   Every animation gets a pf- prefix; reduced-motion users get none of it
+   (kill switch at the bottom zeroes all durations) unless the in-app
+   Animations preference overrides the OS signal (data-motion on <html>,
    motion.ts — "on" escapes the kill, "off" forces it regardless of the OS).
 --------------------------------------------------------------------------- */
-/* Blob drift: transform-only (the layer is oversized in base.css). Excursions
-   stay small so the corner blob never leaves the L-sheet and the center blob
-   keeps passing beneath Modal/CommandPalette. */
+/* Glow-field drift: transform-only (the layer is oversized in base.css).
+   Excursions stay small so the corner glow never leaves the sheet and the
+   center glow keeps passing beneath Modal/CommandPalette. */
 @keyframes pf-aurora {
   0% { transform: translate3d(0, 0, 0) scale(1); }
   33% { transform: translate3d(2.5%, -1.5%, 0) scale(1.05); }
@@ -14,18 +19,54 @@
   100% { transform: translate3d(1.5%, -2.5%, 0) scale(1.02); }
 }
 
-/* Caustic drift: the card overlay's bands creep diagonally over ~90s
-   (glass.css .pf-caustic). Transform-only, oversized layer, GPU-composited. */
+/* Caustic drift: the bloom frame's underwater light creeps diagonally over
+   ~90s (glass.css .pf-caustic). Transform-only, oversized layer, GPU-only. */
 @keyframes pf-caustic {
   from { transform: translate3d(-10%, -4%, 0); }
   to { transform: translate3d(8%, 5%, 0); }
+}
+
+/* Organisms: living UI wobbles and drifts — never static circles. Each
+   consumer should vary duration/phase (5–13s) so no two move alike; a dead
+   thing freezes mid-wobble (animation-play-state, or the dormant variant). */
+@keyframes pf-wobble {
+  0%, 100% { border-radius: 60% 40% 55% 45% / 50% 60% 40% 55%; }
+  25% { border-radius: 44% 56% 38% 62% / 62% 40% 60% 38%; }
+  50% { border-radius: 56% 44% 64% 36% / 40% 56% 44% 62%; }
+  75% { border-radius: 38% 62% 46% 54% / 58% 38% 62% 42%; }
+}
+@keyframes pf-drift {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  30% { transform: translate(3px, -5px) rotate(3deg); }
+  60% { transform: translate(-4px, 2px) rotate(-2deg); }
+  80% { transform: translate(2px, 4px) rotate(1deg); }
+}
+
+/* The organism material: a soft-bodied radial in the role hues (consumer may
+   retint via --organism-c/--organism-c2), alive by default. Size and
+   position stay with the consumer. Dormant = the same body gone dark: a
+   dashed silt outline, glow off, wobble frozen. */
+.pf-organism {
+  border-radius: 60% 40% 55% 45% / 50% 60% 40% 55%;
+  background: radial-gradient(
+    circle at 35% 30%,
+    color-mix(in srgb, var(--organism-c, var(--accent)) 92%, white 8%),
+    color-mix(in srgb, var(--organism-c2, var(--contrast-glow)) 75%, transparent) 82%
+  );
+  box-shadow: 0 0 24px color-mix(in srgb, var(--organism-c, var(--accent)) 40%, transparent);
+  animation: pf-wobble 7s ease-in-out infinite, pf-drift 12s ease-in-out infinite;
+}
+.pf-organism-dormant {
+  border-radius: 60% 40% 55% 45% / 50% 60% 40% 55%;
+  background: color-mix(in srgb, var(--text-3) 30%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--text-3) 65%, transparent);
 }
 
 @keyframes pf-fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
-.pf-fade { animation: pf-fade-in 0.2s ease-out both; }
+.pf-fade { animation: pf-fade-in 0.25s var(--ease-out) both; }
 
 /* Page switch fallback (used when View Transitions are unavailable). */
 @keyframes pf-page-in {
@@ -34,13 +75,15 @@
 }
 .pf-page { animation: pf-page-in 0.5s var(--ease-out) both; }
 
-/* Card entrance; .pf-stagger delays each direct child in sequence. */
+/* Card entrance: rises through the water with a small overshoot, the way
+   ds-rise surfaces on the sheet; .pf-stagger delays each direct child. */
 @keyframes pf-rise {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: none; }
+  0% { opacity: 0; transform: translateY(16px); }
+  55% { opacity: 1; transform: translateY(-3px); }
+  100% { opacity: 1; transform: none; }
 }
-.pf-rise { animation: pf-rise 0.58s var(--ease-out) both; }
-.pf-stagger > * { animation: pf-rise 0.58s var(--ease-out) both; }
+.pf-rise { animation: pf-rise 0.6s var(--ease-out) both; }
+.pf-stagger > * { animation: pf-rise 0.6s var(--ease-out) both; }
 .pf-stagger > *:nth-child(1) { animation-delay: 0.02s; }
 .pf-stagger > *:nth-child(2) { animation-delay: 0.07s; }
 .pf-stagger > *:nth-child(3) { animation-delay: 0.12s; }
@@ -53,7 +96,7 @@
 
 /* Grid-aware stagger: children cascade in loose row pairs (mixed spans make
    true rows unknowable statically; pairs read as rows on the dashboard). */
-.pf-stagger-grid > * { animation: pf-rise 0.58s var(--ease-out) both; }
+.pf-stagger-grid > * { animation: pf-rise 0.6s var(--ease-out) both; }
 .pf-stagger-grid > *:nth-child(1) { animation-delay: 0.02s; }
 .pf-stagger-grid > *:nth-child(2) { animation-delay: 0.06s; }
 .pf-stagger-grid > *:nth-child(3) { animation-delay: 0.1s; }
@@ -65,49 +108,57 @@
 .pf-stagger-grid > *:nth-child(9) { animation-delay: 0.22s; }
 .pf-stagger-grid > *:nth-child(n + 10) { animation-delay: 0.26s; }
 
-/* Modal + scrim, with mirrored exits driven by [data-closing]. */
+/* Modal + scrim: births bloom, deaths sink (mirrored exits driven by
+   [data-closing]). The bloom swells past rest and settles — a body arriving
+   from the deep; the sink drops away small and quick. */
 @keyframes pf-pop {
-  from { opacity: 0; transform: translateY(12px) scale(0.965); }
-  to { opacity: 1; transform: none; }
+  0% { opacity: 0; transform: translateY(10px) scale(0.62); }
+  60% { opacity: 1; transform: translateY(-2px) scale(1.04); }
+  100% { opacity: 1; transform: none; }
 }
-.pf-pop { animation: pf-pop 0.34s cubic-bezier(0.16, 1.1, 0.3, 1) both; }
+.pf-pop { animation: pf-pop 0.5s var(--ease-out) both; }
 @keyframes pf-pop-out {
   from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 0; transform: translateY(9px) scale(0.88); }
 }
 @keyframes pf-scrim {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-.pf-scrim { animation: pf-scrim 0.22s ease-out both; }
+.pf-scrim { animation: pf-scrim 0.3s ease-out both; }
 @keyframes pf-scrim-out {
   from { opacity: 1; }
   to { opacity: 0; }
 }
-[data-closing] .pf-pop { animation: pf-pop-out 0.16s ease-in both; }
-[data-closing].pf-scrim, [data-closing] .pf-scrim { animation: pf-scrim-out 0.16s ease-in both; }
+[data-closing] .pf-pop { animation: pf-pop-out 0.22s ease-in both; }
+[data-closing].pf-scrim, [data-closing] .pf-scrim { animation: pf-scrim-out 0.22s ease-in both; }
 
-/* Command palette: drops from above, slightly quicker than a modal. */
+/* Command palette — the lure: hangs down into frame from above and settles
+   with a small overshoot. */
 @keyframes pf-drop {
-  from { opacity: 0; transform: translateY(-10px) scale(0.985); }
-  to { opacity: 1; transform: none; }
+  0% { opacity: 0; transform: translateY(-14px) scale(0.94); }
+  60% { opacity: 1; transform: translateY(2px) scale(1.01); }
+  100% { opacity: 1; transform: none; }
 }
-.pf-drop { animation: pf-drop 0.26s var(--ease-out) both; }
+.pf-drop { animation: pf-drop 0.4s var(--ease-out) both; }
 @keyframes pf-drop-out {
   from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(-8px) scale(0.99); }
+  to { opacity: 0; transform: translateY(-10px) scale(0.96); }
 }
-[data-closing] .pf-drop { animation: pf-drop-out 0.14s ease-in both; }
+[data-closing] .pf-drop { animation: pf-drop-out 0.18s ease-in both; }
 
-/* Floating bar (unsaved changes) slides in from below. The consumer owns
-   horizontal placement (flex centering) — no translate baked in. */
+/* Floating bar (unsaved changes) surfaces like a bubble — a slight sideways
+   sway on the way up. The consumer owns horizontal placement (flex
+   centering) — no persistent translate baked in. */
 @keyframes pf-slide-up {
-  from { opacity: 0; transform: translateY(16px) scale(0.97); }
-  to { opacity: 1; transform: none; }
+  0% { opacity: 0; transform: translate(4px, 18px) scale(0.96); }
+  60% { opacity: 1; transform: translate(-2px, -3px) scale(1.01); }
+  100% { opacity: 1; transform: none; }
 }
-.pf-slide-up { animation: pf-slide-up 0.34s cubic-bezier(0.16, 1.2, 0.3, 1) both; }
+.pf-slide-up { animation: pf-slide-up 0.45s var(--ease-out) both; }
 
-/* Traffic conduit: dashes stream along the pipeline when a hop is live. */
+/* Traffic conduit: dashes swim along the pipeline when a hop is live —
+   8px bodies on a 13px period, trailing a faint glow into the water. */
 .pf-conduit {
   position: relative;
   height: 2px;
@@ -122,23 +173,24 @@
   border-radius: 2px;
   background-image: repeating-linear-gradient(
     90deg,
-    var(--flow-color, var(--accent)) 0 10px,
-    transparent 10px 22px
+    var(--flow-color, var(--accent)) 0 8px,
+    transparent 8px 13px
   );
-  animation: pf-flow 0.9s linear infinite;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--flow-color, var(--accent)) 25%, transparent);
+  animation: pf-flow 0.8s linear infinite;
   opacity: 0.9;
 }
-@keyframes pf-flow { to { background-position: 22px 0; } }
+@keyframes pf-flow { to { background-position: 26px 0; } }
 
 /* Moments — motion is network state (frontend/DESIGN.md). */
 
 /* First-connect ignite: when the link comes up, the pipeline lights left to
    right — each station brightens in turn, overshooting briefly like a lamp
-   striking. Overview stamps .pf-ignite on the Signal Glass hero for ~1.4s;
+   striking. Overview stamps .pf-ignite on the bloom-frame hero for ~1.4s;
    the stations sit at grid children 1 / 3 / 5 (conduits between). */
 @keyframes pf-ignite-node {
   0% { opacity: 0.35; filter: brightness(0.7); }
-  55% { opacity: 1; filter: brightness(1.3); }
+  55% { opacity: 1; filter: brightness(1.35); }
   100% { opacity: 1; filter: brightness(1); }
 }
 .pf-ignite .pf-pipenode { animation: pf-ignite-node 0.8s var(--ease-out) both; }
@@ -158,42 +210,39 @@
   pointer-events: none;
 }
 
-/* Breathing halo for live status dots. */
+/* Breathing halo for live status dots — a pressure ring let go into the
+   water and released again. */
 @keyframes pf-halo {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--halo, var(--good)) 45%, transparent); }
   55% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--halo, var(--good)) 0%, transparent); }
 }
 .pf-halo { animation: pf-halo 2.2s ease-out infinite; }
 
-/* Gentle float for empty-state icons. */
+/* Gentle float for empty-state icons: a dormant body rocking in the swell. */
 @keyframes pf-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-5px); }
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-5px) rotate(1.5deg); }
 }
 .pf-float { animation: pf-float 3.4s ease-in-out infinite; }
 
-/* Brand glyph glow breathing (wizard hero). */
+/* Brand glyph glow breathing (wizard hero): idle is never still — a living
+   surface brightens and dims on a slow cycle. */
 @keyframes pf-breathe {
   0%, 100% { box-shadow: 0 8px 32px -6px color-mix(in srgb, var(--accent) 55%, transparent); }
   50% { box-shadow: 0 8px 44px -2px color-mix(in srgb, var(--accent-2) 60%, transparent); }
 }
 .pf-breathe { animation: pf-breathe 3.6s ease-in-out infinite; }
 
-/* Skeleton shimmer: masks latency without shifting geometry. */
-@keyframes pf-shimmer {
-  from { background-position: -200% 0; }
-  to { background-position: 200% 0; }
+/* Skeletons breathe — they never slide. An opacity pulse on a flat trench
+   fill masks latency without shifting geometry or sweeping light. */
+@keyframes pf-skeleton-breathe {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 }
 .pf-skeleton {
   border-radius: var(--r-sm);
-  background: linear-gradient(
-    90deg,
-    var(--panel-2) 25%,
-    color-mix(in srgb, var(--panel-2) 60%, var(--panel-3)) 50%,
-    var(--panel-2) 75%
-  );
-  background-size: 200% 100%;
-  animation: pf-shimmer 1.6s ease-in-out infinite;
+  background: color-mix(in srgb, var(--panel-2) 75%, var(--panel-3));
+  animation: pf-skeleton-breathe 1.6s ease-in-out infinite;
 }
 
 /* -----------------------------------------------------------------------
@@ -205,13 +254,13 @@
   to { background-position: 50% 50%; }
 }
 
-/* A glass surface catches the light once as it pops in. */
+/* A glass surface catches the light once as it surfaces. */
 .pf-pop.pf-glass::after,
 .pf-drop.pf-glass::after {
   animation: pf-glare-sweep 0.6s var(--ease-out) both;
 }
 
-/* Menu glass arrivals: the save bar sliding up and a Select list unfolding
+/* Menu glass arrivals: the save bar surfacing and a Select list unfolding
    catch the same one-time glare as any other float. */
 .pf-slide-up.pf-menu::after {
   animation: pf-glare-sweep 0.7s var(--ease-out) both;
@@ -259,25 +308,25 @@ main {
     color 0.6s ease, fill 0.6s ease, stroke 0.6s ease, box-shadow 0.6s ease !important;
 }
 
-/* Interactive lift: cards / tiles that respond to hover. */
+/* Interactive lift: cards / tiles that respond to hover — buoyancy, on the
+   current ease. */
 .pf-lift {
-  transition: transform 0.25s var(--ease-out), box-shadow 0.25s ease, border-color 0.25s ease;
+  transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) ease, border-color var(--dur) ease;
 }
 .pf-lift:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-soft);
 }
 
-/* Tactile press: buttons compress under the pointer AND depress into the
-   material — the bevel pair inverts for the press (instant swap, no shadow
-   animation; only the transform eases). Both halves carry blur: a crisp
-   `inset 0 -1px 0` would round the corners as a crescent that ends dead at the
-   tangent points and specks there (glass.css, the rim primitive). */
+/* Tactile press: propulsion. The body squishes under the pointer (wider than
+   tall, like a bell contracting) and springs back through the overshoot
+   curve on release. Press-down is immediate; only the release swims. */
 .pf-press {
-  transition: transform var(--dur-fast) var(--ease-out);
+  transition: transform var(--dur) var(--ease-spring);
 }
 .pf-press:active:not(:disabled) {
-  transform: scale(0.97);
+  transition-duration: var(--dur-fast);
+  transform: scale(0.95, 0.91);
   box-shadow: inset 0 1px 2px var(--bevel-bot), inset 0 -1px 1px var(--bevel-top);
 }
 
@@ -362,8 +411,8 @@ html.pf-vt-nav::view-transition-new(root) { animation: none; }
 /* Theme relight (theme.ts pulses pf-relight + pf-theme-snap): the swap is
    captured as two static panes, the old holding beneath while the new theme
    sweeps in from the light corner along --light-angle — a soft diagonal
-   front, over-lit at first and settling, as if the glass were re-lit from
-   the other side. Cached snapshots + mask/filter only: compositor work, no
+   front, over-lit at first and settling, as if the water were re-lit from
+   the surface. Cached snapshots + mask/filter only: compositor work, no
    per-frame restyle or re-blur. */
 html.pf-relight::view-transition-old(root) { animation: none; }
 html.pf-relight::view-transition-new(root) {
