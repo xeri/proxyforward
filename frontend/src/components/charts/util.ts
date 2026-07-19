@@ -6,7 +6,7 @@ import {useEffect, useRef, useState} from 'react'
 import {prefersReduced} from '../../motion'
 
 /** The engineering data face: every chart numeral is mono + tabular. */
-export const MONO = "ui-monospace, 'Cascadia Mono', Consolas, monospace"
+export const MONO = "'Spline Sans Mono Variable', ui-monospace, 'Cascadia Mono', Consolas, monospace"
 
 /** niceScale rounds the axis max up to 4 divisions of a clean binary step, so
  * labels land on values like 64 KiB/s · 128 KiB/s · 192 KiB/s · 256 KiB/s. */

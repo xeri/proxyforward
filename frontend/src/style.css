@@ -5,6 +5,7 @@
 @import "./styles/motion.css";
 
 @theme {
-  --font-sans: "Inter Variable", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "Cascadia Mono", ui-monospace, Consolas, monospace;
+  --font-sans: "Spline Sans Mono Variable", "Cascadia Mono", ui-monospace, Consolas, monospace;
+  --font-mono: "Spline Sans Mono Variable", "Cascadia Mono", ui-monospace, Consolas, monospace;
+  --font-display: "Cormorant Unicase", "Georgia", serif;
 }

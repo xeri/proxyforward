@@ -7,7 +7,7 @@ html, body, #root {
   margin: 0;
   background: transparent;
   color: var(--text);
-  font-family: "Inter Variable", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-family: "Spline Sans Mono Variable", "Cascadia Mono", ui-monospace, Consolas, monospace;
   /* The root em is the app's one scale knob: --ui-scale (tokens.css) steps it
      by viewport width, so every rem utility and every --fs-* token resize in
      lockstep across resolutions. 13.5px is the design-width base. */
