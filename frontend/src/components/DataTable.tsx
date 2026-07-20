@@ -42,11 +42,11 @@ export function DataTable<T>({columns, rows, rowKey, empty, dense = false, stick
     <div className={`overflow-x-auto ${className}`}>
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-y border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-3)]">
+          <tr className="border-y border-[var(--border)] text-left text-caption lowercase tracking-[var(--tracking-label)] text-[var(--text-3)]">
             {columns.map(c => (
               <th
                 key={c.key}
-                className={`${stickyHeader ? 'sticky top-0 z-10 bg-[var(--panel)]' : ''} px-4 py-2 font-medium ${c.align === 'right' ? 'text-right' : ''}`}
+                className={`${stickyHeader ? 'sticky top-0 z-10 bg-[var(--panel)]' : ''} px-4 py-2 font-semibold ${c.align === 'right' ? 'text-right' : ''}`}
                 style={c.width ? {width: c.width} : undefined}
               >{c.header}</th>
             ))}

@@ -21,30 +21,47 @@ export function PageHeader({title, subtitle, action}: {
   )
 }
 
-/** Overline: the shared label recipe — 11px uppercase, tracked, muted.
- * Labels recede; values dominate. */
-export function Overline({children, className = ''}: {children: ReactNode; className?: string}) {
+/** Overline: the shared label recipe — caption-size, lowercase, tracked,
+ * muted. Labels recede; values dominate. Lowercase is the app's register:
+ * the instrument murmurs its labels, it does not bark them.
+ * `variant="eyebrow"` is the louder cousin: wider-tracked and accent-inked,
+ * reserved for mastheads and act numbers — never row labels. */
+export function Overline({children, variant = 'label', className = ''}: {
+  children: ReactNode; variant?: 'label' | 'eyebrow'; className?: string
+}) {
+  const cls = variant === 'eyebrow'
+    ? 'text-caption font-medium lowercase tracking-[var(--tracking-eyebrow)] text-[var(--accent)]'
+    : 'text-caption font-semibold lowercase tracking-[var(--tracking-label)] text-[var(--text-3)]'
+  return <div className={`${cls} ${className}`}>{children}</div>
+}
+
+/** PanelTitle: the one panel-heading recipe (Cormorant, --fs-title). Loud
+ * (700, full ink) when the panel is the page's subject; quiet
+ * (--w-display-quiet, receded ink) when it serves. Hierarchy comes from the
+ * casting, never from inventing a new size. */
+export function PanelTitle({children, loud = false, className = ''}: {
+  children: ReactNode; loud?: boolean; className?: string
+}) {
   return (
-    <div className={`text-caption font-semibold uppercase tracking-[var(--tracking-label)] text-[var(--text-3)] ${className}`}>
-      {children}
-    </div>
+    <h2 className={`font-display text-title ${
+      loud ? 'font-bold text-[var(--text)]' : '[font-weight:var(--w-display-quiet)] text-[var(--text-2)]'
+    } ${className}`}>{children}</h2>
   )
 }
 
-/** Card: the quiet tier-2 panel (glass.css .pf-card). It recedes. `title` is
- * a real 18px section heading — most quiet cards should carry `label`
- * instead, an uppercase overline that lets the content dominate. */
-export function Card({title, label, subtitle, action, children, className = '', pad = true}: {
-  title?: ReactNode; label?: ReactNode; subtitle?: string; action?: ReactNode; children: ReactNode; className?: string; pad?: boolean
+/** Card: the quiet tier-2 panel (glass.css .pf-card). It recedes — so its
+ * `title` is the quiet casting by default; pass `loud` only when the panel is
+ * the page's subject. Most quiet cards should carry `label` instead, a
+ * lowercase overline that lets the content dominate. */
+export function Card({title, loud, label, subtitle, action, children, className = '', pad = true}: {
+  title?: ReactNode; loud?: boolean; label?: ReactNode; subtitle?: string; action?: ReactNode; children: ReactNode; className?: string; pad?: boolean
 }) {
   return (
     <div className={`pf-card ${className}`}>
       {(title || label || action) && (
         <div className={`relative flex items-center justify-between gap-3 ${pad ? 'px-5 pt-4' : 'p-5 pb-4'}`}>
           <div className="min-w-0">
-            {title && (
-              <h2 className="font-display text-title font-bold text-[var(--text)]">{title}</h2>
-            )}
+            {title && <PanelTitle loud={loud}>{title}</PanelTitle>}
             {!title && label && <Overline>{label}</Overline>}
             {subtitle && <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitle}</p>}
           </div>
@@ -68,7 +85,7 @@ export function SignalCard({title, subtitle, action, children, className = '', p
       {(title || action) && (
         <div className={`relative flex items-center justify-between gap-3 ${pad ? 'px-5 pt-4' : 'p-5 pb-4'}`}>
           <div className="min-w-0">
-            {title && <h2 className="font-display text-title font-bold text-[var(--text)]">{title}</h2>}
+            {title && <PanelTitle loud>{title}</PanelTitle>}
             {subtitle && <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitle}</p>}
           </div>
           {action}
@@ -83,21 +100,23 @@ export function SignalCard({title, subtitle, action, children, className = '', p
  * The hairline left rule gives metric groups a rhythm without boxes.
  * `value` takes a ReactNode so callers pass a NumberTicker when the numeral
  * should glide. `tone` tints the numeral with a status color; `accent` with
- * the mode accent. `hero` is the one 36px figure a page may carry. */
+ * the mode accent. `hero` is the one --fs-metric-hero figure a page may
+ * carry; `sm` is for dense 3-up-and-tighter grids that would clip 26px. */
 export function StatTile({label, value, sub, accent, tone, size = 'md'}: {
   label: string
   value: ReactNode
   sub?: string
   accent?: boolean
   tone?: 'good' | 'warn' | 'bad'
-  size?: 'md' | 'hero'
+  size?: 'sm' | 'md' | 'hero'
 }) {
   const color = tone ? `var(--${tone})` : accent ? 'var(--accent)' : undefined
+  const fs = size === 'hero' ? 'text-metric-hero' : size === 'sm' ? 'text-metric-sm' : 'text-metric'
   return (
     <div className="border-l border-[var(--hairline)] py-0.5 pl-4">
       <Overline>{label}</Overline>
       <div
-        className={`font-display mt-1 font-bold leading-[var(--lh-tight)] tabular-nums ${size === 'hero' ? 'text-metric-hero' : 'text-metric'}`}
+        className={`font-display mt-1 font-bold leading-[var(--lh-tight)] tabular-nums ${fs}`}
         style={color ? {color} : undefined}
       >{value}</div>
       {sub && <div className="mt-1 truncate text-caption tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
@@ -199,19 +218,21 @@ export function LiveDot() {
   )
 }
 
-/** SectionHeader: in-card section titling — one treatment for grouped rows
- * and tables everywhere. `count` renders quietly beside the title. */
+/** SectionHeader: the mono emphasis tier (13/600) for in-card row groups —
+ * the working voice raised, not the display voice borrowed. Use it where a
+ * Cormorant title would be ceremony a list doesn't deserve. `count` renders
+ * quietly beside the title; hints take the annotation italic. */
 export function SectionHeader({title, hint, count, action}: {
   title: string; hint?: string; count?: ReactNode; action?: ReactNode
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="min-w-0">
-        <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-[var(--text)]">
+        <div className="flex items-center gap-2 text-emphasis font-semibold text-[var(--text)]">
           {title}
           {count !== undefined && <span className="font-normal tabular-nums text-[var(--text-3)]">{count}</span>}
         </div>
-        {hint && <div className="mt-0.5 text-xs text-[var(--text-3)]">{hint}</div>}
+        {hint && <div className="mt-0.5 text-xs italic text-[var(--text-3)]">{hint}</div>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>
@@ -267,7 +288,7 @@ export function Field({label, hint, children}: {label: string; hint?: ReactNode;
     <label className="block">
       <div className="mb-1.5 text-sm font-medium text-[var(--text)]">{label}</div>
       {children}
-      {hint && <div className="mt-1.5 text-xs leading-relaxed text-[var(--text-3)]">{hint}</div>}
+      {hint && <div className="mt-1.5 text-xs italic leading-relaxed text-[var(--text-3)]">{hint}</div>}
     </label>
   )
 }
@@ -301,7 +322,7 @@ export function TextInput({value, onChange, placeholder, type = 'text', mono, on
         type={effectiveType} value={value} placeholder={placeholder} autoFocus={autoFocus} aria-label={ariaLabel}
         onChange={e => onChange(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && onEnter) onEnter() }}
-        className={`h-full w-full min-w-0 rounded-[inherit] bg-transparent text-[var(--text)] outline-none placeholder:text-[var(--text-3)] ${
+        className={`h-full w-full min-w-0 rounded-[inherit] bg-transparent text-[var(--text)] outline-none placeholder:italic placeholder:text-[var(--text-3)] ${
           icon ? 'pl-8' : sm ? 'pl-2.5' : 'pl-3'
         } ${isPassword ? 'pr-10' : sm ? 'pr-2.5' : 'pr-3'} ${sm ? 'text-xs' : 'text-sm'} ${mono ? 'font-mono text-body' : ''}`}
       />
@@ -710,7 +731,7 @@ export function FormRow({label, hint, children}: {label: string; hint?: ReactNod
     <div className="flex items-center justify-between gap-4 py-2">
       <div className="min-w-0">
         <div className="text-sm font-medium text-[var(--text)]">{label}</div>
-        {hint && <div className="mt-0.5 text-xs text-[var(--text-3)]">{hint}</div>}
+        {hint && <div className="mt-0.5 text-xs italic text-[var(--text-3)]">{hint}</div>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -994,18 +1015,24 @@ export function Spinner({size = 16}: {size?: number}) {
   )
 }
 
-export function EmptyState({icon, title, hint, action}: {
-  icon?: ReactNode; title: string; hint?: ReactNode; action?: ReactNode
+/** EmptyState: an empty screen is an invitation, so it speaks in the quiet
+ * display voice with an annotation-italic hint. `size="lg"` is the full-page
+ * centerpiece for a screen with nothing else to show. */
+export function EmptyState({icon, title, hint, action, size = 'md'}: {
+  icon?: ReactNode; title: string; hint?: ReactNode; action?: ReactNode; size?: 'md' | 'lg'
 }) {
+  const lg = size === 'lg'
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+    <div className={`flex flex-col items-center justify-center gap-2 text-center ${lg ? 'py-16' : 'py-10'}`}>
       {icon && (
         <div className="pf-control pf-float relative grid h-12 w-12 place-items-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-3)]">
           {icon}
         </div>
       )}
-      <div className="mt-1 text-sm font-medium text-[var(--text-2)]">{title}</div>
-      {hint && <div className="max-w-sm text-xs leading-relaxed text-[var(--text-3)]">{hint}</div>}
+      <div className={`mt-1 font-display leading-[var(--lh-tight)] [font-weight:var(--w-display-quiet)] text-[var(--text-2)] ${lg ? 'text-hero' : 'text-title'}`}>
+        {title}
+      </div>
+      {hint && <div className={`italic leading-relaxed text-[var(--text-3)] ${lg ? 'max-w-md text-body' : 'max-w-sm text-xs'}`}>{hint}</div>}
       {action && <div className="mt-2">{action}</div>}
     </div>
   )
@@ -1046,7 +1073,7 @@ export function Modal({title, onClose, children, footer, wide}: {
         className={`pf-pop pf-glass relative w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-[85vh] overflow-hidden rounded-[var(--r-bloom)]`}
       >
         <div className="flex items-center justify-between px-5 py-3.5">
-          <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+          <h2 className="font-display text-title font-bold text-[var(--text)]">{title}</h2>
           <IconButton title="Close" onClick={begin}><IconClose size={16} /></IconButton>
         </div>
         <div className="pf-sep" aria-hidden />
@@ -1067,16 +1094,24 @@ export function Modal({title, onClose, children, footer, wide}: {
 
 /** Codebox: a selectable, monospaced value with a copy affordance.
  *
+ * `size="lg"` is the ceremonial artifact — the pairing code or address you
+ * hand to another human renders as a plaque: larger mono, letterspaced,
+ * generous padding. Never case-transformed at any size: codes are
+ * credentials.
+ *
  * `selectable={false}` for a MASKED value: the mask is real text, so a
  * select-all drag off a masked pairing code hands out a string of bullets that
  * looks like it came from the app. Copy still works — callers copy the real
  * string, not what is on screen. */
-export function Codebox({text, action, selectable = true}: {
-  text: string; action?: ReactNode; selectable?: boolean
+export function Codebox({text, action, selectable = true, size = 'md'}: {
+  text: string; action?: ReactNode; selectable?: boolean; size?: 'md' | 'lg'
 }) {
+  const fs = size === 'lg'
+    ? 'text-code font-medium tracking-[var(--tracking-code)] px-4 py-3.5'
+    : 'text-emphasis px-3 py-2.5'
   return (
     <div className="flex items-stretch gap-2">
-      <code className={`pf-well min-w-0 flex-1 break-all px-3 py-2.5 font-mono text-emphasis leading-relaxed text-[var(--text)] ${
+      <code className={`pf-well min-w-0 flex-1 break-all font-mono leading-relaxed text-[var(--text)] ${fs} ${
         selectable ? 'select-text' : 'select-none'
       }`}>
         {text}

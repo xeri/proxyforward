@@ -7,7 +7,7 @@ import {
   saveCandlePref, saveRangePref, saveSeriesPref, saveUptimePref,
   useBandwidthHistory,
 } from '../history'
-import {Button, Card, LiveDot, Switch} from './ui'
+import {Button, Card, LiveDot, PanelTitle, Switch} from './ui'
 
 export {LiveDot} // moved to ui.tsx; re-exported for existing importers
 import {IconArrowRight} from './icons'
@@ -182,7 +182,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
         <section>
           <div className="mb-4 flex items-end justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="font-display text-title font-bold text-[var(--text)]">Bandwidth</h2>
+              <PanelTitle loud>Bandwidth</PanelTitle>
               <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitleFor(range, data)}</p>
             </div>
             {liveReadout}

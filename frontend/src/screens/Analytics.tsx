@@ -9,7 +9,7 @@ import {GeoRank} from '../components/GeoRank'
 import {NumberTicker} from '../components/NumberTicker'
 import {IconActivity, IconClock, IconConnections, IconGlobe} from '../components/icons'
 import {
-  Badge, Button, Card, CopyIcon, EmptyState, LiveDot, Modal, PageHeader, Pill, SegmentedControl, Skeleton, StatTile,
+  Badge, Button, Card, CopyIcon, EmptyState, LiveDot, Modal, PageHeader, PanelTitle, Pill, SegmentedControl, Skeleton, StatTile,
 } from '../components/ui'
 import {
   CountryAgg, PEAK_WEEKS, RANGE_MS, Range, SESSIONS_PAGE_SIZE, SessionMeta, SessionsQuery,
@@ -259,7 +259,7 @@ function Geography({rangeMs, selectedCc, onSelectCc}: {
     <section>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="font-display text-title font-bold text-[var(--text)]">Geography</h2>
+          <PanelTitle loud>Geography</PanelTitle>
           <p className="mt-0.5 text-xs text-[var(--text-2)]">
             Where players connect from across the range — click a country to filter the history below
           </p>

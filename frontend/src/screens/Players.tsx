@@ -6,7 +6,7 @@ import {Column, DataTable} from '../components/DataTable'
 import {GeoRank} from '../components/GeoRank'
 import {IconChevronRight, IconClose, IconPlayers, IconSearch} from '../components/icons'
 import {
-  Badge, Button, Card, CopyIcon, EmptyState, LiveDot, MonoChip, Overline, PageHeader, Pill, PillGroup, SegmentedControl, Skeleton, TextInput,
+  Badge, Button, Card, CopyIcon, EmptyState, LiveDot, MonoChip, Overline, PageHeader, PanelTitle, Pill, PillGroup, SegmentedControl, Skeleton, TextInput,
 } from '../components/ui'
 import {useDebounced} from '../hooks'
 import {
@@ -429,7 +429,7 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
 
       {/* history — one range picker drives both charts below */}
       <div className="flex items-center justify-between gap-3 px-1">
-        <h3 className="font-display text-title font-bold text-[var(--text)]">History</h3>
+        <PanelTitle>History</PanelTitle>
         <SegmentedControl<HistRange>
           value={range}
           onChange={setRange}
