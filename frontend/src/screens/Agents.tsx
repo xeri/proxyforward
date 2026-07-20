@@ -459,7 +459,7 @@ function IssuePairingModal({onClose}: {onClose: () => void}) {
           <ErrorBanner message={err} onDismiss={() => setErr('')} />
         ) : code ? (
           <div className="space-y-2">
-            <Codebox text={code} action={<CopyButton text={code} />} />
+            <Codebox size="lg" text={code} action={<CopyButton text={code} />} />
             <div className="flex items-center justify-between gap-3">
               <span className="min-w-0 text-xs text-[var(--text-3)]">
                 {reusable

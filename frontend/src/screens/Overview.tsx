@@ -624,7 +624,7 @@ function PlayerAddressStrip({status, onNavigate}: {status: UIStatus; onNavigate:
         </div>
         <div className="min-w-56 flex-1">
           {addr ? (
-            <div className="pf-fade"><Codebox text={addr} action={<CopyButton text={addr} label="Copy" />} /></div>
+            <div className="pf-fade"><Codebox size="lg" text={addr} action={<CopyButton text={addr} label="Copy" />} /></div>
           ) : (
             <span className="text-sm text-[var(--text-3)]">Not bound yet — the address appears when the gateway opens your port.</span>
           )}
@@ -694,6 +694,7 @@ function PairingCodeRow({label, hint, hintAfter, cta, fetch, reissuable}: {
   const box = code
     ? <div className="pf-fade">
         <Codebox
+          size="lg"
           text={shown ? code : '•'.repeat(28)} selectable={shown}
           action={
             <div className="flex items-center gap-1.5">

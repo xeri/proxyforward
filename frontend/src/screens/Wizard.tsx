@@ -240,7 +240,7 @@ function GatewayLive({status, controlPort, onDone}: {
         Copy this one-time pairing code and paste it into proxyforward on your Minecraft machine:
       </p>
       {code
-        ? <Codebox text={code} action={<CopyButton text={code} />} />
+        ? <Codebox size="lg" text={code} action={<CopyButton text={code} />} />
         : err
           ? <ErrorBanner message={err} onDismiss={() => setErr('')} />
           : reusable
