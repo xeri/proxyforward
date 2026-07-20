@@ -88,7 +88,9 @@
 
   --text: #bdfbe6;
   --text-2: #7fb3ac;
-  --text-3: #3e6a74;
+  /* Silt, surfaced two fathoms: the sheet's #3e6a74 reads 2.8:1 on trench —
+     the label tier is 10.5px text and must clear AA (4.8:1 here). */
+  --text-3: #62939a;
 
   /* Accent ramp (current blue by default; role selectors below re-map it).
      Both role hues are bright over the abyss, so filled controls take dark
@@ -374,7 +376,7 @@
   /* Status hues sink deeper than the chart series: badge text renders at
      11px over its own 14% tint, which needs 4.5:1 (AA small text) — the
      series only need the 3:1 graphics floor, so --conn stays brighter. */
-  --good: #068f66;
+  --good: #056e4f;
   --warn: #8a5600;
   --bad: #b52441;
 
