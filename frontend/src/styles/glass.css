@@ -490,7 +490,7 @@ aside.pf-sheet {
    variant just turns --btn-lip up instead. */
 .pf-btn {
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: var(--tracking-btn);
   font-weight: 700;
   background-image: linear-gradient(
     var(--light-angle),

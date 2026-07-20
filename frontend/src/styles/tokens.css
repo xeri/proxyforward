@@ -215,24 +215,48 @@
   --ui-scale: 1;
 
   /* Type scale. Values are the 13.5px-root design sizes; --ui-scale carries
-     them across resolutions. These are the only sizes new UI should use.
-     Display sizes (hero/title/metrics) are set in Cormorant Unicase via
-     font-display; everything else is the mono working voice, a step smaller
-     than the old sans because mono is wider per glyph. The label recipe:
-     --fs-caption + uppercase + --tracking-label + weight 600 + --text-3. */
-  --fs-hero: calc(30px * var(--ui-scale));        /* page titles (unicase) */
-  --fs-title: calc(19px * var(--ui-scale));       /* section titles (unicase) */
-  --fs-metric-hero: calc(34px * var(--ui-scale)); /* the one hero figure per page */
+     them across resolutions. These are the only sizes new UI should use —
+     they surface as Tailwind utilities (text-hero, text-body, …) via the
+     @theme inline block in style.css.
+
+     The display ladder (Cormorant Unicase, font-display) has three castings:
+     colossal for ceremony (the wizard's first light, the handshake, and
+     nothing routine), hero for the per-screen masthead, and titles that are
+     LOUD (700, --text) when the panel is the page's subject or QUIET
+     (--w-display-quiet, --text-2) when it recedes. The mono working voice is
+     a step smaller than a sans would be because mono is wider per glyph;
+     600 is its emphasis weight, 700 belongs to buttons and node codes only.
+     Italic is the annotation voice: hints, placeholders, provisional and
+     awaiting states — words the instrument murmurs rather than reads out.
+     The label recipe: --fs-caption + lowercase + --tracking-label + weight
+     600 + --text-3. Eyebrows (mastheads, act numbers) ride --tracking-eyebrow
+     in the accent. */
+  --fs-colossal: calc(56px * var(--ui-scale));    /* ceremony only (unicase) */
+  --fs-hero: calc(42px * var(--ui-scale));        /* masthead page titles (unicase) */
+  --fs-metric-hero: calc(38px * var(--ui-scale)); /* the one hero figure per page */
   --fs-metric: calc(26px * var(--ui-scale));      /* standard headline metrics */
+  --fs-metric-sm: calc(21px * var(--ui-scale));   /* metrics in dense 3-up grids */
+  --fs-title: calc(19px * var(--ui-scale));       /* panel titles (unicase, loud or quiet) */
+  --fs-code: calc(16px * var(--ui-scale));        /* the ceremonial artifact (pairing code, address) */
+  --fs-emphasis: calc(13px * var(--ui-scale));    /* mono emphasis rows, identity values */
   --fs-body: calc(12.5px * var(--ui-scale));      /* default (mono) */
   --fs-sub: calc(11.5px * var(--ui-scale));       /* secondary rows, hints */
   --fs-caption: calc(10.5px * var(--ui-scale));   /* labels, metadata, table headers */
-  --fs-micro: calc(10px * var(--ui-scale));       /* kbd chips, overlines */
+  --fs-micro: calc(10px * var(--ui-scale));       /* kbd chips, level chips */
+  --tracking-eyebrow: 0.22em;
   --tracking-label: 0.16em;
+  --tracking-btn: 0.14em;
+  --tracking-code: 0.03em;
+  /* Quiet display weight: Cormorant 500 on dark; light thins it past
+     legibility on --text-2, so light steps up to 600. */
+  --w-display-quiet: 500;
   /* Cormorant Unicase overshoots its em box (~1.17 at display sizes): 1.2
      keeps display type from silently clipping inside any future
      overflow-hidden or fixed-height row. Consumers that truly need tighter
-     leading (leading-none hero digits) opt in knowingly. */
+     leading (leading-none hero digits) opt in knowingly. --lh-display is for
+     free-standing colossal/hero lockups ONLY — never inside overflow-hidden
+     or fixed-height rows. */
+  --lh-display: 1.08;
   --lh-tight: 1.2;
   --lh-body: 1.5;
 
@@ -362,6 +386,9 @@
   --text: #08262b;
   --text-2: #3c5e60;
   --text-3: #476a6a; /* AA: 5.7:1 on --panel, 4.5:1 on bare --bg-base */
+
+  /* Cormorant 500 thins past legibility on sunlit surfaces. */
+  --w-display-quiet: 600;
 
   --accent: #0a66d6;
   --accent-2: #3f8ce8;

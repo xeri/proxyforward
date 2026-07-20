@@ -3,8 +3,10 @@ import {createRoot} from 'react-dom/client'
 // Self-hosted faces (unicode-range subsets; glyphs outside them fall back to
 // the system stacks). No network fetch — the woff2 files ship inside the
 // binary like every other asset. Spline Sans Mono is the working voice of the
-// app; Cormorant Unicase surfaces only for display type (titles, metrics).
+// app (its italic is the annotation voice: hints, placeholders, provisional
+// states); Cormorant Unicase surfaces only for display type (titles, metrics).
 import '@fontsource-variable/spline-sans-mono/index.css'
+import '@fontsource-variable/spline-sans-mono/wght-italic.css'
 import '@fontsource/cormorant-unicase/500.css'
 import '@fontsource/cormorant-unicase/700.css'
 import './style.css'

@@ -9,3 +9,22 @@
   --font-mono: "Spline Sans Mono Variable", "Cascadia Mono", ui-monospace, Consolas, monospace;
   --font-display: "Cormorant Unicase", "Georgia", serif;
 }
+
+/* The type ladder as utilities (text-hero, text-body, …). `inline` keeps the
+   var() reference in the emitted CSS so every size rides --ui-scale. No
+   line-height companions on purpose: these set font-size only, exactly like
+   the arbitrary values they replace — leading stays an explicit choice. */
+@theme inline {
+  --text-colossal: var(--fs-colossal);
+  --text-hero: var(--fs-hero);
+  --text-metric-hero: var(--fs-metric-hero);
+  --text-metric: var(--fs-metric);
+  --text-metric-sm: var(--fs-metric-sm);
+  --text-title: var(--fs-title);
+  --text-code: var(--fs-code);
+  --text-emphasis: var(--fs-emphasis);
+  --text-body: var(--fs-body);
+  --text-sub: var(--fs-sub);
+  --text-caption: var(--fs-caption);
+  --text-micro: var(--fs-micro);
+}
