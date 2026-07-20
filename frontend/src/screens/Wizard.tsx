@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from 'react'
 import {GetConfig, IssuePairingCode, SetupAgent, SetupGateway} from '../../wailsjs/go/app/App'
-import {Button, Codebox, CopyButton, Disclosure, ErrorBanner, Field, Overline, Spinner, TextInput, Toggle} from '../components/ui'
+import {Button, Codebox, CopyButton, Disclosure, ErrorBanner, FatalStatement, Field, Overline, Spinner, TextInput, Toggle} from '../components/ui'
 import {Emblem} from '../components/Emblem'
 import {ImportSetupFlow} from '../components/SetupBackup'
 import {IconCheck, IconGlobe, IconRefresh, IconServer, IconShield, IconSpark} from '../components/icons'
@@ -317,30 +317,34 @@ function AgentLive({status, onDone, onBack}: {
 
   return (
     <Panel>
-      <div className="flex flex-col items-center py-6 text-center">
-        <div
-          className={`grid h-14 w-14 place-items-center rounded-[var(--r-xl)] border transition-all duration-500 ${up ? 'pf-breathe' : ''}`}
-          style={{
-            color: fatal ? 'var(--bad)' : up ? 'var(--good)' : 'var(--accent)',
-            borderColor: `color-mix(in srgb, ${fatal ? 'var(--bad)' : up ? 'var(--good)' : 'var(--accent)'} 40%, var(--border))`,
-            background: `color-mix(in srgb, ${fatal ? 'var(--bad)' : up ? 'var(--good)' : 'var(--accent)'} 9%, transparent)`,
-          }}
-        >
-          {fatal ? <IconRefresh size={26} /> : up ? <IconSpark size={26} /> : <Spinner size={24} />}
+      {fatal ? (
+        <div className="py-3">
+          <FatalStatement eyebrow="refused" title="The gateway said no" detail={fatal} />
         </div>
-        <div className={`mt-5 text-balance font-display font-bold leading-[var(--lh-display)] ${
-          up ? 'text-colossal' : 'text-metric-hero'}`}>
-          {fatal ? 'The gateway said no' : up ? 'Handshake complete.' : 'Dialing the gateway…'}
-        </div>
-        <div className="mt-2.5 max-w-sm text-sm text-[var(--text-2)]">
-          {fatal
-            ? fatal
-            : up
+      ) : (
+        <div className="flex flex-col items-center py-6 text-center">
+          <div
+            className={`grid h-14 w-14 place-items-center rounded-[var(--r-xl)] border transition-all duration-500 ${up ? 'pf-breathe' : ''}`}
+            style={{
+              color: up ? 'var(--good)' : 'var(--accent)',
+              borderColor: `color-mix(in srgb, ${up ? 'var(--good)' : 'var(--accent)'} 40%, var(--border))`,
+              background: `color-mix(in srgb, ${up ? 'var(--good)' : 'var(--accent)'} 9%, transparent)`,
+            }}
+          >
+            {up ? <IconSpark size={26} /> : <Spinner size={24} />}
+          </div>
+          <div className={`mt-5 text-balance font-display font-bold leading-[var(--lh-display)] ${
+            up ? 'text-colossal' : 'text-metric-hero'}`}>
+            {up ? 'Handshake complete.' : 'Dialing the gateway…'}
+          </div>
+          <div className="mt-2.5 max-w-sm text-sm text-[var(--text-2)]">
+            {up
               ? `Connected to ${status?.peerHostname || 'the gateway'}${status && hasRtt(status.rttMillis) ? ` in ${fmtRtt(status.rttMillis)}` : ''}. Opening your console…`
               : 'Establishing the tunnel link. Reconnects retry automatically with backoff.'}
+          </div>
         </div>
-      </div>
-      <div className="flex justify-between">
+      )}
+      <div className="mt-2 flex justify-between">
         <Button variant="ghost" onClick={onBack}>{fatal ? 'Fix the pairing code' : 'Back'}</Button>
         {!fatal && <Button variant={up ? 'primary' : 'ghost'} onClick={onDone}>Open the console</Button>}
       </div>

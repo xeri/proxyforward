@@ -916,6 +916,25 @@ export function Disclosure({label, hint, children, defaultOpen = false}: {
   )
 }
 
+/** FatalStatement: distress in the display voice — type on whitespace behind a
+ * single coral rule, never a boxed alert (a screen keeps one identity surface;
+ * a fatal must not add a second). The eyebrow murmurs the register, Cormorant
+ * carries the sentence, and the raw engine error sits under it in the working
+ * voice, capped at prose width so a long Go error stays readable. Reserved for
+ * EngineFatal-class states — a warning is still a Banner. */
+export function FatalStatement({eyebrow = 'fatal', title, detail, action}: {
+  eyebrow?: string; title: string; detail?: ReactNode; action?: ReactNode
+}) {
+  return (
+    <div className="pf-fade border-l-2 border-[var(--bad)] py-1 pl-5">
+      <div className="text-caption font-medium lowercase tracking-[var(--tracking-eyebrow)] text-[var(--bad)]">{eyebrow}</div>
+      <h2 className="mt-1.5 font-display text-metric-hero font-bold leading-[var(--lh-display)] text-[var(--text)]">{title}</h2>
+      {detail && <p className="mt-2 max-w-prose text-body text-[var(--text-2)]">{detail}</p>}
+      {action && <div className="mt-3.5">{action}</div>}
+    </div>
+  )
+}
+
 /** Banner: inline callout for alerts and mode ribbons. */
 export function Banner({tone = 'info', children, action, onDismiss}: {
   tone?: 'info' | 'good' | 'warn' | 'bad'

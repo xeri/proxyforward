@@ -12,7 +12,7 @@ import {BandwidthPanel} from '../components/BandwidthChart'
 import {NumberTicker} from '../components/NumberTicker'
 import {
   Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, ErrorBanner,
-  IconButton, Overline, PageHeader, RoleWord, SignalCard, StatTile, StatusDot, TextInput,
+  FatalStatement, IconButton, Overline, PageHeader, RoleWord, SignalCard, StatTile, StatusDot, TextInput,
 } from '../components/ui'
 import {Emblem} from '../components/Emblem'
 import {IconActivity, IconEye, IconEyeOff, IconGlobe, IconLink, IconRefresh, IconServer} from '../components/icons'
@@ -186,15 +186,14 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
         />
 
         {status.engineFatal && (
-          <div className="mb-4">
-            <Banner
-              tone="bad"
+          <div className="mb-6">
+            <FatalStatement
+              title="The engine stopped"
+              detail={status.engineFatal}
               action={status.mode !== 'attached' ? (
                 <Button variant="ghost" size="sm" onClick={() => RestartEngine().catch(() => {})}>Restart</Button>
               ) : undefined}
-            >
-              Engine stopped: {status.engineFatal}
-            </Banner>
+            />
           </div>
         )}
         {isEngineOff(status) && (
