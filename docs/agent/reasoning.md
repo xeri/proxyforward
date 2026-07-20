@@ -111,9 +111,12 @@ Apply in order when polishing a screen; each is a question with a mechanical ans
 2. **Box test**: is metadata sitting in its own card? Convert to type on whitespace —
    `Overline` label + value (`StatTile`/`HealthMetric` pattern). Cards are for
    *groups*, not single facts.
-3. **Label recipe**: every label = `--fs-caption` + uppercase + `--tracking-label` +
-   weight 600 + `--text-3` (`Overline`). Values dominate, labels recede. Type contrast
-   over type size; only tokenized sizes.
+3. **Label recipe**: every label = `--fs-caption` + lowercase + `--tracking-label` +
+   weight 600 + `--text-3` (`Overline`). The accent eyebrow (`Overline`
+   `variant="eyebrow"`, `--tracking-eyebrow`) is for mastheads and the wizard's act
+   numbers — never row labels. Chips/badges may stay uppercase (LAN, log levels);
+   codes are never case-transformed. Values dominate, labels recede. Type contrast
+   over type size; only tokenized sizes (the `text-*` utilities).
 4. **Color audit**: for every non-neutral color ask "what signal is this?" Allowed:
    role accent (identity/nav/primary/live), `--good/--warn/--bad` (state),
    `--dl/--ul/--conn/--rtt` (series). Anything else → neutral.

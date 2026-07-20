@@ -114,6 +114,14 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
     for the live-handshake step, or record it as a reviewed exception in a one-line
     comment (as #7 does for BandwidthChart's pickers).
 
+34. **Chart SVG text is px-locked outside `--ui-scale`** — axis ticks and in-chart
+    annotations set `fontSize` as SVG attributes (`BandwidthChart.tsx`,
+    `charts/LineChart.tsx`), deliberately excluded from the type-token sweep: their
+    sizes are coupled to px tick geometry, and scaling the text alone breaks the
+    layout. At the 1.33× viewport step chart labels sit visibly smaller than the
+    caption tier around them. Fix means scaling the chart's whole coordinate frame
+    (or deriving tick geometry from the resolved font size), not just the text.
+
 ## QUIC transport follow-ons
 
 23. **Gateway per-session QUIC link bytes are unattributed** — the QUIC listener shares

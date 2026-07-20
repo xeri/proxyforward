@@ -24,6 +24,9 @@ Read `frontend/DESIGN.md` (the charter) before any UI work; pull polish work fro
 
 ## CSS
 - Tokens in `tokens.css` are the only sizes/colors/durations new UI may use.
+- Type sizes are the `text-*` token utilities (`--fs-*` via `@theme inline` in
+  `style.css`); a `text-[Npx]` literal is allowed only where geometry is px-locked
+  (chart SVG innards, the `Kbd` chip) and says so in a comment.
 - `pf-*` recipes in `glass.css` / `motion.css` own *material and motion only* —
   positioning stays with the consumer. They beat Tailwind utilities at equal
   specificity.
