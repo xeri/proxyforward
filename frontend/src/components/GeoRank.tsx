@@ -29,7 +29,7 @@ export function GeoRank({rows, metric, hoverCc, onHover, onSelect, selectedCc, c
   return (
     <div className="min-w-0" onMouseLeave={() => onHover?.(null)}>
       {!compact && (
-        <div className="mb-1.5 flex items-center justify-between px-0.5 text-[11px] uppercase tracking-wide text-[var(--text-3)]">
+        <div className="mb-1.5 flex items-center justify-between px-0.5 text-sub uppercase tracking-wide text-[var(--text-3)]">
           <span>Country</span>
           <span>{metric === 'latency' ? 'Avg ping' : 'Sessions'}</span>
         </div>
@@ -60,8 +60,8 @@ export function GeoRank({rows, metric, hoverCc, onHover, onSelect, selectedCc, c
               <span className="w-5 shrink-0 text-center text-sm leading-none">{flagEmoji(r.cc) ?? '🌐'}</span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline justify-between gap-2">
-                  <span className="truncate text-[13px] text-[var(--text)]">{r.country || r.cc}</span>
-                  <span className="shrink-0 tabular-nums text-[13px] text-[var(--text-2)]">
+                  <span className="truncate text-emphasis text-[var(--text)]">{r.country || r.cc}</span>
+                  <span className="shrink-0 tabular-nums text-emphasis text-[var(--text-2)]">
                     {metric === 'latency'
                       ? (hasRtt(r.rttAvg) ? <span style={{color: `var(--${rttTone(r.rttAvg)})`}}>{fmtRtt(r.rttAvg)}</span> : '—')
                       : r.sessions}
@@ -71,7 +71,7 @@ export function GeoRank({rows, metric, hoverCc, onHover, onSelect, selectedCc, c
                   <span className="relative h-1 flex-1 overflow-hidden rounded-full bg-[var(--panel-2)]">
                     <span className="absolute inset-y-0 left-0 rounded-full" style={{width: `${Math.max(3, frac * 100)}%`, background: barColor}} />
                   </span>
-                  <span className="shrink-0 text-[10.5px] tabular-nums text-[var(--text-3)]">{r.players}p</span>
+                  <span className="shrink-0 text-caption tabular-nums text-[var(--text-3)]">{r.players}p</span>
                 </span>
               </span>
             </button>

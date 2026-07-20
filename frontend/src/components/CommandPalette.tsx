@@ -118,14 +118,14 @@ export function CommandPalette({ctx, onClose}: {ctx: CommandCtx; onClose: () => 
             {grouped
               ? grouped.map(([section, cmds]) => (
                   <div key={section}>
-                    <div className="px-2.5 pb-1 pt-2.5 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--text-3)]">{section}</div>
+                    <div className="px-2.5 pb-1 pt-2.5 text-caption font-semibold uppercase tracking-wider text-[var(--text-3)]">{section}</div>
                     {cmds.map(renderItem)}
                   </div>
                 ))
               : results.map(renderItem)}
           </div>
         </div>
-        <div className="flex items-center gap-3 border-t border-[var(--border)] px-4 py-2 text-[11px] text-[var(--text-3)]">
+        <div className="flex items-center gap-3 border-t border-[var(--border)] px-4 py-2 text-sub text-[var(--text-3)]">
           <span className="flex items-center gap-1"><Kbd>↑ ↓</Kbd> navigate</span>
           <span className="flex items-center gap-1"><Kbd>Enter</Kbd> run</span>
         </div>

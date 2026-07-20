@@ -35,7 +35,7 @@ export function Sidebar({status, nav, onNav, onPair}: {
         <div className="grid h-6 w-6 shrink-0 place-items-center rounded-[var(--r-sm)] bg-[var(--accent)] text-[var(--accent-contrast)] shadow-[0_2px_10px_-2px_color-mix(in_srgb,var(--accent)_55%,transparent)]">
           <IconServer size={14} />
         </div>
-        <span className="text-[13px] font-semibold tracking-tight">proxyforward</span>
+        <span className="text-emphasis font-semibold tracking-tight">proxyforward</span>
       </div>
 
       {/* Mode identity anchor: the role's emblem, riding the live accent so a
@@ -67,7 +67,7 @@ export function Sidebar({status, nav, onNav, onPair}: {
       </div>
 
       <div className="pf-sep mx-2" aria-hidden />
-      <div className="space-y-2 px-3 py-3 text-[11px] text-[var(--text-3)]">
+      <div className="space-y-2 px-3 py-3 text-sub text-[var(--text-3)]">
         {status.hostname && (
           <HostPair isAgent={isAgent} self={status.hostname} peer={status.peerHostname || ''} />
         )}
@@ -105,7 +105,7 @@ function HostRow({role, name, sub, dim}: {role: 'agent' | 'gateway'; name: strin
       <span className={`min-w-0 truncate font-medium text-[var(--text-2)] ${dim ? 'italic' : ''}`} title={name}>
         {name}
       </span>
-      {sub && <span className="ml-auto shrink-0 text-[9.5px] uppercase tracking-wide text-[var(--text-3)]">{sub}</span>}
+      {sub && <span className="ml-auto shrink-0 text-micro uppercase tracking-wide text-[var(--text-3)]">{sub}</span>}
     </div>
   )
 }

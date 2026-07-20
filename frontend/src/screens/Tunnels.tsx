@@ -130,7 +130,7 @@ export function Tunnels({status}: {status: UIStatus}) {
           <div className="space-y-2">
             <div>
               <div className="font-medium">Waiting for the gateway to approve your change</div>
-              <div className="text-[12px] text-[var(--text-3)]">
+              <div className="text-body text-[var(--text-3)]">
                 Sent {proposalAge(consent.view.outgoing.atMs)}. Your tunnels keep running as they are until it is accepted.
                 {status.peerHeadless && ' The gateway runs headless — nobody may be watching for this until someone opens its app.'}
               </div>
@@ -147,7 +147,7 @@ export function Tunnels({status}: {status: UIStatus}) {
       {consent.view?.lastDecline && !consent.view.outgoing && (
         <Banner tone="warn">
           <div className="font-medium">The gateway declined your last change</div>
-          <div className="text-[12px] text-[var(--text-3)]">{consent.view.lastDecline}</div>
+          <div className="text-body text-[var(--text-3)]">{consent.view.lastDecline}</div>
         </Banner>
       )}
 
@@ -205,7 +205,7 @@ export function Tunnels({status}: {status: UIStatus}) {
 
               {advanced.length > 0 && (
                 <div className="mt-3">
-                  <Disclosure label={<span className="text-[13px]">Advanced</span>} hint={`${advanced.length} option${advanced.length === 1 ? '' : 's'} set`}>
+                  <Disclosure label={<span className="text-emphasis">Advanced</span>} hint={`${advanced.length} option${advanced.length === 1 ? '' : 's'} set`}>
                     <dl className="space-y-1.5">
                       {advanced.map(([k, v]) => (
                         <div key={k} className="flex items-baseline justify-between gap-3 text-xs">
@@ -269,7 +269,7 @@ function TestPath({tunnelID, bound, port}: {tunnelID: string; bound: boolean; po
       </Button>
       {msg && (
         <span
-          className={`pf-fade max-w-64 truncate text-right text-[11px] ${state === 'ok' ? 'text-[var(--good)]' : 'text-[var(--bad)]'}`}
+          className={`pf-fade max-w-64 truncate text-right text-sub ${state === 'ok' ? 'text-[var(--good)]' : 'text-[var(--bad)]'}`}
           title={msg}
         >{msg}</span>
       )}

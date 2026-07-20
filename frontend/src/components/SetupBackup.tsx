@@ -106,7 +106,7 @@ export function ImportSetupFlow({disabled, isWizard, onDone}: {
               exported {new Date(info.exportedAtMs).toLocaleString()} · v{info.appVersion}
             </span>
           </div>
-          <div className="mt-1.5 truncate font-mono text-[11px] text-[var(--text-3)]">{info.path}</div>
+          <div className="mt-1.5 truncate font-mono text-sub text-[var(--text-3)]">{info.path}</div>
           {info.encrypted && (
             <div className="mt-3">
               <Field label="Passphrase">

@@ -261,10 +261,10 @@ function PlayerTile({p, live, showData, onClick}: {p: PlayerCard; live: boolean;
         )}
       </span>
       <span className="w-full">
-        <span className="block truncate font-mono text-[13px] font-semibold text-[var(--text)]" title={p.name}>
+        <span className="block truncate font-mono text-emphasis font-semibold text-[var(--text)]" title={p.name}>
           {p.name}
         </span>
-        <span className="mt-0.5 flex items-center justify-center gap-1.5 text-[10.5px] text-[var(--text-3)]">
+        <span className="mt-0.5 flex items-center justify-center gap-1.5 text-caption text-[var(--text-3)]">
           {p.offline && <Badge tone="warn">cracked</Badge>}
           {hasRtt(p.rttMs) && <PingBadge ms={p.rttMs} />}
           {showData
@@ -397,7 +397,7 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
           />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-mono text-[length:var(--fs-metric)] font-bold leading-tight tracking-tight text-[var(--text)]">
+              <h2 className="font-mono text-metric font-bold leading-tight tracking-tight text-[var(--text)]">
                 {card ? card.name : <Skeleton className="h-7 w-44 rounded" />}
               </h2>
               {live && <Badge tone="good">online</Badge>}
@@ -429,7 +429,7 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
 
       {/* history — one range picker drives both charts below */}
       <div className="flex items-center justify-between gap-3 px-1">
-        <h3 className="font-display text-[length:var(--fs-title)] font-bold text-[var(--text)]">History</h3>
+        <h3 className="font-display text-title font-bold text-[var(--text)]">History</h3>
         <SegmentedControl<HistRange>
           value={range}
           onChange={setRange}
@@ -483,8 +483,8 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
               <ul className="divide-y divide-[var(--border)]">
                 {det.names.map(n => (
                   <li key={n.name} className="flex items-baseline justify-between px-4 py-2">
-                    <span className="font-mono text-[13px] font-medium text-[var(--text)]">{n.name}</span>
-                    <span className="text-[11px] tabular-nums text-[var(--text-3)]">
+                    <span className="font-mono text-emphasis font-medium text-[var(--text)]">{n.name}</span>
+                    <span className="text-sub tabular-nums text-[var(--text-3)]">
                       {fmtSpan(n.firstSeen, n.lastSeen)}
                     </span>
                   </li>
@@ -501,12 +501,12 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
               <ul className="divide-y divide-[var(--border)]">
                 {det.ips.map(ip => (
                   <li key={ip.ip} className="flex items-center justify-between gap-2 px-4 py-2">
-                    <span className="inline-flex min-w-0 items-center gap-1.5 font-mono text-[13px]">
+                    <span className="inline-flex min-w-0 items-center gap-1.5 font-mono text-emphasis">
                       {flagEmoji(ip.cc) && <span title={ip.cc}>{flagEmoji(ip.cc)}</span>}
                       <span className="select-text truncate">{ip.ip}</span>
                       <CopyIcon text={ip.ip} title="Copy IP" />
                     </span>
-                    <span className="shrink-0 text-[11px] tabular-nums text-[var(--text-3)]">
+                    <span className="shrink-0 text-sub tabular-nums text-[var(--text-3)]">
                       <MonoChip>{ip.sessions}×</MonoChip> <span className="ml-1.5">{fmtLastSeen(ip.lastSeen)}</span>
                     </span>
                   </li>
@@ -526,8 +526,8 @@ function DossierStat({label, value, sub}: {label: string; value: string; sub?: s
   return (
     <div className="min-w-0">
       <Overline>{label}</Overline>
-      <div className="font-display mt-0.5 truncate text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)] tabular-nums" title={value}>{value}</div>
-      {sub && <div className="truncate text-[11px] tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
+      <div className="font-display mt-0.5 truncate text-metric font-bold leading-[var(--lh-tight)] tabular-nums" title={value}>{value}</div>
+      {sub && <div className="truncate text-sub tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
     </div>
   )
 }

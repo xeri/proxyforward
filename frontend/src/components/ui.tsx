@@ -13,8 +13,8 @@ export function PageHeader({title, subtitle, action}: {
   return (
     <div className="mb-8 flex items-end justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="font-display text-[length:var(--fs-hero)] font-bold leading-[var(--lh-tight)]">{title}</h1>
-        {subtitle && <p className="mt-1 text-[13px] text-[var(--text-2)]">{subtitle}</p>}
+        <h1 className="font-display text-hero font-bold leading-[var(--lh-tight)]">{title}</h1>
+        {subtitle && <p className="mt-1 text-emphasis text-[var(--text-2)]">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>
@@ -25,7 +25,7 @@ export function PageHeader({title, subtitle, action}: {
  * Labels recede; values dominate. */
 export function Overline({children, className = ''}: {children: ReactNode; className?: string}) {
   return (
-    <div className={`text-[length:var(--fs-caption)] font-semibold uppercase tracking-[var(--tracking-label)] text-[var(--text-3)] ${className}`}>
+    <div className={`text-caption font-semibold uppercase tracking-[var(--tracking-label)] text-[var(--text-3)] ${className}`}>
       {children}
     </div>
   )
@@ -43,7 +43,7 @@ export function Card({title, label, subtitle, action, children, className = '', 
         <div className={`relative flex items-center justify-between gap-3 ${pad ? 'px-5 pt-4' : 'p-5 pb-4'}`}>
           <div className="min-w-0">
             {title && (
-              <h2 className="font-display text-[length:var(--fs-title)] font-bold text-[var(--text)]">{title}</h2>
+              <h2 className="font-display text-title font-bold text-[var(--text)]">{title}</h2>
             )}
             {!title && label && <Overline>{label}</Overline>}
             {subtitle && <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitle}</p>}
@@ -68,7 +68,7 @@ export function SignalCard({title, subtitle, action, children, className = '', p
       {(title || action) && (
         <div className={`relative flex items-center justify-between gap-3 ${pad ? 'px-5 pt-4' : 'p-5 pb-4'}`}>
           <div className="min-w-0">
-            {title && <h2 className="font-display text-[length:var(--fs-title)] font-bold text-[var(--text)]">{title}</h2>}
+            {title && <h2 className="font-display text-title font-bold text-[var(--text)]">{title}</h2>}
             {subtitle && <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitle}</p>}
           </div>
           {action}
@@ -97,10 +97,10 @@ export function StatTile({label, value, sub, accent, tone, size = 'md'}: {
     <div className="border-l border-[var(--hairline)] py-0.5 pl-4">
       <Overline>{label}</Overline>
       <div
-        className={`font-display mt-1 font-bold leading-[var(--lh-tight)] tabular-nums ${size === 'hero' ? 'text-[length:var(--fs-metric-hero)]' : 'text-[length:var(--fs-metric)]'}`}
+        className={`font-display mt-1 font-bold leading-[var(--lh-tight)] tabular-nums ${size === 'hero' ? 'text-metric-hero' : 'text-metric'}`}
         style={color ? {color} : undefined}
       >{value}</div>
-      {sub && <div className="mt-1 truncate text-[length:var(--fs-caption)] tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
+      {sub && <div className="mt-1 truncate text-caption tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
     </div>
   )
 }
@@ -192,7 +192,7 @@ export function RoleWord({role, children}: {role: 'agent' | 'gateway'; children?
  * word "live". Anything haloed keeps that much air (tokens.css). */
 export function LiveDot() {
   return (
-    <span className="inline-flex items-center gap-[var(--halo-gap)] text-[10px] uppercase tracking-wide text-[var(--text-3)]">
+    <span className="inline-flex items-center gap-[var(--halo-gap)] text-micro uppercase tracking-wide text-[var(--text-3)]">
       <span className="inline-flex h-2 w-2 rounded-full pf-halo" style={{background: 'var(--good)', ['--halo' as string]: 'var(--good)'}} />
       live
     </span>
@@ -303,7 +303,7 @@ export function TextInput({value, onChange, placeholder, type = 'text', mono, on
         onKeyDown={e => { if (e.key === 'Enter' && onEnter) onEnter() }}
         className={`h-full w-full min-w-0 rounded-[inherit] bg-transparent text-[var(--text)] outline-none placeholder:text-[var(--text-3)] ${
           icon ? 'pl-8' : sm ? 'pl-2.5' : 'pl-3'
-        } ${isPassword ? 'pr-10' : sm ? 'pr-2.5' : 'pr-3'} ${sm ? 'text-xs' : 'text-sm'} ${mono ? 'font-mono text-[12.5px]' : ''}`}
+        } ${isPassword ? 'pr-10' : sm ? 'pr-2.5' : 'pr-3'} ${sm ? 'text-xs' : 'text-sm'} ${mono ? 'font-mono text-body' : ''}`}
       />
       {isPassword && (
         <button
@@ -546,7 +546,7 @@ export function MenuItem({lead, title, hint, on, disabled, onClick, onPointerEnt
       {lead && <span className="shrink-0">{lead}</span>}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{title}</span>
-        {hint && <span className="mt-0.5 block text-[11px] leading-snug text-[var(--text-3)]">{hint}</span>}
+        {hint && <span className="mt-0.5 block text-sub leading-snug text-[var(--text-3)]">{hint}</span>}
       </span>
       {on && <span className="shrink-0 text-[var(--accent)]"><IconCheck size={14} /></span>}
     </button>
@@ -687,7 +687,7 @@ export function Badge({children, tone = 'neutral'}: {children: ReactNode; tone?:
     bad: 'bg-[color-mix(in_srgb,var(--bad)_14%,transparent)] text-[var(--bad)] border-[color-mix(in_srgb,var(--bad)_30%,transparent)]',
     accent: 'bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--accent)] border-[color-mix(in_srgb,var(--accent)_30%,transparent)]',
   }[tone]
-  return <span className={`inline-flex items-center gap-1 rounded-[var(--r-chip)] border px-1.5 py-0.5 text-[11px] font-semibold ${tones}`}>{children}</span>
+  return <span className={`inline-flex items-center gap-1 rounded-[var(--r-chip)] border px-1.5 py-0.5 text-sub font-semibold ${tones}`}>{children}</span>
 }
 
 /** MonoChip: compact monospaced chip for ports, counts, and addresses that
@@ -697,7 +697,7 @@ export function MonoChip({children, tone = 'neutral'}: {children: ReactNode; ton
     ? 'border-[color-mix(in_srgb,var(--accent)_35%,transparent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--accent)]'
     : 'border-[var(--border)] bg-[var(--panel-2)] text-[var(--text-2)]'
   return (
-    <span className={`rounded-[var(--r-chip)] border px-1.5 py-0.5 font-mono text-[11px] tabular-nums ${cls}`}>
+    <span className={`rounded-[var(--r-chip)] border px-1.5 py-0.5 font-mono text-sub tabular-nums ${cls}`}>
       {children}
     </span>
   )
@@ -741,6 +741,8 @@ export function Kbd({children, className = ''}: {children: string; className?: s
       {children.split(' ').map((k, i) => (
         <kbd
           key={i}
+          // px-locked on purpose: the 18px chip box doesn't ride --ui-scale,
+          // so the glyph size can't either or it outgrows the chip at 1.33×.
           className="pf-control relative inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[var(--r-chip)] bg-[var(--panel-2)] px-1 font-sans text-[10.5px] font-medium text-[var(--text-3)]"
         >{k}</kbd>
       ))}
@@ -1074,7 +1076,7 @@ export function Codebox({text, action, selectable = true}: {
 }) {
   return (
     <div className="flex items-stretch gap-2">
-      <code className={`pf-well min-w-0 flex-1 break-all px-3 py-2.5 font-mono text-[14px] leading-relaxed text-[var(--text)] ${
+      <code className={`pf-well min-w-0 flex-1 break-all px-3 py-2.5 font-mono text-emphasis leading-relaxed text-[var(--text)] ${
         selectable ? 'select-text' : 'select-none'
       }`}>
         {text}

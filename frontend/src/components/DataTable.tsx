@@ -68,7 +68,7 @@ export function DataTable<T>({columns, rows, rowKey, empty, dense = false, stick
               {columns.map(c => (
                 <td
                   key={c.key}
-                  className={`${cellPad} ${c.align === 'right' ? 'text-right tabular-nums' : ''} ${c.mono ? 'font-mono text-[13px]' : ''} ${c.pin ? 'bg-[var(--panel-2)]/40' : ''}`}
+                  className={`${cellPad} ${c.align === 'right' ? 'text-right tabular-nums' : ''} ${c.mono ? 'font-mono text-emphasis' : ''} ${c.pin ? 'bg-[var(--panel-2)]/40' : ''}`}
                 >{c.render(r)}</td>
               ))}
             </tr>

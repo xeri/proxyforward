@@ -107,7 +107,7 @@ export function LineChart({series, height = 180, scale = 'linear', formatY, empt
 
   if (!view) {
     return (
-      <div ref={wellRef} className="pf-well grid place-items-center p-3 text-center font-mono text-[11px] leading-relaxed text-[var(--text-3)]" style={{height}}>
+      <div ref={wellRef} className="pf-well grid place-items-center p-3 text-center font-mono text-sub leading-relaxed text-[var(--text-3)]" style={{height}}>
         {emptyHint ?? 'no data'}
       </div>
     )

@@ -494,7 +494,7 @@ function FleetSummary({rows, invites}: {rows: Row[]; invites: number}) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
       <div className="flex items-baseline gap-2.5">
-        <span className="font-display text-[length:var(--fs-metric-hero)] font-bold leading-none tabular-nums">{n}</span>
+        <span className="font-display text-metric-hero font-bold leading-none tabular-nums">{n}</span>
         <span className="text-sm text-[var(--text-2)]">{n === 1 ? 'agent' : 'agents'}</span>
       </div>
       {online > 0
@@ -547,7 +547,7 @@ function Metric({label, value, tone}: {label: string; value: string; tone: Seg |
   return (
     <div className="min-w-0 border-l border-[var(--hairline)] pl-3">
       <Overline>{label}</Overline>
-      <div className="font-display mt-1 truncate text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)] tabular-nums" style={{color: c}} title={value}>{value}</div>
+      <div className="font-display mt-1 truncate text-metric font-bold leading-[var(--lh-tight)] tabular-nums" style={{color: c}} title={value}>{value}</div>
     </div>
   )
 }
@@ -589,7 +589,7 @@ function AgentCard({row, gwVersion, onOpen}: {row: Row; gwVersion: string; onOpe
         <Emblem role="agent" size={38} fixed glow={connected && h === 'good'} />
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold">{displayName(view)}</div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--text-3)]">{view.agentId || '—'}</div>
+          <div className="mt-0.5 truncate font-mono text-sub text-[var(--text-3)]">{view.agentId || '—'}</div>
         </div>
         <div className="shrink-0"><StatusMark view={view} h={h} update={updateAvailable(view.version, gwVersion)} /></div>
       </div>
@@ -609,7 +609,7 @@ function AgentCard({row, gwVersion, onOpen}: {row: Row; gwVersion: string; onOpe
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--border)] pt-3 text-[11px] text-[var(--text-3)]">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--border)] pt-3 text-sub text-[var(--text-3)]">
         <span className="inline-flex items-center gap-1.5"><IconTunnels size={13} /> {view.tunnels} tunnel{view.tunnels === 1 ? '' : 's'}</span>
         {connected && <span className="inline-flex items-center gap-1.5"><IconUsers size={13} /> {players(row)} player{players(row) === 1 ? '' : 's'}</span>}
         <ScopeChip view={view} />
@@ -647,7 +647,7 @@ function InviteCard({invite, onChanged}: {invite: InviteView; onChanged: () => v
         <div className="pf-control grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-2)]"><IconKey size={17} /></div>
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold">{invite.label || 'Pairing code'}</div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--text-3)]">invite {invite.handle}</div>
+          <div className="mt-0.5 truncate font-mono text-sub text-[var(--text-3)]">invite {invite.handle}</div>
         </div>
         <div className="shrink-0">{invite.reusable ? <Badge>Reusable</Badge> : <Badge tone="warn">Single-use</Badge>}</div>
       </div>
@@ -663,7 +663,7 @@ function InviteCard({invite, onChanged}: {invite: InviteView; onChanged: () => v
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--border)] pt-3 text-[11px] text-[var(--text-3)]">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--border)] pt-3 text-sub text-[var(--text-3)]">
         <span className="inline-flex min-w-0 items-center gap-1.5"><IconShield size={13} /> <span className="truncate">{scope}</span></span>
         <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
           <CopyButton text={invite.code} size="sm" label="Copy code" />
@@ -677,7 +677,7 @@ function InviteCard({invite, onChanged}: {invite: InviteView; onChanged: () => v
           )}
         </span>
       </div>
-      {err && <div className="text-[11px] text-[var(--bad)]">{err}</div>}
+      {err && <div className="text-sub text-[var(--bad)]">{err}</div>}
     </div>
   )
 }
@@ -700,7 +700,7 @@ function AgentList({rows, gwVersion, onOpen}: {rows: Row[]; gwVersion: string; o
             <Emblem role="agent" size={30} fixed glow={connected && h === 'good'} />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{displayName(view)}</div>
-              <div className="truncate font-mono text-[11px] text-[var(--text-3)]">{view.agentId || '—'}</div>
+              <div className="truncate font-mono text-sub text-[var(--text-3)]">{view.agentId || '—'}</div>
             </div>
             <div className="hidden w-28 shrink-0 @min-[40rem]:block"><StatusMark view={view} h={h} update={updateAvailable(view.version, gwVersion)} /></div>
             <div className="hidden w-16 shrink-0 text-right font-mono text-xs tabular-nums text-[var(--text-2)] @min-[52rem]:block" title="Round trip">{connected && live ? fmtRttMs(live.rttMillis) : '—'}</div>
@@ -836,9 +836,9 @@ function ConflictCard({e, linkable, incumbent, onSelect, onDismiss, onReclaimed}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           <span className="font-medium text-[var(--text)]">{clone ? 'Possible cloned agent' : 'Port auto-reassigned'}</span>
           {!clone && hasPorts && (
-            <span className="font-mono text-[11px] tabular-nums text-[var(--text-3)]">requested {e.requestedPort} → bound {e.actualPort}</span>
+            <span className="font-mono text-sub tabular-nums text-[var(--text-3)]">requested {e.requestedPort} → bound {e.actualPort}</span>
           )}
-          <span className="ml-auto text-[11px] tabular-nums text-[var(--text-3)]">{fmtTime(e.timeMs)}</span>
+          <span className="ml-auto text-sub tabular-nums text-[var(--text-3)]">{fmtTime(e.timeMs)}</span>
         </div>
         <div className="break-words text-[var(--text-2)]">{e.message}</div>
         {incumbent && (
@@ -847,12 +847,12 @@ function ConflictCard({e, linkable, incumbent, onSelect, onDismiss, onReclaimed}
               {busy ? 'Moving…' : `Give :${e.requestedPort} to this agent`}
             </Button>
             <Button size="sm" variant="ghost" onClick={onDismiss}>Keep the reassignment</Button>
-            <span className="min-w-0 text-[11px] text-[var(--text-3)]">
+            <span className="min-w-0 text-sub text-[var(--text-3)]">
               {displayName(incumbent)} holds :{e.requestedPort} now — it moves to another port.
             </span>
           </div>
         )}
-        {err && <div className="pt-1.5 text-[11px] text-[var(--bad)]">{err}</div>}
+        {err && <div className="pt-1.5 text-sub text-[var(--bad)]">{err}</div>}
       </div>
     </Banner>
   )
@@ -892,7 +892,7 @@ function EventRow({e}: {e: GwEvent}) {
   // raw kind as its chip, rather than being mislabelled as one we do know.
   const badge = EVENT_BADGE[e.kind] ?? {label: e.kind, tone: 'warn' as const}
   return (
-    <div className="flex items-baseline gap-2 py-1 text-[12px]">
+    <div className="flex items-baseline gap-2 py-1 text-body">
       <span className="shrink-0 font-mono tabular-nums text-[var(--text-3)]">{fmtTime(e.timeMs)}</span>
       <span className="shrink-0"><Badge tone={badge.tone}>{badge.label}</Badge></span>
       <span className="min-w-0 flex-1 text-[var(--text-2)]">{e.message}</span>
@@ -935,7 +935,7 @@ function AgentDetail({status, row, onBack, onChanged}: {
           title={displayName(view)}
           subtitle={view.agentId ? (
             <span className="inline-flex items-center gap-1.5">
-              <span className="select-text font-mono text-[11px] text-[var(--text-3)]">{view.agentId}</span>
+              <span className="select-text font-mono text-sub text-[var(--text-3)]">{view.agentId}</span>
               <CopyIcon text={view.agentId} title="Copy agent ID" />
             </span>
           ) : undefined}
@@ -1036,7 +1036,7 @@ function AgentManagement({view, players, onChanged}: {view: AgentView; players: 
           </Field>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <span className="min-w-0 truncate text-[11px] text-[var(--text-3)]" title={`Scope: ${scopeText(view)}`}>Current scope: {scopeText(view)}</span>
+          <span className="min-w-0 truncate text-sub text-[var(--text-3)]" title={`Scope: ${scopeText(view)}`}>Current scope: {scopeText(view)}</span>
           <Button variant="subtle" onClick={saveScope} disabled={savingScope || !scopeChanged}>{savingScope ? 'Saving…' : 'Update scope'}</Button>
         </div>
 
@@ -1076,7 +1076,7 @@ function AgentManagement({view, players, onChanged}: {view: AgentView; players: 
           {!view.revoked && <Button variant="danger" onClick={() => setConfirming(true)}>Revoke</Button>}
         </div>
 
-        <div className="text-[11px] text-[var(--text-3)]">
+        <div className="text-sub text-[var(--text-3)]">
           Enrolled {fmtDate(view.issuedAtMs)}{view.enrolledVia ? <> · via invite “{view.enrolledVia}”</> : null} · Ed25519 identity
         </div>
       </div>
@@ -1127,7 +1127,7 @@ function InboundProposalBanner({agentId, proposal, current, onDecided}: {
       <div className="space-y-2.5">
         <div>
           <div className="font-medium">This agent proposes a config change</div>
-          <div className="text-[12px] text-[var(--text-3)]">Sent {proposalAge(proposal.atMs)}. Nothing changes until you approve it.</div>
+          <div className="text-body text-[var(--text-3)]">Sent {proposalAge(proposal.atMs)}. Nothing changes until you approve it.</div>
         </div>
         <ProposalDiff current={specsOf(current)} proposed={specsOf(proposal.tunnels)} />
         {rejecting ? (
@@ -1148,7 +1148,7 @@ function InboundProposalBanner({agentId, proposal, current, onDecided}: {
             <Button size="sm" variant="subtle" disabled={busy} onClick={() => setRejecting(true)}>Reject…</Button>
           </div>
         )}
-        {err && <div className="text-[12px] text-[var(--bad)]">{err}</div>}
+        {err && <div className="text-body text-[var(--bad)]">{err}</div>}
       </div>
     </Banner>
   )
@@ -1233,7 +1233,7 @@ function AgentConfigPanel({view}: {view: AgentView}) {
                   <div className="space-y-2">
                     <div>
                       <div className="font-medium">Proposed — awaiting the agent’s approval</div>
-                      <div className="text-[12px] text-[var(--text-3)]">
+                      <div className="text-body text-[var(--text-3)]">
                         Sent {proposalAge(pendingOut.atMs)}. It applies only if the agent accepts.
                         {view.headless && ' The agent runs headless — nobody may be watching for this until someone opens its app.'}
                       </div>
@@ -1261,7 +1261,7 @@ function AgentConfigPanel({view}: {view: AgentView}) {
                   <div className="pf-control grid h-8 w-8 shrink-0 place-items-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-2)]"><IconServer size={15} /></div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{t.name || t.id}</div>
-                    <div className="truncate font-mono text-[11px] text-[var(--text-3)]">{t.id}</div>
+                    <div className="truncate font-mono text-sub text-[var(--text-3)]">{t.id}</div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <Badge>{(t.type || 'tcp').toUpperCase()}</Badge>
@@ -1288,9 +1288,9 @@ function AgentConfigPanel({view}: {view: AgentView}) {
               <div className="flex items-center gap-2">
                 <Button size="sm" disabled={saving} onClick={submit}>Propose to agent</Button>
                 <Button size="sm" variant="ghost" disabled={saving} onClick={reset}>Cancel</Button>
-                <span className="text-[12px] text-[var(--text-3)]">The agent must accept before anything moves.</span>
+                <span className="text-body text-[var(--text-3)]">The agent must accept before anything moves.</span>
               </div>
-              {saveErr && <div className="text-[12px] text-[var(--bad)]">{saveErr}</div>}
+              {saveErr && <div className="text-body text-[var(--bad)]">{saveErr}</div>}
             </div>
           )}
           {/* Something arrived (or the session went) while this edit was open. The
@@ -1298,7 +1298,7 @@ function AgentConfigPanel({view}: {view: AgentView}) {
               the submit quietly vanish. */}
           {!editable && dirty && (
             <div className="flex items-center gap-2 border-t border-[var(--border)] px-5 py-3">
-              <span className="flex-1 text-[12px] text-[var(--text-3)]">
+              <span className="flex-1 text-body text-[var(--text-3)]">
                 {pendingIn ? 'Your edit can’t be sent while this agent’s proposal is waiting — decide that first.'
                   : pendingOut ? 'Your edit can’t be sent while a proposal is already awaiting the agent.'
                     : 'Your edit can’t be sent — the agent’s session ended.'}
@@ -1326,14 +1326,14 @@ function AgentIdentity({agent, transport}: {agent: AgentUI; transport: string}) 
           <div>
             <Overline>Remote address</Overline>
             <div className="mt-0.5 flex items-center gap-1.5">
-              <span className="select-text truncate font-mono text-[14px] font-semibold text-[var(--text)]">{agent.remoteIp || '—'}</span>
+              <span className="select-text truncate font-mono text-emphasis font-semibold text-[var(--text)]">{agent.remoteIp || '—'}</span>
               {agent.remoteIp && <CopyIcon text={agent.remoteIp} title="Copy remote address" />}
             </div>
           </div>
           {lan.length > 0 && (
             <div>
               <Overline>LAN</Overline>
-              <div className="mt-0.5 truncate font-mono text-[12px] text-[var(--text-2)]">{lan.join(', ')}</div>
+              <div className="mt-0.5 truncate font-mono text-body text-[var(--text-2)]">{lan.join(', ')}</div>
             </div>
           )}
           <div className="flex flex-wrap gap-x-6 gap-y-2.5 pt-0.5">
@@ -1420,7 +1420,7 @@ function AgentTunnels({tunnels, conns, view}: {tunnels: app.TunnelUI[]; conns: a
                 <div className="pf-control grid h-8 w-8 shrink-0 place-items-center rounded-[var(--r-md)] bg-[var(--input-bg)] text-[var(--text-2)]"><IconServer size={15} /></div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{t.name}</div>
-                  <div className="truncate font-mono text-[11px] text-[var(--text-3)]" title={sub}>{sub}</div>
+                  <div className="truncate font-mono text-sub text-[var(--text-3)]" title={sub}>{sub}</div>
                 </div>
                 {t.paused
                   ? <PausedBadge pausedBy={t.pausedBy} peer="the agent" />
@@ -1459,11 +1459,11 @@ function AgentSessions({conns}: {conns: app.ConnUI[]}) {
             <div key={c.id} className="flex items-center gap-3 px-5 py-2.5">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{c.playerName || c.clientAddr}</div>
-                <div className="truncate font-mono text-[11px] text-[var(--text-3)]">{c.tunnelName} · {c.clientAddr}</div>
+                <div className="truncate font-mono text-sub text-[var(--text-3)]">{c.tunnelName} · {c.clientAddr}</div>
               </div>
               <div className="shrink-0 text-right">
                 <div className="font-mono text-xs tabular-nums text-[var(--text-2)]">{fmtBytes(c.bytesIn + c.bytesOut)}</div>
-                {hasRtt(c.rttMs) && <div className="font-mono text-[11px] tabular-nums text-[var(--text-3)]">{Math.round(c.rttMs)} ms</div>}
+                {hasRtt(c.rttMs) && <div className="font-mono text-sub tabular-nums text-[var(--text-3)]">{Math.round(c.rttMs)} ms</div>}
               </div>
             </div>
           ))}

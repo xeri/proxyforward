@@ -105,7 +105,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
               <button
                 key={k}
                 onClick={() => pickRange(k)}
-                className={`rounded-[calc(var(--r-md)-2px)] px-2 py-1 font-mono text-[11px] font-medium tabular-nums transition-colors duration-150 ${
+                className={`rounded-[calc(var(--r-md)-2px)] px-2 py-1 font-mono text-sub font-medium tabular-nums transition-colors duration-150 ${
                   k === range
                     ? 'bg-[var(--panel)] text-[var(--text)] shadow-[var(--shadow-soft)]'
                     : 'text-[var(--text-3)] hover:text-[var(--text)]'
@@ -114,7 +114,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
             ))}
           </div>
           {spec.render === 'bars' ? (
-            <span className="font-mono text-[11px] text-[var(--text-3)]">
+            <span className="font-mono text-sub text-[var(--text-3)]">
               {RANGES[range].windowMs === 604_800_000 ? 'hourly totals' : 'daily totals'}
             </span>
           ) : (
@@ -128,7 +128,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
                     disabled={disabled}
                     title={disabled ? 'Candles need 15m or longer ranges' : undefined}
                     onClick={() => pickCandles(m === 'candles')}
-                    className={`rounded-[calc(var(--r-md)-2px)] px-2 py-1 text-[11px] font-medium transition-colors duration-150 ${
+                    className={`rounded-[calc(var(--r-md)-2px)] px-2 py-1 text-sub font-medium transition-colors duration-150 ${
                       on ? 'bg-[var(--panel)] text-[var(--text)] shadow-[var(--shadow-soft)]'
                         : disabled ? 'cursor-not-allowed text-[var(--text-3)] opacity-40'
                           : 'text-[var(--text-3)] hover:text-[var(--text)]'
@@ -160,7 +160,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
           {/* Coverage toggle: reveal a strip under the time axis marking when
               the app was actually recording — the stretches the plot draws as
               real data, versus the quiet gaps that read as 0 B/s. */}
-          <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text-3)]">
+          <div className="mt-2 flex items-center gap-2 text-sub text-[var(--text-3)]">
             <Switch checked={uptime} onChange={pickUptime} label="Show app uptime timeline" />
             <button type="button" onClick={() => pickUptime(!uptime)} className="select-none transition-colors hover:text-[var(--text-2)]">
               App uptime
@@ -182,7 +182,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
         <section>
           <div className="mb-4 flex items-end justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="font-display text-[length:var(--fs-title)] font-bold text-[var(--text)]">Bandwidth</h2>
+              <h2 className="font-display text-title font-bold text-[var(--text)]">Bandwidth</h2>
               <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitleFor(range, data)}</p>
             </div>
             {liveReadout}
@@ -220,10 +220,10 @@ function RateHeadline({color, glyph, label, value}: {
 }) {
   return (
     <div>
-      <div className="text-[11px] text-[var(--text-3)]">
+      <div className="text-sub text-[var(--text-3)]">
         <span style={{color}}>{glyph}</span> {label}
       </div>
-      <div className="font-display mt-0.5 text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)] tabular-nums" style={{color}}>
+      <div className="font-display mt-0.5 text-metric font-bold leading-[var(--lh-tight)] tabular-nums" style={{color}}>
         {value !== null ? <NumberTicker value={value} format={fmtRate} /> : <span className="text-[var(--text-3)]">—</span>}
       </div>
     </div>
@@ -280,7 +280,7 @@ function StatsRow({buckets, mode, bucketMs, vis, onToggle}: {
 
   return (
     <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+      <div className="flex flex-wrap items-center gap-2 text-sub">
         <LegendChip color="var(--dl)" label="↓ download" on={vis.dl} onClick={() => onToggle('dl')} />
         <LegendChip color="var(--ul)" label="↑ upload" on={vis.ul} onClick={() => onToggle('ul')} />
         {mode !== 'bars' && (
@@ -293,7 +293,7 @@ function StatsRow({buckets, mode, bucketMs, vis, onToggle}: {
         )}
       </div>
       {stats && (
-        <div className="text-[10.5px] tabular-nums text-[var(--text-3)]" style={{fontFamily: MONO}}>
+        <div className="text-caption tabular-nums text-[var(--text-3)]" style={{fontFamily: MONO}}>
           {stats.kind === 'rates'
             ? <>min {fmtRate(stats.min)} · avg {fmtRate(stats.avg)} · max {fmtRate(stats.max)} · last {fmtRate(stats.last)}
               {vis.conn && hasConn && <> · <span className="text-[var(--conn)]">~{avgConn!.toFixed(1)} conns</span></>}
@@ -492,7 +492,7 @@ function SparkChart({buckets, bucketMs, windowMs = 0, emptyHint}: {
     // HTML well (not SVG text) so the long hints wrap; height matches the
     // populated spark so the card doesn't jump when data arrives.
     return (
-      <div ref={wellRef} className="pf-well grid h-[138px] place-items-center p-3 text-center font-mono text-[11px] leading-relaxed text-[var(--text-3)]">
+      <div ref={wellRef} className="pf-well grid h-[138px] place-items-center p-3 text-center font-mono text-sub leading-relaxed text-[var(--text-3)]">
         {emptyHint ?? 'no data'}
       </div>
     )

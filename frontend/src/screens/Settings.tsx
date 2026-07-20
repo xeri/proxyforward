@@ -427,7 +427,7 @@ function SectionRail({sections}: {sections: SectionDef[]}) {
           key={s.id}
           data-sec={s.id}
           onClick={() => jump(s.id)}
-          className={`relative rounded-[var(--r-sm)] border border-transparent px-3 py-1.5 text-left text-[13px] transition-colors duration-200 ${
+          className={`relative rounded-[var(--r-sm)] border border-transparent px-3 py-1.5 text-left text-emphasis transition-colors duration-200 ${
             active === s.id ? 'font-medium text-[var(--text)]' : 'text-[var(--text-3)] hover:text-[var(--text)]'
           }`}
         >{s.label}</button>

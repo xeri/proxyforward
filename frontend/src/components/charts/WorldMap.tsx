@@ -197,7 +197,7 @@ function TipRow({label, value}: {label: string; value: string}) {
 function Legend({metric}: {metric: GeoMetric}) {
   if (metric === 'activity') {
     return (
-      <div className="mt-2.5 flex items-center justify-end gap-2 text-[10px] text-[var(--text-3)]">
+      <div className="mt-2.5 flex items-center justify-end gap-2 text-micro text-[var(--text-3)]">
         <span>quiet</span>
         <div className="flex gap-[3px]">
           {[16, 38, 58, 76, 92].map(p => (
@@ -209,7 +209,7 @@ function Legend({metric}: {metric: GeoMetric}) {
     )
   }
   return (
-    <div className="mt-2.5 flex items-center justify-end gap-2 text-[10px] text-[var(--text-3)]">
+    <div className="mt-2.5 flex items-center justify-end gap-2 text-micro text-[var(--text-3)]">
       <span>fast</span>
       <div className="h-3 w-28 rounded-[2px]" style={{background: 'linear-gradient(90deg, var(--good), var(--warn), var(--bad))'}} />
       <span>slow</span>

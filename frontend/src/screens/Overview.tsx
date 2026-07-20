@@ -55,7 +55,7 @@ function GatewayProposalBanner({proposal, current, onDecided}: {
       <div className="space-y-2.5">
         <div>
           <div className="font-medium">The gateway proposes a change to your tunnels</div>
-          <div className="text-[12px] text-[var(--text-3)]">Sent {proposalAge(proposal.atMs)}. Nothing on this machine changes unless you approve it.</div>
+          <div className="text-body text-[var(--text-3)]">Sent {proposalAge(proposal.atMs)}. Nothing on this machine changes unless you approve it.</div>
         </div>
         <ProposalDiff current={current} proposed={specsOf(proposal.tunnels)} />
         {rejecting ? (
@@ -76,7 +76,7 @@ function GatewayProposalBanner({proposal, current, onDecided}: {
             <Button size="sm" variant="subtle" disabled={busy} onClick={() => setRejecting(true)}>Reject…</Button>
           </div>
         )}
-        {err && <div className="text-[12px] text-[var(--bad)]">{err}</div>}
+        {err && <div className="text-body text-[var(--bad)]">{err}</div>}
       </div>
     </Banner>
   )
@@ -282,7 +282,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
                 ? (status.linkUp ? (hasRtt(status.rttMillis) ? `${fmtRtt(status.rttMillis)} round trip` : 'Measuring round trip…') : 'Retrying with backoff')
                 : (status.agentConnected ? 'Relaying player traffic' : 'Listening for the agent')}
             extra={status.peerAddr ? (
-              <span className="inline-flex max-w-full items-center gap-1 text-[11px] text-[var(--text-3)]">
+              <span className="inline-flex max-w-full items-center gap-1 text-sub text-[var(--text-3)]">
                 <span className="select-text truncate font-mono">{status.peerAddr}</span>
                 <CopyIcon text={status.peerAddr} title="Copy peer address" />
               </span>
@@ -301,7 +301,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
                 ? (firstTunnel && firstTunnel.publicPort > 0 ? 'Players connect here' : 'Waiting for the gateway')
                 : (tunnels.length ? 'Open to players' : 'Waiting for tunnels')}
             extra={(
-              <span className="font-mono text-[11px] tabular-nums text-[var(--text-3)]">
+              <span className="font-mono text-sub tabular-nums text-[var(--text-3)]">
                 {conns.length} live session{conns.length === 1 ? '' : 's'}
               </span>
             )}
@@ -434,7 +434,7 @@ function HealthMetric({label, value, tone}: {label: string; value: string; tone:
   return (
     <div className="min-w-0 border-l border-[var(--hairline)] pl-3">
       <Overline>{label}</Overline>
-      <div className="font-display mt-1 truncate text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)] tabular-nums" style={{color: c}} title={value}>{value}</div>
+      <div className="font-display mt-1 truncate text-metric font-bold leading-[var(--lh-tight)] tabular-nums" style={{color: c}} title={value}>{value}</div>
     </div>
   )
 }
@@ -476,7 +476,7 @@ function LatencyProbe({linked, peer}: {linked: boolean; peer: 'gateway' | 'agent
                 <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
                   <div>
                     <Overline>One-way (estimated)</Overline>
-                    <div className="font-display text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)] tabular-nums text-[var(--text)]">{res.oneWayEstimateMs.toFixed(1)} ms</div>
+                    <div className="font-display text-metric font-bold leading-[var(--lh-tight)] tabular-nums text-[var(--text)]">{res.oneWayEstimateMs.toFixed(1)} ms</div>
                   </div>
                   <div className="text-xs tabular-nums text-[var(--text-3)]">
                     round trip {res.rttAvgMs.toFixed(1)} ms ({res.rttMinMs.toFixed(1)}–{res.rttMaxMs.toFixed(1)}) · jitter {res.jitterMs.toFixed(1)} ms · {res.samples} probes
@@ -489,7 +489,7 @@ function LatencyProbe({linked, peer}: {linked: boolean; peer: 'gateway' | 'agent
                       <span className="text-[var(--text-2)]">↓ download <b className="text-[var(--text)]">{res.oneWayDownMs.toFixed(1)} ms</b></span>
                     </div>
                     {res.clockSyncCaveat && (
-                      <div className="mt-1 text-[11px] text-[var(--text-3)]">
+                      <div className="mt-1 text-sub text-[var(--text-3)]">
                         Per-direction values assume NTP-synced clocks on both machines; treat them as approximate.
                       </div>
                     )}
@@ -521,14 +521,14 @@ function IdentityCard({role, self = false, sideLabel, host, publicIp, lanIps, on
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <Overline>{sideLabel}</Overline>
-            <span className="truncate text-[11px] text-[var(--text-3)]">{host || '—'}</span>
+            <span className="truncate text-sub text-[var(--text-3)]">{host || '—'}</span>
           </div>
           <div className="mt-2 flex items-center gap-1.5">
-            <span className="select-text truncate font-mono text-[14px] font-semibold text-[var(--text)]">{publicIp || '—'}</span>
+            <span className="select-text truncate font-mono text-emphasis font-semibold text-[var(--text)]">{publicIp || '—'}</span>
             {publicIp && <CopyIcon text={publicIp} title="Copy public address" />}
           </div>
           {lan.length > 0 && (
-            <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--text-3)]">
+            <div className="mt-0.5 truncate font-mono text-sub text-[var(--text-3)]">
               LAN {lan.join(', ')}
             </div>
           )}
@@ -560,7 +560,7 @@ function PipeNode({icon, title, state, headline, detail, extra, pulse}: {
       </div>
       <div className="min-w-0 flex-1">
         <Overline>{title}</Overline>
-        <div className="font-display mt-0.5 truncate text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)]">{headline}</div>
+        <div className="font-display mt-0.5 truncate text-metric font-bold leading-[var(--lh-tight)]">{headline}</div>
         <div className="mt-1.5"><StatusDot state={state} label={detail} pulse={pulse} /></div>
         {extra && <div className="mt-1 flex max-w-full">{extra}</div>}
       </div>
@@ -593,7 +593,7 @@ function Conduit({on, label}: {on: boolean; label?: string}) {
         style={{['--flow-color' as string]: 'var(--accent)'}}
       />
       {label && (
-        <span className="whitespace-nowrap font-mono text-[10px] tabular-nums text-[var(--text-3)]">
+        <span className="whitespace-nowrap font-mono text-micro tabular-nums text-[var(--text-3)]">
           {label}
         </span>
       )}
@@ -616,7 +616,7 @@ function PlayerAddressStrip({status, onNavigate}: {status: UIStatus; onNavigate:
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-5 py-3.5">
         <div className="w-44 shrink-0">
           <Overline>Player address</Overline>
-          <div className="mt-0.5 text-[11px] text-[var(--text-3)]">
+          <div className="mt-0.5 text-sub text-[var(--text-3)]">
             <button className="font-medium hover:text-[var(--text)] hover:underline" onClick={() => onNavigate('tunnels')}>
               Test the player path →
             </button>
@@ -715,7 +715,7 @@ function PairingCodeRow({label, hint, hintAfter, cta, fetch, reissuable}: {
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
       <div className="w-44 shrink-0">
         <Overline>{label}</Overline>
-        <div className="mt-0.5 text-[11px] text-[var(--text-3)]">{code && hintAfter ? hintAfter : hint}</div>
+        <div className="mt-0.5 text-sub text-[var(--text-3)]">{code && hintAfter ? hintAfter : hint}</div>
       </div>
       <div className="min-w-56 flex-1">{box}</div>
     </div>

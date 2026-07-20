@@ -122,7 +122,7 @@ export function RoleSwitcher({status, onPair}: {status: UIStatus; onPair: () => 
       </button>
 
       <Menu open={open} anchor={btnRef} onClose={close} minWidth={228}>
-        <div className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[var(--tracking-label)] text-[var(--text-3)]">
+        <div className="px-2 pb-1 pt-1 text-micro font-semibold uppercase tracking-[var(--tracking-label)] text-[var(--text-3)]">
           This machine is
         </div>
         {(['gateway', 'agent'] as Role[]).map(r => (

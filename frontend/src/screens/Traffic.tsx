@@ -167,7 +167,7 @@ export function Traffic({status, onNavigate}: {status: UIStatus; onNavigate: (id
             }}
           />
           {status.connectionsTruncated && (
-            <div className="px-4 py-2 text-[11px] tabular-nums text-[var(--text-3)]">
+            <div className="px-4 py-2 text-sub tabular-nums text-[var(--text-3)]">
               showing {conns.length} of {status.connectionsTotal} connections
             </div>
           )}
@@ -217,12 +217,12 @@ function LinkStrip({status}: {status: UIStatus}) {
         </div>
         <div className="min-w-0">
           <Overline>{title}</Overline>
-          <div className="font-display mt-0.5 flex items-center gap-[var(--halo-gap)] text-[length:var(--fs-title)] font-bold leading-[var(--lh-tight)]">
+          <div className="font-display mt-0.5 flex items-center gap-[var(--halo-gap)] text-title font-bold leading-[var(--lh-tight)]">
             {/* --halo-gap: the live dot breathes a 5px ring (motion.css). */}
             <span className={`inline-flex h-2 w-2 shrink-0 rounded-full ${up ? 'pf-halo' : ''}`} style={{background: c, ['--halo' as string]: c}} />
             <span className="truncate">{headline}</span>
             {status.peerAddr && (
-              <span className="ml-1 hidden min-w-0 items-center gap-1.5 text-[12.5px] font-normal text-[var(--text-3)] @2xl:inline-flex">
+              <span className="ml-1 hidden min-w-0 items-center gap-1.5 text-body font-normal text-[var(--text-3)] @2xl:inline-flex">
                 <span className="min-w-0 select-text truncate font-mono" title={status.peerAddr}>{status.peerAddr}</span>
                 <CopyIcon text={status.peerAddr} title="Copy peer address" />
               </span>
@@ -333,7 +333,7 @@ function isPrivateIP(ip: string): boolean {
 function LanTag({ip, selfIP}: {ip: string; selfIP: string}) {
   if (!(isPrivateIP(ip) || (selfIP && ip === selfIP))) return null
   return (
-    <span className="rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--input-bg)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-2)]">
+    <span className="rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--input-bg)] px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-[var(--text-2)]">
       LAN
     </span>
   )

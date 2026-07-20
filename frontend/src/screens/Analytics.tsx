@@ -164,7 +164,7 @@ function RecordsStrip({s}: {s: ReturnType<typeof useSummary>}) {
   if (s.recPlayers >= 0) items.push({label: 'Most players', value: String(Math.round(s.recPlayers)), when: s.recPlayersAt})
   if (s.recConns >= 0) items.push({label: 'Most connections', value: String(Math.round(s.recConns)), when: s.recConnsAt})
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-1 text-[11px] text-[var(--text-3)]">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-1 text-sub text-[var(--text-3)]">
       <span className="font-medium uppercase tracking-wide">All-time records</span>
       {items.map(it => (
         <span key={it.label} className="inline-flex items-baseline gap-1.5">
@@ -259,7 +259,7 @@ function Geography({rangeMs, selectedCc, onSelectCc}: {
     <section>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="font-display text-[length:var(--fs-title)] font-bold text-[var(--text)]">Geography</h2>
+          <h2 className="font-display text-title font-bold text-[var(--text)]">Geography</h2>
           <p className="mt-0.5 text-xs text-[var(--text-2)]">
             Where players connect from across the range — click a country to filter the history below
           </p>
@@ -309,7 +309,7 @@ function PeakHours() {
         <div className="grid gap-[3px]" style={{gridTemplateColumns: 'auto repeat(24, minmax(0, 1fr))'}}>
           {DAY_ORDER.map((dow, ri) => (
             <Fragment key={dow}>
-              <div className="pr-2 text-right text-[10px] leading-4 text-[var(--text-3)]">{DAY_LABELS[ri]}</div>
+              <div className="pr-2 text-right text-micro leading-4 text-[var(--text-3)]">{DAY_LABELS[ri]}</div>
               {Array.from({length: 24}, (_, h) => {
                 const c = m.cells[dow][h]
                 const known = c.avg >= 0
@@ -334,10 +334,10 @@ function PeakHours() {
           {/* hour axis */}
           <div />
           {Array.from({length: 24}, (_, h) => (
-            <div key={h} className="mt-1 text-center text-[9px] leading-none text-[var(--text-3)]">{h % 6 === 0 ? h : ''}</div>
+            <div key={h} className="mt-1 text-center text-micro leading-none text-[var(--text-3)]">{h % 6 === 0 ? h : ''}</div>
           ))}
         </div>
-        <div className="mt-3 flex items-center justify-end gap-2 text-[10px] text-[var(--text-3)]">
+        <div className="mt-3 flex items-center justify-end gap-2 text-micro text-[var(--text-3)]">
           <span>quiet</span>
           <div className="flex gap-[3px]">
             {[10, 30, 55, 80, 100].map(p => (
@@ -393,7 +393,7 @@ function UptimeBands({windowMs}: {windowMs: number}) {
           <Band events={r.events ?? []} t0={t0} span={span} now={now} />
         </div>
       ))}
-      <div className="flex items-center gap-3 pt-1 text-[10px] text-[var(--text-3)]">
+      <div className="flex items-center gap-3 pt-1 text-micro text-[var(--text-3)]">
         <LegendSwatch color="var(--good)" label="up" />
         <LegendSwatch color="var(--bad)" label="down" />
         <LegendSwatch color="var(--panel-2)" label="unknown" />
@@ -509,7 +509,7 @@ function ConnectionHistory({tunnels, rangeMs, cc, onClearCc}: {
             ? <AvatarImg id={s.playerUuid} size={32} px={20}
                 className="h-5 w-5 rounded-[var(--r-xs)] border border-[var(--border)] bg-[var(--panel-2)]" />
             : <span className="h-5 w-5 rounded-[var(--r-xs)] border border-[var(--border)] bg-[var(--panel-2)]" />}
-          <span className="truncate font-mono text-[13px] text-[var(--text)]">{s.playerName || '—'}</span>
+          <span className="truncate font-mono text-emphasis text-[var(--text)]">{s.playerName || '—'}</span>
         </span>
       ),
     },
@@ -721,7 +721,7 @@ function SessionReplay({session, onClose}: {session: SessionMeta; onClose: () =>
               onChange={e => setCursorT(Number(e.target.value))}
               className="w-full accent-[var(--accent)]"
             />
-            <div className="flex items-center justify-between font-mono text-[11px] tabular-nums text-[var(--text-3)]">
+            <div className="flex items-center justify-between font-mono text-sub tabular-nums text-[var(--text-3)]">
               <span>{fmtTickTime(domain.min, 'second')}</span>
               {readout && (
                 <span className="inline-flex items-center gap-3">
@@ -743,9 +743,9 @@ function SessionReplay({session, onClose}: {session: SessionMeta; onClose: () =>
 function ReplayStat({label, value, sub}: {label: string; value: string; sub?: string}) {
   return (
     <div className="pf-well px-3 py-2">
-      <div className="text-[11px] text-[var(--text-3)]">{label}</div>
+      <div className="text-sub text-[var(--text-3)]">{label}</div>
       <div className="mt-0.5 truncate text-sm font-semibold tabular-nums" title={value}>{value}</div>
-      {sub && <div className="truncate text-[10.5px] tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
+      {sub && <div className="truncate text-caption tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
     </div>
   )
 }

@@ -405,7 +405,7 @@ function PortChecklist({title, intro, rules, footnote}: {
       <div className="mt-2.5 space-y-1.5">
         {rules.map(r => (
           <div key={r.port} className="flex items-start gap-2.5 text-sm">
-            <code className="shrink-0 select-text rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--panel)] px-2 py-0.5 font-mono text-[12px] font-semibold text-[var(--text)]">
+            <code className="shrink-0 select-text rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--panel)] px-2 py-0.5 font-mono text-body font-semibold text-[var(--text)]">
               TCP {r.port}
             </code>
             <span className="min-w-0 leading-snug">

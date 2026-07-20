@@ -73,7 +73,7 @@ export function ProposalDiff({current, proposed}: {current: DiffTunnel[]; propos
   const changes = diffTunnels(current, proposed)
   if (changes.length === 0) {
     return (
-      <p className="text-[12px] text-[var(--text-3)]">
+      <p className="text-body text-[var(--text-3)]">
         Nothing the gateway serves would change — the difference is local to the agent.
       </p>
     )
@@ -81,10 +81,10 @@ export function ProposalDiff({current, proposed}: {current: DiffTunnel[]; propos
   return (
     <ul className="space-y-1">
       {changes.map(c => (
-        <li key={`${c.kind}:${c.id}`} className="flex items-center gap-2 text-[12px]">
+        <li key={`${c.kind}:${c.id}`} className="flex items-center gap-2 text-body">
           <Badge tone={TONE[c.kind]}>{VERB[c.kind]}</Badge>
           <span className="min-w-0 flex-1 truncate text-[var(--text-1)]">{c.name}</span>
-          <span className="shrink-0 font-mono text-[11px] text-[var(--text-3)]">
+          <span className="shrink-0 font-mono text-sub text-[var(--text-3)]">
             {c.kind === 'moved' ? `${portLabel(c.fromPort)} → ${portLabel(c.toPort)}` : portLabel(c.fromPort ?? c.toPort)}
           </span>
         </li>

@@ -41,14 +41,14 @@ export function TitleBar({status, nav, brand = false, onPalette}: {
             <div className="grid h-6 w-6 shrink-0 place-items-center rounded-[var(--r-sm)] bg-[var(--accent)] text-[var(--accent-contrast)]">
               <IconServer size={14} />
             </div>
-            <span className="truncate text-[13px] font-semibold tracking-tight">proxyforward</span>
+            <span className="truncate text-emphasis font-semibold tracking-tight">proxyforward</span>
           </>
         )}
         {!brand && navLabel && (
           <div className="flex min-w-0 items-baseline gap-2.5">
-            <span className="shrink-0 text-[12.5px] font-medium text-[var(--text-2)]">{navLabel}</span>
+            <span className="shrink-0 text-body font-medium text-[var(--text-2)]">{navLabel}</span>
             {ctx && (
-              <span className="min-w-0 truncate font-mono text-[11px] tabular-nums text-[var(--text-3)]">{ctx}</span>
+              <span className="min-w-0 truncate font-mono text-sub tabular-nums text-[var(--text-3)]">{ctx}</span>
             )}
           </div>
         )}
