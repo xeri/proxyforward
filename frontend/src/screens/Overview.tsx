@@ -427,16 +427,11 @@ function HealthPanel({status}: {status: UIStatus}) {
   )
 }
 
-/** HealthMetric: tier-3 — type on whitespace with a hairline lead, no box.
- * Status tones stay on the numerals: the color IS the signal. */
+/** HealthMetric: the health grid's stat — StatTile at the small size, so a
+ * 3-up grid breathes at mid widths. Status tones stay on the numerals: the
+ * color IS the signal, and `neutral` leaves the numeral in full ink. */
 function HealthMetric({label, value, tone}: {label: string; value: string; tone: Seg | 'neutral'}) {
-  const c = tone === 'neutral' ? 'var(--text)' : segColor[tone]
-  return (
-    <div className="min-w-0 border-l border-[var(--hairline)] pl-3">
-      <Overline>{label}</Overline>
-      <div className="font-display mt-1 truncate text-metric font-bold leading-[var(--lh-tight)] tabular-nums" style={{color: c}} title={value}>{value}</div>
-    </div>
-  )
+  return <StatTile size="sm" label={label} value={value} tone={tone === 'neutral' ? undefined : tone} />
 }
 
 /** LatencyProbe: an expandable strip inside the health card. Headlines the

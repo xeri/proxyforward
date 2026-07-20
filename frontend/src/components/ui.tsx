@@ -111,13 +111,14 @@ export function StatTile({label, value, sub, accent, tone, size = 'md'}: {
   value: ReactNode
   sub?: string
   accent?: boolean
-  tone?: 'good' | 'warn' | 'bad'
+  /** `unknown` dims the numeral to silt — a sentinel is never painted healthy. */
+  tone?: 'good' | 'warn' | 'bad' | 'unknown'
   size?: 'sm' | 'md' | 'hero'
 }) {
-  const color = tone ? `var(--${tone})` : accent ? 'var(--accent)' : undefined
+  const color = tone === 'unknown' ? 'var(--text-3)' : tone ? `var(--${tone})` : accent ? 'var(--accent)' : undefined
   const fs = size === 'hero' ? 'text-metric-hero' : size === 'sm' ? 'text-metric-sm' : 'text-metric'
   return (
-    <div className="border-l border-[var(--hairline)] py-0.5 pl-4">
+    <div className="min-w-0 border-l border-[var(--hairline)] py-0.5 pl-4">
       <Overline>{label}</Overline>
       <div
         className={`font-display mt-1 font-bold leading-[var(--lh-tight)] tabular-nums ${fs}`}

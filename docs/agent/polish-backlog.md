@@ -80,12 +80,6 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
     clamped but nothing in the titlebar hints at it (`ConnectionPill.tsx`). Low
     priority; only matters on very busy gateways.
 
-14. **Overview HealthPanel metrics truncate at mid widths** — the 3-up
-    jitter/loss/RTT grid (`Overview.tsx HealthMetric`, `grid-cols-3`) lives inside the
-    `@5xl:col-span-5` card, so at ~1440px the 26px `--fs-metric` numerals clip to
-    "6.0 …" / "26 …". Either let these values shrink a step (they are metrics, not the
-    hero) or drop to a 2-up grid below some container width. Predates the glass pass.
-
 15. **`frontend/src/hooks.ts:26` carries an `eslint-disable` comment but no ESLint
     config exists** — either add ESLint (decision) or drop the comment.
 

@@ -11,7 +11,7 @@ import {BandwidthPanel} from '../components/BandwidthChart'
 import {Emblem} from '../components/Emblem'
 import {
   Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, Disclosure, EmptyState, ErrorBanner,
-  Field, Modal, MonoChip, Overline, PageHeader, SegmentedControl, Skeleton, StatusDot, TextInput,
+  Field, Modal, MonoChip, Overline, PageHeader, SegmentedControl, Skeleton, StatTile, StatusDot, TextInput,
 } from '../components/ui'
 import {
   IconActivity, IconAgents, IconArrowRight, IconChevronRight, IconClock, IconKey, IconLogs,
@@ -540,16 +540,11 @@ function StatusMark({view, h, update}: {view: AgentView; h: Seg; update?: boolea
   )
 }
 
-/** Metric: tier-3 stat — type on whitespace with a hairline lead, no box; the
- * status tone lives on the numeral. Shared by the cards and the detail health. */
+/** Metric: tier-3 stat — StatTile at the small size, so the roster cards and
+ * the detail health grid breathe at mid widths; the status tone lives on the
+ * numeral. Shared by the cards and the detail health. */
 function Metric({label, value, tone}: {label: string; value: string; tone: Seg | 'neutral'}) {
-  const c = tone === 'neutral' ? 'var(--text)' : segColor[tone]
-  return (
-    <div className="min-w-0 border-l border-[var(--hairline)] pl-3">
-      <Overline>{label}</Overline>
-      <div className="font-display mt-1 truncate text-metric font-bold leading-[var(--lh-tight)] tabular-nums" style={{color: c}} title={value}>{value}</div>
-    </div>
-  )
+  return <StatTile size="sm" label={label} value={value} tone={tone === 'neutral' ? undefined : tone} />
 }
 
 /** Uptime: a 1 Hz self-updating duration so the readout ticks between snapshots. */
