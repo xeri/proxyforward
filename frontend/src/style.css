@@ -27,4 +27,12 @@
   --text-sub: var(--fs-sub);
   --text-caption: var(--fs-caption);
   --text-micro: var(--fs-micro);
+
+  /* One ladder: the stock rem sizes snap onto the nearest token, so
+     text-xs/sm/base can never drift from the scale (xs 10.1→10.5,
+     sm 11.8→11.5, base 13.5→13 at design width). Their default line-height
+     ratios are untouched. */
+  --text-xs: var(--fs-caption);
+  --text-sm: var(--fs-sub);
+  --text-base: var(--fs-emphasis);
 }
