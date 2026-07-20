@@ -38,7 +38,7 @@ export function Analytics({status}: {status: UIStatus}) {
   if (status.analyticsUnsupported) {
     return (
       <div className="pf-stagger space-y-4">
-        <PageHeader title="Analytics" subtitle="Traffic, players, and uptime over time." />
+        <PageHeader eyebrow="time & place" title="Analytics" subtitle="Traffic, players, and uptime over time." />
         <Card><AnalyticsUnavailable /></Card>
       </div>
     )
@@ -52,6 +52,7 @@ export function Analytics({status}: {status: UIStatus}) {
           Peak hours sits outside: it is intrinsically multi-week. */}
       <div>
         <PageHeader
+          eyebrow="time & place"
           title="Analytics"
           subtitle="Traffic, players, and uptime over time."
           action={

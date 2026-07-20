@@ -147,7 +147,7 @@ export function Traffic({status, onNavigate}: {status: UIStatus; onNavigate: (id
   return (
     <div className="pf-stagger space-y-12">
       <div>
-        <PageHeader title="Traffic" subtitle="Every byte, session, and client through the tunnel." />
+        <PageHeader eyebrow="motion" title="Traffic" subtitle="Every byte, session, and client through the tunnel." />
         <LinkStrip status={status} />
       </div>
 

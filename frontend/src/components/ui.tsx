@@ -5,16 +5,20 @@ import {IconAlert, IconCheck, IconChevronDown, IconCopy, IconEye, IconEyeOff, Ic
 
 type State = 'good' | 'warn' | 'bad' | 'unknown'
 
-/** PageHeader: one display-size title per screen, with an optional tool slot.
- * The generous bottom margin is deliberate — silence before the content. */
-export function PageHeader({title, subtitle, action}: {
-  title: string; subtitle?: ReactNode; action?: ReactNode
+/** PageHeader: the masthead — an accent eyebrow murmuring the screen's theme,
+ * one hero-size display title, a mono subtitle. One per screen, nothing
+ * larger above the fold. The generous bottom margin is deliberate — silence
+ * before the content. `truncate` on the h1 because 42px meets narrow windows
+ * (and the Agents detail masthead is a hostname of arbitrary length). */
+export function PageHeader({eyebrow, title, subtitle, action}: {
+  eyebrow?: string; title: string; subtitle?: ReactNode; action?: ReactNode
 }) {
   return (
     <div className="mb-8 flex items-end justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="font-display text-hero font-bold leading-[var(--lh-tight)]">{title}</h1>
-        {subtitle && <p className="mt-1 text-emphasis text-[var(--text-2)]">{subtitle}</p>}
+        {eyebrow && <Overline variant="eyebrow" className="mb-1.5">{eyebrow}</Overline>}
+        <h1 className="truncate font-display text-hero font-bold leading-[var(--lh-tight)]">{title}</h1>
+        {subtitle && <p className="mt-1.5 text-body text-[var(--text-2)]">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>

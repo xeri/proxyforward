@@ -66,6 +66,7 @@ export function Activity({attached}: {attached: boolean}) {
     // with only the log body scrolling. 3rem = the canvas's py-6 total.
     <div className="pf-stagger flex h-[calc(100dvh-var(--chrome-top)-3rem)] min-h-0 flex-col">
       <PageHeader
+        eyebrow="sediment"
         title="Activity"
         subtitle="A live tail of the engine's log."
         action={<Button variant="ghost" size="sm" onClick={doExport}><IconExternal size={14} /> Export diagnostics</Button>}

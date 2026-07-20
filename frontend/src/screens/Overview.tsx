@@ -177,6 +177,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
     <div className="pf-stagger space-y-12">
       <div>
         <PageHeader
+          eyebrow="connection"
           title="Overview"
           subtitle={isAgent ? 'The path from your server to your players.' : 'The public front door for your agent.'}
           action={runStateOf(status) !== 'stopped'

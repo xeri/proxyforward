@@ -390,7 +390,7 @@ export function Agents({status}: {status: UIStatus}) {
 }
 
 function Header({action}: {action?: ReactNode}) {
-  return <PageHeader title="Agents" subtitle="Every machine enrolled with this gateway." action={action} />
+  return <PageHeader eyebrow="fleet" title="Agents" subtitle="Every machine enrolled with this gateway." action={action} />
 }
 
 /** IssuePairingModal: mint an enrollment code to hand to a new machine — the roster
@@ -932,6 +932,7 @@ function AgentDetail({status, row, onBack, onChanged}: {
           <IconArrowRight size={14} className="rotate-180" /> All agents
         </button>
         <PageHeader
+          eyebrow="fleet"
           title={displayName(view)}
           subtitle={view.agentId ? (
             <span className="inline-flex items-center gap-1.5">

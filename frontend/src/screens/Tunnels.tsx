@@ -96,7 +96,7 @@ export function Tunnels({status}: {status: UIStatus}) {
     ]
     return (
       <div className="pf-stagger space-y-4">
-        <PageHeader title="Tunnels" subtitle="Registered by the connected agent." />
+        <PageHeader eyebrow="passage" title="Tunnels" subtitle="Registered by the connected agent." />
         <Card title="Registered tunnels" pad={false}
           action={gwTunnels.length > 0 ? <div className="pr-4"><Badge tone="neutral">{gwTunnels.length}</Badge></div> : undefined}>
           <DataTable
@@ -115,6 +115,7 @@ export function Tunnels({status}: {status: UIStatus}) {
   return (
     <div className="pf-stagger space-y-4">
       <PageHeader
+        eyebrow="passage"
         title="Tunnels"
         subtitle={consent.view?.consentActive
           ? 'Map local servers to public ports. Changes go to the gateway for approval.'

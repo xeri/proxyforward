@@ -36,7 +36,7 @@ export function Players({status}: {status: UIStatus}) {
   if (status.analyticsUnsupported) {
     return (
       <div className="pf-stagger space-y-4">
-        <PageHeader title="Players" subtitle="Everyone who has joined through the tunnel, by name." />
+        <PageHeader eyebrow="people" title="Players" subtitle="Everyone who has joined through the tunnel, by name." />
         <Card><AnalyticsUnavailable /></Card>
       </div>
     )
@@ -108,6 +108,7 @@ function Wall({status, liveUUIDs, onOpen}: {
   return (
     <div className="pf-stagger space-y-4">
       <PageHeader
+        eyebrow="people"
         title="Players"
         subtitle="Everyone who has joined through the tunnel, by name."
         action={
