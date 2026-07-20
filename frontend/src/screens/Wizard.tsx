@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from 'react'
 import {GetConfig, IssuePairingCode, SetupAgent, SetupGateway} from '../../wailsjs/go/app/App'
-import {Button, Codebox, CopyButton, Disclosure, ErrorBanner, Field, Spinner, TextInput, Toggle} from '../components/ui'
+import {Button, Codebox, CopyButton, Disclosure, ErrorBanner, Field, Overline, Spinner, TextInput, Toggle} from '../components/ui'
 import {Emblem} from '../components/Emblem'
 import {ImportSetupFlow} from '../components/SetupBackup'
 import {IconCheck, IconGlobe, IconRefresh, IconServer, IconShield, IconSpark} from '../components/icons'
@@ -68,13 +68,19 @@ export function Wizard({status, onDone, deepLink}: {status: UIStatus | null; onD
   return (
     <div className="flex h-full items-center justify-center overflow-y-auto overscroll-y-contain p-6">
       <div className="pf-stagger w-full max-w-xl" data-band-content>
-        {/* Brand hero */}
+        {/* Brand hero: the one colossal moment the app allows itself. The
+            two-line break is designed — 56px never fits max-w-xl on one line,
+            so each clause owns a line instead of wrapping ragged. */}
         <div className="mb-7 text-center">
-          <div className="pf-breathe mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-[var(--r-xl)] bg-[var(--accent)] text-[var(--accent-contrast)]">
+          <div className="pf-breathe mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-[var(--r-xl)] bg-[var(--accent)] text-[var(--accent-contrast)]">
             <IconServer size={28} />
           </div>
-          <h1 className="text-[26px] font-semibold leading-tight tracking-tight">Two machines. One address.</h1>
-          <p className="mt-2 text-sm text-[var(--text-2)]">
+          <Overline variant="eyebrow" className="mb-2">proxyforward</Overline>
+          <h1 className="font-display text-colossal font-bold leading-[var(--lh-display)]">
+            <span className="block">Two machines.</span>
+            <span className="block">One address.</span>
+          </h1>
+          <p className="mx-auto mt-3 max-w-md text-body text-[var(--text-2)]">
             Publish a Minecraft server from behind NAT through any machine that can port-forward.
           </p>
         </div>
@@ -227,9 +233,9 @@ function GatewayLive({status, controlPort, onDone}: {
   const paired = !!status?.agentConnected
   return (
     <Panel>
-      <div className="mb-3 flex items-center gap-2 text-[var(--good)]">
-        <IconCheck size={18} /> <span className="font-medium">Gateway is live</span>
-      </div>
+      <h2 className="mb-2 font-display text-metric-hero font-bold leading-[var(--lh-display)] text-[var(--good)]">
+        Gateway is live
+      </h2>
       <p className="mb-2 text-sm text-[var(--text-2)]">
         Copy this one-time pairing code and paste it into proxyforward on your Minecraft machine:
       </p>
@@ -322,10 +328,11 @@ function AgentLive({status, onDone, onBack}: {
         >
           {fatal ? <IconRefresh size={26} /> : up ? <IconSpark size={26} /> : <Spinner size={24} />}
         </div>
-        <div className="mt-4 text-lg font-semibold">
+        <div className={`mt-5 text-balance font-display font-bold leading-[var(--lh-display)] ${
+          up ? 'text-colossal' : 'text-metric-hero'}`}>
           {fatal ? 'The gateway said no' : up ? 'Handshake complete.' : 'Dialing the gateway…'}
         </div>
-        <div className="mt-1 max-w-sm text-sm text-[var(--text-2)]">
+        <div className="mt-2.5 max-w-sm text-sm text-[var(--text-2)]">
           {fatal
             ? fatal
             : up
@@ -341,20 +348,27 @@ function AgentLive({status, onDone, onBack}: {
   )
 }
 
+/** Stepper: the wizard's three acts, numbered like a playbill — 01 02 03 at
+ * eyebrow tracking. Accent ink marks acts reached; the future stays silt.
+ * Wizard steps are a true sequence, so ordinals are honest here (nowhere else
+ * in the app numbers its sections). */
 function Stepper({act}: {act: Act}) {
   const idx = act === 'role' ? 0 : act === 'live' ? 2 : 1
-  const labels = ['Choose role', act === 'import' ? 'Restore' : 'Configure', 'Go live']
+  const labels = ['choose role', act === 'import' ? 'restore' : 'configure', 'go live']
   return (
-    <div className="mb-5 flex items-center justify-center gap-2">
+    <div className="mb-6 flex items-center justify-center gap-2.5 text-caption">
       {labels.map((label, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-300 ${
-            i <= idx ? 'bg-[var(--accent)] text-[var(--accent-contrast)]' : 'bg-[var(--panel-2)] text-[var(--text-3)]'}`}>
-            {i < idx ? <IconCheck size={12} /> : i + 1}
+        <div key={i} className="flex items-center gap-2.5">
+          <span className="flex items-baseline gap-1.5">
+            <span className={`font-semibold tabular-nums tracking-[var(--tracking-eyebrow)] transition-colors duration-300 ${
+              i <= idx ? 'text-[var(--accent)]' : 'text-[var(--text-3)]'}`}>
+              0{i + 1}
+            </span>
+            <span className={`lowercase tracking-[var(--tracking-label)] transition-colors duration-300 ${
+              i <= idx ? 'text-[var(--text)]' : 'text-[var(--text-3)]'}`}>{label}</span>
           </span>
-          <span className={`text-xs transition-colors duration-300 ${i <= idx ? 'text-[var(--text)]' : 'text-[var(--text-3)]'}`}>{label}</span>
           {i < labels.length - 1 && (
-            <span className={`mx-1 h-px w-8 transition-colors duration-300 ${i < idx ? 'bg-[color-mix(in_srgb,var(--accent)_55%,var(--border))]' : 'bg-[var(--border)]'}`} />
+            <span className={`h-px w-8 transition-colors duration-300 ${i < idx ? 'bg-[color-mix(in_srgb,var(--accent)_55%,var(--border))]' : 'bg-[var(--border)]'}`} />
           )}
         </div>
       ))}
@@ -381,7 +395,7 @@ function RoleCard({role, title, sub, onClick, onHover}: {
       <div className="mb-3 inline-flex transition-transform duration-300 group-hover:scale-110">
         <Emblem role={role} fixed size={40} />
       </div>
-      <div className="text-base font-semibold">{title}</div>
+      <div className="font-display text-title font-bold text-[var(--text)]">{title}</div>
       <div className="mt-1 text-sm text-[var(--text-2)]">{sub}</div>
     </button>
   )
