@@ -225,9 +225,10 @@ all of these looked reasonable right up until they didn't.
   `frontend/src/history.ts` header, and every consumer applies it as written. The
   sole re-map is the role-relative link-counter flip, confined to `Traffic.tsx`.
   Never invent a third mapping.
-- The design charter is `frontend/DESIGN.md` — one identity surface per screen; every
-  surface is glass but only Signal Glass *answers the pointer* (never give a card the
-  caustics/streak/wake); motion communicates network state; color is signal.
+- The design charter is `frontend/DESIGN.md` (Abyssal Bloom) — one identity surface
+  per screen; every surface is trench water but only the bloom frame (Signal Glass,
+  `.pf-signal`) *answers the pointer* (never give a card the caustics/bloom/wake);
+  motion communicates network state; color is a life-signal.
 
 ### Privacy
 - Player/traffic analytics are local-only (SQLite next to the config); the only

@@ -128,7 +128,7 @@ persisted to config.
 | Pairing code | `pxf://host:port/v1/pair/<tkt>#sha256:<64hex>`, ≤ 512 B before parse | `link/pairing.go ParsePairingCode` |
 | Agent auth | Ed25519 proof-of-possession over `proxyforward-agent-auth-v1` + gateway cert FP — no bearer token in steady state | `link/cred.go AgentAuthMessage` |
 | Perf floor | ≥20 MiB/s, worst cross-stream RTT ≤500 ms (64 MiB loopback burst); per-transport twins `TestBurstThroughputPerConn` / `TestBurstThroughputQUIC` | `e2e_test.go runBurst` |
-| Blur ladder | control 10, Signal Glass 20, card frost 30, chrome 36, island 40, float 48, pop 56 px | `tokens.css` |
+| Blur ladder | control 4, bloom frame 5, card 4, chrome 8, island 8, float 10, pop 12 px (water, not frost) | `tokens.css` |
 | Switch geometry | 40×22 track, 1px rim + 2px seat → 16px knob (7px radius), 18px travel; ×`--ui-scale` | `tokens.css`, `ui.tsx Switch` |
 | Control height | 2.25rem + 2px = 1px rim + 0.5rem padding + 1.25rem line, per side | `tokens.css` |
 | Halo clearance | 12px dot→label (the halo ring breathes out to 5px) | `tokens.css`, `motion.css` |
