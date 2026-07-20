@@ -6,6 +6,7 @@ import {useMemo} from 'react'
 import type {CountryAgg} from '../analytics'
 import type {GeoMetric} from './charts/WorldMap'
 import {flagEmoji, fmtRtt, hasRtt} from '../state'
+import {Overline} from './ui'
 
 const rttTone = (ms: number): 'good' | 'warn' | 'bad' => (ms < 60 ? 'good' : ms < 130 ? 'warn' : 'bad')
 
@@ -29,9 +30,9 @@ export function GeoRank({rows, metric, hoverCc, onHover, onSelect, selectedCc, c
   return (
     <div className="min-w-0" onMouseLeave={() => onHover?.(null)}>
       {!compact && (
-        <div className="mb-1.5 flex items-center justify-between px-0.5 text-sub uppercase tracking-wide text-[var(--text-3)]">
-          <span>Country</span>
-          <span>{metric === 'latency' ? 'Avg ping' : 'Sessions'}</span>
+        <div className="mb-1.5 flex items-center justify-between px-0.5">
+          <Overline>Country</Overline>
+          <Overline>{metric === 'latency' ? 'Avg ping' : 'Sessions'}</Overline>
         </div>
       )}
       {/* Deliberately NOT overscroll-contain (rubberband.ts): an embedded list on

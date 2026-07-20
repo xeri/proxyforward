@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react'
 import {Command, CommandCtx, COMMANDS, fuzzyScore, navCommands} from '../commands'
 import {IconSearch} from './icons'
-import {Kbd} from './ui'
+import {Kbd, Overline} from './ui'
 
 /**
  * CommandPalette (Ctrl+K): a glass overlay for keyboard-first navigation and
@@ -118,7 +118,7 @@ export function CommandPalette({ctx, onClose}: {ctx: CommandCtx; onClose: () => 
             {grouped
               ? grouped.map(([section, cmds]) => (
                   <div key={section}>
-                    <div className="px-2.5 pb-1 pt-2.5 text-caption font-semibold uppercase tracking-wider text-[var(--text-3)]">{section}</div>
+                    <Overline className="px-2.5 pb-1 pt-2.5">{section}</Overline>
                     {cmds.map(renderItem)}
                   </div>
                 ))

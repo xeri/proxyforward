@@ -120,7 +120,7 @@ function LogLine({e}: {e: Entry}) {
     <div className="pf-fade flex items-baseline gap-2 whitespace-pre-wrap break-words py-0.5 transition-colors duration-150 hover:bg-[var(--panel)]/40">
       <span className="shrink-0 text-[var(--text-3)]">{time}</span>
       <span
-        className="w-12 shrink-0 rounded-[var(--r-xs)] px-1 text-center text-micro font-bold uppercase leading-4"
+        className="w-12 shrink-0 rounded-[var(--r-xs)] px-1 text-center text-micro font-semibold uppercase leading-4"
         style={{color: c, background: `color-mix(in srgb, ${c} 12%, transparent)`}}
       >{e.level}</span>
       <span className="min-w-0 flex-1 text-[var(--text)]">

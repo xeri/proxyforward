@@ -105,7 +105,7 @@ function HostRow({role, name, sub, dim}: {role: 'agent' | 'gateway'; name: strin
       <span className={`min-w-0 truncate font-medium text-[var(--text-2)] ${dim ? 'italic' : ''}`} title={name}>
         {name}
       </span>
-      {sub && <span className="ml-auto shrink-0 text-micro uppercase tracking-wide text-[var(--text-3)]">{sub}</span>}
+      {sub && <span className="ml-auto shrink-0 text-micro lowercase tracking-[var(--tracking-label)] text-[var(--text-3)]">{sub}</span>}
     </div>
   )
 }

@@ -211,7 +211,7 @@ export function RoleWord({role, children}: {role: 'agent' | 'gateway'; children?
  * word "live". Anything haloed keeps that much air (tokens.css). */
 export function LiveDot() {
   return (
-    <span className="inline-flex items-center gap-[var(--halo-gap)] text-micro uppercase tracking-wide text-[var(--text-3)]">
+    <span className="inline-flex items-center gap-[var(--halo-gap)] text-micro lowercase tracking-[var(--tracking-label)] text-[var(--text-3)]">
       <span className="inline-flex h-2 w-2 rounded-full pf-halo" style={{background: 'var(--good)', ['--halo' as string]: 'var(--good)'}} />
       live
     </span>

@@ -1,7 +1,7 @@
 import {useEffect, useRef, useState} from 'react'
 import {GetConfig, RestartEngine, SaveSettings, SetupGateway} from '../../wailsjs/go/app/App'
 import {config} from '../../wailsjs/go/models'
-import {Badge, Button, ErrorBanner, Menu, MenuItem, Modal, RoleWord} from './ui'
+import {Badge, Button, ErrorBanner, Menu, MenuItem, Modal, Overline, RoleWord} from './ui'
 import {Emblem} from './Emblem'
 import {IconChevronDown} from './icons'
 import {UIStatus} from '../state'
@@ -122,9 +122,7 @@ export function RoleSwitcher({status, onPair}: {status: UIStatus; onPair: () => 
       </button>
 
       <Menu open={open} anchor={btnRef} onClose={close} minWidth={228}>
-        <div className="px-2 pb-1 pt-1 text-micro font-semibold uppercase tracking-[var(--tracking-label)] text-[var(--text-3)]">
-          This machine is
-        </div>
+        <Overline className="px-2 pb-1 pt-1">This machine is</Overline>
         {(['gateway', 'agent'] as Role[]).map(r => (
           <MenuItem
             key={r}
