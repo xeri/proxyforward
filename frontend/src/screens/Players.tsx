@@ -398,7 +398,7 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
           />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-display text-metric font-bold leading-tight text-[var(--text)]">
+              <h2 className="font-display text-metric font-bold leading-[var(--lh-tight)] text-[var(--text)]">
                 {card ? card.name : <Skeleton className="h-7 w-44 rounded" />}
               </h2>
               {live && <Badge tone="good">online</Badge>}
