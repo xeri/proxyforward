@@ -83,7 +83,7 @@ export function ProposalDiff({current, proposed}: {current: DiffTunnel[]; propos
       {changes.map(c => (
         <li key={`${c.kind}:${c.id}`} className="flex items-center gap-2 text-body">
           <Badge tone={TONE[c.kind]}>{VERB[c.kind]}</Badge>
-          <span className="min-w-0 flex-1 truncate text-[var(--text-1)]">{c.name}</span>
+          <span className="min-w-0 flex-1 truncate text-[var(--text)]">{c.name}</span>
           <span className="shrink-0 font-mono text-sub text-[var(--text-3)]">
             {c.kind === 'moved' ? `${portLabel(c.fromPort)} → ${portLabel(c.toPort)}` : portLabel(c.fromPort ?? c.toPort)}
           </span>
