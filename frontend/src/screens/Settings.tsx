@@ -310,7 +310,7 @@ export function Settings({status}: {status: UIStatus}) {
         {dirty && (
           <div className="pointer-events-none sticky bottom-6 z-40 -mt-14 flex justify-center pb-1">
             <div
-              className="pf-slide-up pf-menu pf-bleed pointer-events-auto relative flex items-center gap-4 rounded-[var(--r-lg)] py-3 pl-5 pr-3"
+              className="pf-slide-up pf-menu pf-bleed pointer-events-auto relative flex items-center gap-4 rounded-[var(--r-btn)] py-3 pl-5 pr-3"
               style={{
                 ['--bleed' as string]: 'var(--accent)',
                 ['--bleed-strength' as string]: '28%',

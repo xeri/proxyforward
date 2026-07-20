@@ -96,7 +96,7 @@ export function CommandPalette({ctx, onClose}: {ctx: CommandCtx; onClose: () => 
       <div className="pf-scrim absolute inset-0 bg-black/40" />
       <div
         onMouseDown={e => e.stopPropagation()}
-        className="pf-drop pf-glass pf-fringe relative w-full max-w-[560px] overflow-hidden rounded-[var(--r-xl)] will-change-[transform,opacity]"
+        className="pf-drop pf-glass pf-fringe relative w-full max-w-[560px] overflow-hidden rounded-[var(--r-bloom)] will-change-[transform,opacity]"
       >
         <div className="flex items-center gap-2.5 border-b border-[var(--border)] px-4 py-3">
           <span className="shrink-0 text-[var(--text-3)]"><IconSearch size={16} /></span>

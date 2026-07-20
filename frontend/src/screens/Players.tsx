@@ -429,7 +429,7 @@ function PlayerDossier({uuid, live, onBack}: {uuid: string; live: boolean; onBac
 
       {/* history — one range picker drives both charts below */}
       <div className="flex items-center justify-between gap-3 px-1">
-        <h3 className="text-[length:var(--fs-title)] font-semibold tracking-tight text-[var(--text)]">History</h3>
+        <h3 className="font-display text-[length:var(--fs-title)] font-bold text-[var(--text)]">History</h3>
         <SegmentedControl<HistRange>
           value={range}
           onChange={setRange}
@@ -526,7 +526,7 @@ function DossierStat({label, value, sub}: {label: string; value: string; sub?: s
   return (
     <div className="min-w-0">
       <Overline>{label}</Overline>
-      <div className="mt-0.5 truncate text-[length:var(--fs-metric)] font-semibold leading-tight tabular-nums" title={value}>{value}</div>
+      <div className="font-display mt-0.5 truncate text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)] tabular-nums" title={value}>{value}</div>
       {sub && <div className="truncate text-[11px] tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
     </div>
   )

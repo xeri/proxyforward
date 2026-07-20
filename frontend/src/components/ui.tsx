@@ -13,7 +13,7 @@ export function PageHeader({title, subtitle, action}: {
   return (
     <div className="mb-8 flex items-end justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="text-[length:var(--fs-hero)] font-semibold leading-tight tracking-tight">{title}</h1>
+        <h1 className="font-display text-[length:var(--fs-hero)] font-bold leading-[var(--lh-tight)]">{title}</h1>
         {subtitle && <p className="mt-1 text-[13px] text-[var(--text-2)]">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
@@ -43,7 +43,7 @@ export function Card({title, label, subtitle, action, children, className = '', 
         <div className={`relative flex items-center justify-between gap-3 ${pad ? 'px-5 pt-4' : 'p-5 pb-4'}`}>
           <div className="min-w-0">
             {title && (
-              <h2 className="text-[length:var(--fs-title)] font-semibold tracking-tight text-[var(--text)]">{title}</h2>
+              <h2 className="font-display text-[length:var(--fs-title)] font-bold text-[var(--text)]">{title}</h2>
             )}
             {!title && label && <Overline>{label}</Overline>}
             {subtitle && <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitle}</p>}
@@ -68,7 +68,7 @@ export function SignalCard({title, subtitle, action, children, className = '', p
       {(title || action) && (
         <div className={`relative flex items-center justify-between gap-3 ${pad ? 'px-5 pt-4' : 'p-5 pb-4'}`}>
           <div className="min-w-0">
-            {title && <h2 className="text-[length:var(--fs-title)] font-semibold tracking-tight text-[var(--text)]">{title}</h2>}
+            {title && <h2 className="font-display text-[length:var(--fs-title)] font-bold text-[var(--text)]">{title}</h2>}
             {subtitle && <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitle}</p>}
           </div>
           {action}
@@ -97,7 +97,7 @@ export function StatTile({label, value, sub, accent, tone, size = 'md'}: {
     <div className="border-l border-[var(--hairline)] py-0.5 pl-4">
       <Overline>{label}</Overline>
       <div
-        className={`mt-1 font-semibold leading-tight tabular-nums ${size === 'hero' ? 'text-[length:var(--fs-metric-hero)]' : 'text-[length:var(--fs-metric)]'}`}
+        className={`font-display mt-1 font-bold leading-[var(--lh-tight)] tabular-nums ${size === 'hero' ? 'text-[length:var(--fs-metric-hero)]' : 'text-[length:var(--fs-metric)]'}`}
         style={color ? {color} : undefined}
       >{value}</div>
       {sub && <div className="mt-1 truncate text-[length:var(--fs-caption)] tabular-nums text-[var(--text-3)]" title={sub}>{sub}</div>}
@@ -111,7 +111,7 @@ export function Pill({on, onClick, children}: {on: boolean; onClick: () => void;
   return (
     <button
       type="button" onClick={onClick} aria-pressed={on}
-      className={`pf-press rounded-full border px-2.5 py-1 text-xs transition-all duration-150 ${
+      className={`pf-press rounded-[var(--r-chip)] border px-2.5 py-1 text-xs transition-all duration-150 ${
         on
           ? 'border-[color-mix(in_srgb,var(--accent)_45%,transparent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] font-medium text-[var(--text)]'
           : 'border-[var(--border)] text-[var(--text-3)] hover:text-[var(--text)]'
@@ -147,7 +147,7 @@ export function PillGroup<T extends string>({value, onChange, options}: {
     <div ref={ref} className="relative inline-flex flex-wrap items-center gap-1.5" role="radiogroup">
       <div
         aria-hidden
-        className={`pf-control pointer-events-none absolute left-0 top-0 rounded-full bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] [--control-edge:color-mix(in_srgb,var(--accent)_45%,transparent)] [--control-rim-o:1] ${
+        className={`pf-control pointer-events-none absolute left-0 top-0 rounded-[var(--r-chip)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] [--control-edge:color-mix(in_srgb,var(--accent)_45%,transparent)] [--control-rim-o:1] ${
           armed ? 'transition-[transform,width,height] duration-[var(--dur-slow)] [transition-timing-function:var(--ease-spring)]' : ''
         }`}
         style={{
@@ -162,7 +162,7 @@ export function PillGroup<T extends string>({value, onChange, options}: {
           <button
             key={o.value} type="button" role="radio" aria-checked={on} data-pill={o.value}
             onClick={() => onChange(o.value)}
-            className={`pf-press relative z-10 inline-flex h-[26px] items-center gap-1.5 whitespace-nowrap rounded-full border border-transparent px-2.5 text-xs transition-colors duration-150 ${
+            className={`pf-press relative z-10 inline-flex h-[26px] items-center gap-1.5 whitespace-nowrap rounded-[var(--r-chip)] border border-transparent px-2.5 text-xs transition-colors duration-150 ${
               on ? 'font-medium text-[var(--text)]' : 'text-[var(--text-3)] hover:text-[var(--text)]'
             }`}
           >{o.label}</button>
@@ -242,7 +242,7 @@ export function Button({children, onClick, variant = 'primary', size = 'md', dis
   return (
     <button
       title={title}
-      className={`pf-press pf-btn relative inline-flex items-center justify-center gap-1.5 rounded-[var(--r-md)] font-medium transition-[background-color,border-color,box-shadow,color,opacity] duration-200 ${sz} ${styles} ${className}`}
+      className={`pf-press pf-btn relative inline-flex items-center justify-center gap-1.5 rounded-[var(--r-btn)] font-medium transition-[background-color,border-color,box-shadow,color,opacity] duration-200 ${sz} ${styles} ${className}`}
       onClick={onClick} disabled={disabled}
     >{children}</button>
   )
@@ -256,7 +256,7 @@ export function IconButton({children, onClick, title, variant = 'ghost', disable
     : 'text-[var(--text-3)] hover:text-[var(--text)] hover:bg-[var(--panel-2)]'
   return (
     <button title={title} aria-label={title} onClick={onClick} disabled={disabled}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--r-md)] transition-all duration-200 active:scale-90 disabled:opacity-40 ${styles}`}>
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--r-btn)] transition-all duration-200 active:scale-90 disabled:opacity-40 ${styles}`}>
       {children}
     </button>
   )
@@ -290,7 +290,7 @@ export function TextInput({value, onChange, placeholder, type = 'text', mono, on
   const sm = size === 'sm'
   return (
     <div
-      className={`pf-control relative flex items-center rounded-[var(--r-md)] bg-[var(--input-bg)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot)] transition-[background-color,box-shadow] duration-200 hover:bg-[var(--input-bg-hover)] has-[:focus]:bg-[var(--input-bg-hover)] has-[:focus]:shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)] ${
+      className={`pf-control relative flex items-center rounded-[var(--r-input)] bg-[var(--input-bg)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot)] transition-[background-color,box-shadow] duration-200 hover:bg-[var(--input-bg-hover)] has-[:focus]:bg-[var(--input-bg-hover)] has-[:focus]:shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)] ${
         sm ? 'h-8' : 'h-[var(--control-h)]'
       }`}
     >
@@ -406,7 +406,7 @@ export function Select({value, onChange, options, disabled}: {
         ref={btnRef}
         type="button" onClick={toggle} disabled={disabled} aria-haspopup="listbox" aria-expanded={open}
         data-open={open}
-        className={`pf-control relative flex h-[var(--control-h)] w-full items-center justify-between gap-2 rounded-[var(--r-md)] px-3 text-left text-sm text-[var(--text)] outline-none transition-[background-color,box-shadow] duration-200 hover:bg-[var(--input-bg-hover)] disabled:opacity-50 disabled:pointer-events-none ${
+        className={`pf-control relative flex h-[var(--control-h)] w-full items-center justify-between gap-2 rounded-[var(--r-input)] px-3 text-left text-sm text-[var(--text)] outline-none transition-[background-color,box-shadow] duration-200 hover:bg-[var(--input-bg-hover)] disabled:opacity-50 disabled:pointer-events-none ${
           open
             ? 'bg-[var(--input-bg-hover)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)]'
             : 'bg-[var(--input-bg)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot)]'
@@ -419,7 +419,7 @@ export function Select({value, onChange, options, disabled}: {
         <div
           ref={listRef}
           role="listbox"
-          className="pf-fade pf-menu fixed z-[60] max-h-60 overflow-auto overscroll-y-contain rounded-[var(--r-md)] p-1"
+          className="pf-fade pf-menu fixed z-[60] max-h-60 overflow-auto overscroll-y-contain rounded-[var(--r-btn)] p-1"
           style={{
             left: anchor.left,
             width: anchor.width,
@@ -511,7 +511,7 @@ export function Menu({open, anchor, onClose, children, align = 'left', minWidth}
     <div
       ref={listRef}
       role="menu"
-      className="pf-fade pf-menu fixed z-[60] overflow-auto overscroll-y-contain rounded-[var(--r-md)] p-1"
+      className="pf-fade pf-menu fixed z-[60] overflow-auto overscroll-y-contain rounded-[var(--r-btn)] p-1"
       style={{
         ...(align === 'right' ? {right: at.right} : {left: at.left}),
         minWidth,
@@ -687,7 +687,7 @@ export function Badge({children, tone = 'neutral'}: {children: ReactNode; tone?:
     bad: 'bg-[color-mix(in_srgb,var(--bad)_14%,transparent)] text-[var(--bad)] border-[color-mix(in_srgb,var(--bad)_30%,transparent)]',
     accent: 'bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--accent)] border-[color-mix(in_srgb,var(--accent)_30%,transparent)]',
   }[tone]
-  return <span className={`inline-flex items-center gap-1 rounded-[var(--r-sm)] border px-1.5 py-0.5 text-[11px] font-semibold ${tones}`}>{children}</span>
+  return <span className={`inline-flex items-center gap-1 rounded-[var(--r-chip)] border px-1.5 py-0.5 text-[11px] font-semibold ${tones}`}>{children}</span>
 }
 
 /** MonoChip: compact monospaced chip for ports, counts, and addresses that
@@ -697,7 +697,7 @@ export function MonoChip({children, tone = 'neutral'}: {children: ReactNode; ton
     ? 'border-[color-mix(in_srgb,var(--accent)_35%,transparent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--accent)]'
     : 'border-[var(--border)] bg-[var(--panel-2)] text-[var(--text-2)]'
   return (
-    <span className={`rounded-[var(--r-sm)] border px-1.5 py-0.5 font-mono text-[11px] tabular-nums ${cls}`}>
+    <span className={`rounded-[var(--r-chip)] border px-1.5 py-0.5 font-mono text-[11px] tabular-nums ${cls}`}>
       {children}
     </span>
   )
@@ -741,7 +741,7 @@ export function Kbd({children, className = ''}: {children: string; className?: s
       {children.split(' ').map((k, i) => (
         <kbd
           key={i}
-          className="pf-control relative inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[var(--r-xs)] bg-[var(--panel-2)] px-1 font-sans text-[10.5px] font-medium text-[var(--text-3)]"
+          className="pf-control relative inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[var(--r-chip)] bg-[var(--panel-2)] px-1 font-sans text-[10.5px] font-medium text-[var(--text-3)]"
         >{k}</kbd>
       ))}
     </span>
@@ -831,7 +831,7 @@ export function SegmentedControl<T extends string>({value, onChange, options, cl
       ref={ref}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
       onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
-      className={`pf-control relative grid touch-none rounded-[var(--r-md)] bg-[var(--input-bg)] p-0.5 shadow-[inset_0_1px_3px_var(--bevel-bot)] ${className}`}
+      className={`pf-control relative grid touch-none rounded-[var(--r-seg)] bg-[var(--input-bg)] p-0.5 shadow-[inset_0_1px_3px_var(--bevel-bot)] ${className}`}
       style={{gridTemplateColumns: `repeat(${n}, 1fr)`}}
       role="radiogroup"
     >
@@ -839,7 +839,7 @@ export function SegmentedControl<T extends string>({value, onChange, options, cl
           padding (0.5 = 0.125rem) — the same length the drag math measures. */}
       <div
         aria-hidden
-        className="pf-control absolute bottom-0.5 left-0.5 top-0.5 rounded-[calc(var(--r-md)-2px)] bg-[var(--panel-3)] shadow-[var(--shadow-soft)] transition-transform duration-300 [transition-timing-function:var(--ease-out)]"
+        className="pf-control absolute bottom-0.5 left-0.5 top-0.5 rounded-[var(--r-seg-item)] bg-[var(--panel-3)] shadow-[var(--shadow-soft)] transition-transform duration-300 [transition-timing-function:var(--ease-out)]"
         style={{
           width: `calc((100% - 0.25rem) / ${n})`,
           ...(dragPx !== null
@@ -853,7 +853,7 @@ export function SegmentedControl<T extends string>({value, onChange, options, cl
           <button
             key={o.value} type="button" role="radio" aria-checked={on} title={o.title}
             onClick={() => pick(o.value)}
-            className={`relative z-10 flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[calc(var(--r-md)-2px)] px-3 py-1.5 text-xs font-medium transition-colors duration-200 ${
+            className={`relative z-10 flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--r-seg-item)] px-3 py-1.5 text-xs font-medium transition-colors duration-200 ${
               on ? 'text-[var(--text)]' : 'text-[var(--text-3)] hover:text-[var(--text-2)]'
             }`}
           >{o.label}</button>
@@ -907,10 +907,12 @@ export function Banner({tone = 'info', children, action, onDismiss}: {
   const bleeds = tone === 'warn' || tone === 'bad'
   return (
     <div
-      className={`pf-fade relative flex items-center gap-3 rounded-[var(--r-md)] border px-3.5 py-2.5 text-sm ${bleeds ? 'pf-bleed' : ''}`}
+      className={`pf-fade relative flex items-center gap-3 rounded-[var(--r-input)] border px-3.5 py-2.5 text-sm ${bleeds ? 'pf-bleed' : ''}`}
       style={{
         borderColor: `color-mix(in srgb, ${tones.color} 35%, var(--border))`,
-        background: `color-mix(in srgb, ${tones.color} 8%, transparent)`,
+        // The sheet's bleed banner: the tone feeds in from the leading edge
+        // and gives way to plain trench — never a solid fill.
+        background: `linear-gradient(90deg, color-mix(in srgb, ${tones.color} 12%, transparent), transparent 60%)`,
         ...(bleeds ? {['--bleed' as string]: tones.color, ['--bleed-strength' as string]: '22%'} : undefined),
       }}
     >
@@ -1039,7 +1041,7 @@ export function Modal({title, onClose, children, footer, wide}: {
       <div className="pf-scrim absolute inset-0 bg-black/50" />
       <div
         onMouseDown={e => e.stopPropagation()}
-        className={`pf-pop pf-glass relative w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-[85vh] overflow-hidden rounded-[var(--r-xl)]`}
+        className={`pf-pop pf-glass relative w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-[85vh] overflow-hidden rounded-[var(--r-bloom)]`}
       >
         <div className="flex items-center justify-between px-5 py-3.5">
           <h2 className="text-base font-semibold tracking-tight">{title}</h2>

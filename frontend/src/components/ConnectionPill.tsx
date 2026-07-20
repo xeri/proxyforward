@@ -26,7 +26,7 @@ export function ConnectionPill({status}: {status: UIStatus}) {
 
   if (stale) {
     return (
-      <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1 text-xs text-[var(--text-2)] shadow-[var(--shadow-soft)]">
+      <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1 text-xs text-[var(--text-2)] shadow-[var(--shadow-soft)]">
         <span className="text-[var(--warn)]"><Spinner size={12} /></span>
         <span className="font-medium">Syncing…</span>
       </div>
@@ -42,7 +42,7 @@ export function ConnectionPill({status}: {status: UIStatus}) {
   if (runState === 'stopping' || isEngineOff(status)) {
     const stopping = runState === 'stopping'
     return (
-      <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1 text-xs text-[var(--text-2)] shadow-[var(--shadow-soft)]">
+      <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1 text-xs text-[var(--text-2)] shadow-[var(--shadow-soft)]">
         {stopping
           ? <span className="text-[var(--text-3)]"><Spinner size={12} /></span>
           : <span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-[var(--text-3)]" />}
@@ -73,7 +73,7 @@ export function ConnectionPill({status}: {status: UIStatus}) {
   const showLoss = showTail && status.packetLossPct > 0
 
   return (
-    <div className="flex items-center gap-2 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1 text-xs shadow-[var(--shadow-soft)] transition-colors duration-300">
+    <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1 text-xs shadow-[var(--shadow-soft)] transition-colors duration-300">
       {/* The dot keeps --halo-gap from its own label — it breathes a 5px ring
           (motion.css .pf-halo) — while the readouts that follow stay on the
           pill's tighter rhythm. */}

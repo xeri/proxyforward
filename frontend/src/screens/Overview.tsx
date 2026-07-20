@@ -434,7 +434,7 @@ function HealthMetric({label, value, tone}: {label: string; value: string; tone:
   return (
     <div className="min-w-0 border-l border-[var(--hairline)] pl-3">
       <Overline>{label}</Overline>
-      <div className="mt-1 truncate text-[length:var(--fs-metric)] font-semibold leading-tight tabular-nums" style={{color: c}} title={value}>{value}</div>
+      <div className="font-display mt-1 truncate text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)] tabular-nums" style={{color: c}} title={value}>{value}</div>
     </div>
   )
 }
@@ -476,7 +476,7 @@ function LatencyProbe({linked, peer}: {linked: boolean; peer: 'gateway' | 'agent
                 <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
                   <div>
                     <Overline>One-way (estimated)</Overline>
-                    <div className="text-[length:var(--fs-metric)] font-semibold leading-tight tabular-nums text-[var(--text)]">{res.oneWayEstimateMs.toFixed(1)} ms</div>
+                    <div className="font-display text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)] tabular-nums text-[var(--text)]">{res.oneWayEstimateMs.toFixed(1)} ms</div>
                   </div>
                   <div className="text-xs tabular-nums text-[var(--text-3)]">
                     round trip {res.rttAvgMs.toFixed(1)} ms ({res.rttMinMs.toFixed(1)}–{res.rttMaxMs.toFixed(1)}) · jitter {res.jitterMs.toFixed(1)} ms · {res.samples} probes
@@ -560,7 +560,7 @@ function PipeNode({icon, title, state, headline, detail, extra, pulse}: {
       </div>
       <div className="min-w-0 flex-1">
         <Overline>{title}</Overline>
-        <div className="mt-0.5 truncate text-[length:var(--fs-metric)] font-semibold leading-tight tracking-tight">{headline}</div>
+        <div className="font-display mt-0.5 truncate text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)]">{headline}</div>
         <div className="mt-1.5"><StatusDot state={state} label={detail} pulse={pulse} /></div>
         {extra && <div className="mt-1 flex max-w-full">{extra}</div>}
       </div>

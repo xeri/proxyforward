@@ -164,7 +164,7 @@ function MapTooltip({geo, d}: {geo: WorldCountry; d: CountryAgg}) {
   const below = geo.cy < 90
   return (
     <div
-      className="pointer-events-none absolute z-10 w-max max-w-[15rem] -translate-x-1/2 rounded-[var(--r-sm)] border border-[var(--border-strong)] bg-[var(--panel-3)] px-2.5 py-1.5 text-xs shadow-lg"
+      className="pointer-events-none absolute z-10 w-max max-w-[15rem] -translate-x-1/2 rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--panel-3)] px-2.5 py-1.5 text-xs shadow-lg"
       style={{
         left: `${leftPct}%`,
         top: `${topPct}%`,

@@ -217,7 +217,7 @@ function LinkStrip({status}: {status: UIStatus}) {
         </div>
         <div className="min-w-0">
           <Overline>{title}</Overline>
-          <div className="mt-0.5 flex items-center gap-[var(--halo-gap)] text-[length:var(--fs-title)] font-semibold leading-tight">
+          <div className="font-display mt-0.5 flex items-center gap-[var(--halo-gap)] text-[length:var(--fs-title)] font-bold leading-[var(--lh-tight)]">
             {/* --halo-gap: the live dot breathes a 5px ring (motion.css). */}
             <span className={`inline-flex h-2 w-2 shrink-0 rounded-full ${up ? 'pf-halo' : ''}`} style={{background: c, ['--halo' as string]: c}} />
             <span className="truncate">{headline}</span>

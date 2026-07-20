@@ -494,7 +494,7 @@ function FleetSummary({rows, invites}: {rows: Row[]; invites: number}) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
       <div className="flex items-baseline gap-2.5">
-        <span className="text-[length:var(--fs-metric-hero)] font-semibold leading-none tabular-nums">{n}</span>
+        <span className="font-display text-[length:var(--fs-metric-hero)] font-bold leading-none tabular-nums">{n}</span>
         <span className="text-sm text-[var(--text-2)]">{n === 1 ? 'agent' : 'agents'}</span>
       </div>
       {online > 0
@@ -547,7 +547,7 @@ function Metric({label, value, tone}: {label: string; value: string; tone: Seg |
   return (
     <div className="min-w-0 border-l border-[var(--hairline)] pl-3">
       <Overline>{label}</Overline>
-      <div className="mt-1 truncate text-[length:var(--fs-metric)] font-semibold leading-tight tabular-nums" style={{color: c}} title={value}>{value}</div>
+      <div className="font-display mt-1 truncate text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)] tabular-nums" style={{color: c}} title={value}>{value}</div>
     </div>
   )
 }

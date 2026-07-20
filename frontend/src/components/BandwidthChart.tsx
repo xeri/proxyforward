@@ -182,7 +182,7 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
         <section>
           <div className="mb-4 flex items-end justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="text-[length:var(--fs-title)] font-semibold tracking-tight text-[var(--text)]">Bandwidth</h2>
+              <h2 className="font-display text-[length:var(--fs-title)] font-bold text-[var(--text)]">Bandwidth</h2>
               <p className="mt-0.5 text-xs text-[var(--text-2)]">{subtitleFor(range, data)}</p>
             </div>
             {liveReadout}
@@ -223,7 +223,7 @@ function RateHeadline({color, glyph, label, value}: {
       <div className="text-[11px] text-[var(--text-3)]">
         <span style={{color}}>{glyph}</span> {label}
       </div>
-      <div className="mt-0.5 font-mono text-[length:var(--fs-metric)] font-semibold leading-tight tabular-nums" style={{color}}>
+      <div className="font-display mt-0.5 text-[length:var(--fs-metric)] font-bold leading-[var(--lh-tight)] tabular-nums" style={{color}}>
         {value !== null ? <NumberTicker value={value} format={fmtRate} /> : <span className="text-[var(--text-3)]">—</span>}
       </div>
     </div>

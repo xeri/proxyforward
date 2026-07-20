@@ -48,7 +48,7 @@ export function Sidebar({status, nav, onNav, onPair}: {
             pill (main rail only; Settings styles itself). */}
         <div
           aria-hidden
-          className="pf-nav-glow pointer-events-none absolute left-2 right-2 top-4 rounded-[var(--r-md)] transition-[transform,opacity] duration-[var(--dur-slow)] [transition-timing-function:var(--ease-spring)]"
+          className="pf-nav-glow pointer-events-none absolute left-2 right-2 top-4 rounded-[var(--r-btn)] transition-[transform,opacity] duration-[var(--dur-slow)] [transition-timing-function:var(--ease-spring)]"
           style={{
             height: ITEM_H,
             opacity: activeIdx < 0 ? 0 : 1,
@@ -122,7 +122,7 @@ function NavButton({item, on, onNav, standalone = false}: {
       onClick={() => onNav(item.id)}
       title={`${item.label} — Ctrl+${item.shortcut}`}
       style={{height: ITEM_H}}
-      className={`group pf-press flex w-full items-center gap-2.5 rounded-[var(--r-md)] px-3 text-sm transition-colors duration-200 ${
+      className={`group pf-press flex w-full items-center gap-2.5 rounded-[var(--r-btn)] px-3 text-sm transition-colors duration-200 ${
         on
           ? `font-medium text-[var(--text)] ${standalone ? 'pf-nav-glow' : ''}`
           : 'text-[var(--text-2)] hover:bg-[color-mix(in_srgb,var(--text)_5%,transparent)] hover:text-[var(--text)]'

@@ -259,7 +259,7 @@ function Geography({rangeMs, selectedCc, onSelectCc}: {
     <section>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-[length:var(--fs-title)] font-semibold tracking-tight text-[var(--text)]">Geography</h2>
+          <h2 className="font-display text-[length:var(--fs-title)] font-bold text-[var(--text)]">Geography</h2>
           <p className="mt-0.5 text-xs text-[var(--text-2)]">
             Where players connect from across the range — click a country to filter the history below
           </p>
