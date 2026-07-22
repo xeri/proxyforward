@@ -82,6 +82,22 @@ const (
 	// config/consent paths — which is also what makes resume safe: clearing a
 	// bit can only ever un-cover a tunnel the agent itself still enables.
 	CapPause = "pause"
+	// CapTunnelUDP: the gateway may bind a UDP public listener for a tunnel
+	// whose TunnelSpec.Type is "udp", and the agent will serve the resulting
+	// data streams as datagrams rather than as a byte stream. The stream still
+	// opens with an ordinary TypeOpenConn header — the tunnel's type, which both
+	// ends already know from the spec, decides how the body is read — so no new
+	// message type or wire field exists for UDP, and a frame to a legacy peer is
+	// byte-identical to one from a build that had never heard of it.
+	//
+	// Without this capability the gateway must refuse a udp tunnel rather than
+	// bind it, because a legacy agent would splice the datagram stream as raw
+	// bytes and silently corrupt every packet boundary.
+	//
+	// This constant was once advertised without an implementation behind it,
+	// which is precisely the bug the SupportedCapabilities comment warns about;
+	// it joins that list only in the commit that completes the path end to end.
+	CapTunnelUDP = "tunnel-udp"
 )
 
 // SupportedCapabilities is everything this build implements, both roles. A
