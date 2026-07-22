@@ -81,6 +81,13 @@ export const BANDWIDTH_SCOPES = [
   {value: 'per-direction', label: 'Per-direction'},
   {value: 'per-connection', label: 'Per-connection'},
 ]
+/** Tunnel protocols the agent can serve. Labelled by what a user is actually
+ * setting up rather than by the transport name, because "UDP" alone does not
+ * tell a Minecraft admin whether it is the one they need. */
+export const PROTOCOLS = [
+  {value: 'tcp', label: 'TCP — Java Edition'},
+  {value: 'udp', label: 'UDP — Bedrock, Geyser, voice chat'},
+]
 export function scopeLabel(s: string): string {
   return BANDWIDTH_SCOPES.find(o => o.value === (s || 'combined'))?.label ?? 'Combined'
 }

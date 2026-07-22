@@ -306,9 +306,10 @@ export function Field({label, hint, children}: {label: string; hint?: ReactNode;
  *
  * `size="sm"` + `icon` is the compact form for list toolbars. Screens must not
  * hand-roll their own search box beside this one. */
-export function TextInput({value, onChange, placeholder, type = 'text', mono, onEnter, autoFocus, size = 'md', icon, ariaLabel}: {
+export function TextInput({value, onChange, placeholder, type = 'text', mono, onEnter, autoFocus, size = 'md', icon, ariaLabel, disabled}: {
   value: string; onChange: (v: string) => void; placeholder?: string; type?: string; mono?: boolean
   onEnter?: () => void; autoFocus?: boolean; size?: 'sm' | 'md'; icon?: ReactNode; ariaLabel?: string
+  disabled?: boolean
 }) {
   const isPassword = type === 'password'
   const [reveal, setReveal] = useState(false)
@@ -316,15 +317,16 @@ export function TextInput({value, onChange, placeholder, type = 'text', mono, on
   const sm = size === 'sm'
   return (
     <div
-      className={`pf-control relative flex items-center rounded-[var(--r-input)] bg-[var(--input-bg)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot)] transition-[background-color,box-shadow] duration-200 hover:bg-[var(--input-bg-hover)] has-[:focus]:bg-[var(--input-bg-hover)] has-[:focus]:shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)] ${
-        sm ? 'h-8' : 'h-[var(--control-h)]'
-      }`}
+      className={`pf-control relative flex items-center rounded-[var(--r-input)] bg-[var(--input-bg)] shadow-[inset_0_2px_4px_-1px_var(--bevel-bot)] transition-[background-color,box-shadow] duration-200 ${
+        disabled ? 'pointer-events-none opacity-50' : 'hover:bg-[var(--input-bg-hover)] has-[:focus]:bg-[var(--input-bg-hover)] has-[:focus]:shadow-[inset_0_2px_4px_-1px_var(--bevel-bot),0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent),0_0_18px_-4px_color-mix(in_srgb,var(--accent)_40%,transparent)]'
+      } ${sm ? 'h-8' : 'h-[var(--control-h)]'}`}
     >
       {icon && (
         <span className="pointer-events-none absolute left-2.5 flex text-[var(--text-3)]">{icon}</span>
       )}
       <input
         type={effectiveType} value={value} placeholder={placeholder} autoFocus={autoFocus} aria-label={ariaLabel}
+        disabled={disabled}
         onChange={e => onChange(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && onEnter) onEnter() }}
         className={`h-full w-full min-w-0 rounded-[inherit] bg-transparent text-[var(--text)] outline-none placeholder:italic placeholder:text-[var(--text-3)] ${

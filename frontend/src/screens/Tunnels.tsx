@@ -9,7 +9,7 @@ import {
   Modal, MonoChip, PageHeader, Select, Skeleton, TextInput, Toggle,
 } from '../components/ui'
 import {IconBolt, IconEdit, IconPlus, IconServer, IconTrash, IconTunnels} from '../components/icons'
-import {BANDWIDTH_SCOPES, scopeLabel, UIStatus} from '../state'
+import {BANDWIDTH_SCOPES, PROTOCOLS, scopeLabel, UIStatus} from '../state'
 
 type Tunnel = config.Tunnel
 
@@ -170,6 +170,7 @@ export function Tunnels({status}: {status: UIStatus}) {
           const l = live.get(t.ID)
           const bound = !!(l && l.publicPort > 0)
           const advanced: [string, string][] = [
+            ...(t.Type === 'udp' ? [['Protocol', 'UDP'] as [string, string]] : []),
             ...(t.Options?.MinecraftAware ? [['Minecraft-aware', 'On'] as [string, string]] : []),
             ...(t.Options?.ProxyProtocolV2 ? [['PROXY protocol v2', 'On'] as [string, string]] : []),
             ...(t.Options?.OfflineMOTD ? [['Offline MOTD', t.Options.OfflineMOTD] as [string, string]] : []),
@@ -307,6 +308,19 @@ function TunnelEditor({title, initial, onSave, onCancel}: {
   const opt = t.Options ?? config.TunnelOptions.createFrom({})
   const set = (patch: Partial<Tunnel>) => setT(prev => config.Tunnel.createFrom({...prev, ...patch}))
   const setOpt = (patch: Partial<config.TunnelOptions>) => set({Options: config.TunnelOptions.createFrom({...opt, ...patch})})
+  const proto = t.Type || 'tcp'
+  const isUDP = proto === 'udp'
+  // Switching to UDP clears the three TCP-only options rather than leaving them
+  // set-but-ignored: the agent's config validation rejects each of those
+  // combinations, so a tunnel carrying them would fail on save with an error
+  // about a checkbox the user can no longer see.
+  const setProto = (v: string) => {
+    if (v === 'udp') {
+      set({Type: v, Options: config.TunnelOptions.createFrom({...opt, MinecraftAware: false, ProxyProtocolV2: false, OfflineMOTD: ''})})
+      return
+    }
+    set({Type: v})
+  }
 
   const save = async () => { setSaving(true); await onSave(t); setSaving(false) }
 
@@ -332,20 +346,37 @@ function TunnelEditor({title, initial, onSave, onCancel}: {
         <Disclosure
           label="Advanced options"
           hint="Protocol awareness, real client IPs, offline behavior, bandwidth"
-          defaultOpen={opt.MinecraftAware || opt.ProxyProtocolV2 || !!opt.OfflineMOTD || (opt.BandwidthLimitMbps ?? 0) > 0}
+          defaultOpen={isUDP || opt.MinecraftAware || opt.ProxyProtocolV2 || !!opt.OfflineMOTD || (opt.BandwidthLimitMbps ?? 0) > 0}
         >
           <div className="space-y-4">
+            {/* Protocol leads the section because it governs everything under it:
+                the three options below are TCP-only, and picking UDP turns them
+                off rather than leaving controls that would fail validation on
+                save. */}
+            <Field label="Protocol" hint={isUDP
+              ? 'Datagrams, for Bedrock/Geyser and voice-chat mods. TCP and UDP hold a port number independently, so this may reuse the number a Java tunnel already uses.'
+              : 'A byte stream, for Java Edition.'}>
+              <Select value={proto} onChange={v => setProto(v)} options={PROTOCOLS} />
+            </Field>
+
             <div className="divide-y divide-[var(--border)] rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] px-4 py-1">
               <Toggle checked={opt.MinecraftAware} onChange={v => setOpt({MinecraftAware: v})}
-                label="Minecraft-aware"
-                hint="Sniff player usernames from the login handshake for the traffic and players views." />
+                label="Minecraft-aware" disabled={isUDP}
+                hint={isUDP
+                  ? 'TCP only — the Java login handshake this reads is a TCP stream.'
+                  : 'Sniff player usernames from the login handshake for the traffic and players views.'} />
               <Toggle checked={opt.ProxyProtocolV2} onChange={v => setOpt({ProxyProtocolV2: v})}
-                label="PROXY protocol v2"
-                hint={<>Send the real client IP to the local server (Paper/Velocity). <b>Mutually exclusive</b> with BungeeCord/Velocity IP-forwarding — enabling both causes ghost errors.</>} />
+                label="PROXY protocol v2" disabled={isUDP}
+                hint={isUDP
+                  ? 'TCP only — the v2 header is a preamble on a stream, and a datagram flow has none.'
+                  : <>Send the real client IP to the local server (Paper/Velocity). <b>Mutually exclusive</b> with BungeeCord/Velocity IP-forwarding — enabling both causes ghost errors.</>} />
             </div>
 
-            <Field label="Offline MOTD" hint="Shown to players when the agent or server is down. Leave blank for a clean disconnect instead.">
-              <TextInput value={opt.OfflineMOTD} onChange={v => setOpt({OfflineMOTD: v})} placeholder="Server is offline — back soon" />
+            <Field label="Offline MOTD" hint={isUDP
+              ? 'TCP only — status pings are a TCP protocol, so there is no ping here to answer.'
+              : 'Shown to players when the agent or server is down. Leave blank for a clean disconnect instead.'}>
+              <TextInput value={opt.OfflineMOTD} onChange={v => setOpt({OfflineMOTD: v})}
+                placeholder="Server is offline — back soon" disabled={isUDP} />
             </Field>
 
             <div className="grid grid-cols-2 gap-3">
@@ -365,10 +396,6 @@ function TunnelEditor({title, initial, onSave, onCancel}: {
                 />
               </Field>
             </div>
-
-            <Field label="Protocol">
-              <Select value="tcp" onChange={() => {}} options={[{value: 'tcp', label: 'TCP (Java Edition)'}]} />
-            </Field>
           </div>
         </Disclosure>
       </div>
