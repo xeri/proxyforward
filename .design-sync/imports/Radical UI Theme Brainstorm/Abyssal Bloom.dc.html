@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Unicase:wght@500;700&family=Spline+Sans+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#02090f; }
+  a { color:#2fffc0; text-decoration:none; } a:hover { color:#bdfbe6; }
+  @keyframes ds-wobble { 0%,100% { border-radius:60% 40% 55% 45% / 50% 60% 40% 55%; } 25% { border-radius:44% 56% 38% 62% / 62% 40% 60% 38%; } 50% { border-radius:56% 44% 64% 36% / 40% 56% 44% 62%; } 75% { border-radius:38% 62% 46% 54% / 58% 38% 62% 42%; } }
+  @keyframes ds-drift { 0%,100% { transform:translate(0,0) rotate(0deg); } 30% { transform:translate(4px,-6px) rotate(4deg); } 60% { transform:translate(-5px,3px) rotate(-3deg); } 80% { transform:translate(2px,5px) rotate(2deg); } }
+  @keyframes ds-pulse { 0%,100% { opacity:0.55; } 50% { opacity:1; } }
+</style>
+</helmet>
+
+<div style="position:relative; height:100vh; overflow:hidden; background:#02090f; background-image:radial-gradient(circle at 75% -10%,rgba(47,255,192,0.08),transparent 55%),radial-gradient(circle at 10% 110%,rgba(28,139,255,0.10),transparent 50%); font-family:'Spline Sans Mono',monospace;">
+  <sc-if value="{{ dotGrid }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute; inset:0; background-image:radial-gradient(rgba(18,68,80,0.55) 1px,transparent 1px); background-size:26px 26px; pointer-events:none;"></div>
+  </sc-if>
+  <canvas ref="{{ canvasRef }}" style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none;"></canvas>
+  <sc-if value="{{ scanlines }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute; inset:0; background:repeating-linear-gradient(0deg,rgba(47,255,192,0.025) 0 1px,transparent 1px 4px); pointer-events:none; z-index:5;"></div>
+  </sc-if>
+
+  <div style="position:relative; z-index:1; display:grid; grid-template-columns:236px 1fr; height:100%;">
+
+    <!-- sidebar -->
+    <div style="display:flex; flex-direction:column; gap:28px; padding:26px 20px; background:linear-gradient(180deg,rgba(6,34,43,0.55),rgba(2,9,15,0.92)); border-right:1px solid #0d2b33; backdrop-filter:blur(6px);">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="width:36px; height:36px; background:radial-gradient(circle at 35% 30%,#2fffc0,#1c8bff 80%); animation:ds-wobble 7s ease-in-out infinite; box-shadow:0 0 20px rgba(47,255,192,0.45);"></div>
+        <div style="font-family:'Cormorant Unicase',serif; font-weight:700; color:#bdfbe6; font-size:19px;">Proxyforward</div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:14px 6px 14px 6px; background:rgba(47,255,192,0.09); border:1px solid rgba(47,255,192,0.32); color:#2fffc0; font-size:12px; font-weight:600;">
+          <span style="width:6px; height:6px; background:#2fffc0; border-radius:50%; box-shadow:0 0 8px #2fffc0;"></span>overview
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:14px 6px 14px 6px; border:1px solid transparent; color:#3e6a74; font-size:12px;" style-hover="color:#bdfbe6; background:rgba(18,68,80,0.25);">exit nodes</div>
+        <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:14px 6px 14px 6px; border:1px solid transparent; color:#3e6a74; font-size:12px;" style-hover="color:#bdfbe6; background:rgba(18,68,80,0.25);">sessions</div>
+        <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:14px 6px 14px 6px; border:1px solid transparent; color:#3e6a74; font-size:12px;" style-hover="color:#bdfbe6; background:rgba(18,68,80,0.25);">api keys</div>
+        <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:14px 6px 14px 6px; border:1px solid transparent; color:#3e6a74; font-size:12px;" style-hover="color:#bdfbe6; background:rgba(18,68,80,0.25);">billing</div>
+      </div>
+      <div style="margin-top:auto; display:flex; flex-direction:column; gap:14px;">
+        <div style="border:1px solid #124450; border-radius:28px 10px 28px 10px; padding:14px; background:linear-gradient(180deg,rgba(28,139,255,0.10),rgba(2,9,15,0.6));">
+          <div style="color:#3e6a74; font-size:10px;">depth · plan</div>
+          <div style="font-family:'Cormorant Unicase',serif; font-weight:700; color:#bdfbe6; font-size:17px; margin-top:2px;">Mesopelagic</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:6px;">312 gb of 2 tb used</div>
+          <div style="height:4px; background:#0d2b33; border-radius:2px; margin-top:6px;"><div style="width:16%; height:4px; background:linear-gradient(90deg,#2fffc0,#1c8bff); border-radius:2px; box-shadow:0 0 8px rgba(47,255,192,0.5);"></div></div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:30px; height:30px; background:radial-gradient(circle at 60% 30%,#1c8bff,#06222b 85%); border:1px solid #124450; animation:ds-wobble 9s ease-in-out infinite reverse;"></div>
+          <div><div style="color:#bdfbe6; font-size:11px; font-weight:600;">m. okonkwo</div><div style="color:#3e6a74; font-size:10px;">ops@abyss.dev</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- main -->
+    <div style="overflow:auto; padding:30px 38px 38px; display:flex; flex-direction:column; gap:22px;">
+
+      <div style="display:flex; align-items:center; gap:16px;">
+        <div>
+          <div style="color:#3e6a74; font-size:11px; letter-spacing:0.14em;">tuesday · 04:11 utc</div>
+          <div style="font-family:'Cormorant Unicase',serif; font-weight:700; color:#bdfbe6; font-size:32px; line-height:1.1;">Overview</div>
+        </div>
+        <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
+          <div style="display:flex; align-items:center; gap:8px; background:rgba(47,255,192,0.10); border:1px solid rgba(47,255,192,0.35); color:#2fffc0; font-size:11px; padding:8px 14px; border-radius:999px;"><span style="width:7px; height:7px; background:#2fffc0; border-radius:50%; box-shadow:0 0 10px #2fffc0; animation:ds-pulse 2.4s ease-in-out infinite;"></span>tethered · fra-07</div>
+          <div style="background:#2fffc0; color:#02090f; font-size:13px; font-weight:700; letter-spacing:0.14em; padding:12px 22px; border-radius:14px 6px 14px 6px; box-shadow:0 0 22px rgba(47,255,192,0.35); cursor:pointer;" style-hover="box-shadow:0 0 34px rgba(47,255,192,0.55);">ROTATE IP</div>
+          <div style="border:1px solid #1c8bff; color:#1c8bff; font-size:13px; font-weight:700; letter-spacing:0.14em; padding:12px 22px; border-radius:14px 6px 14px 6px; cursor:pointer;" style-hover="background:rgba(28,139,255,0.12); color:#bdfbe6;">NEW SESSION</div>
+        </div>
+      </div>
+
+      <!-- hero: special frame -->
+      <div style="position:relative; border:1px solid rgba(47,255,192,0.4); border-radius:28px 10px 28px 10px; background:radial-gradient(circle at 78% 15%,rgba(47,255,192,0.16),rgba(6,34,43,0.72) 55%,rgba(2,9,15,0.85)); box-shadow:0 0 34px rgba(47,255,192,0.16); backdrop-filter:blur(5px); padding:28px 32px; display:flex; align-items:center; gap:32px; overflow:hidden;">
+        <div>
+          <div style="color:#3e6a74; font-size:11px; letter-spacing:0.2em;">throughput · live</div>
+          <div style="font-family:'Cormorant Unicase',serif; font-weight:700; color:#2fffc0; font-size:72px; line-height:1; margin-top:6px; text-shadow:0 0 32px rgba(47,255,192,0.45);">4.2 <span style="font-size:26px; color:#1c8bff;">gb/s</span></div>
+          <div style="display:flex; gap:22px; margin-top:14px; font-size:11px;">
+            <span style="color:#bdfbe6;">rx <span style="color:#2fffc0;">3.1 gb/s</span></span>
+            <span style="color:#bdfbe6;">tx <span style="color:#1c8bff;">1.1 gb/s</span></span>
+            <span style="color:#3e6a74;">hop count 3</span>
+            <span style="color:#3e6a74;">jitter 0.8ms</span>
+          </div>
+        </div>
+        <div style="margin-left:auto; display:flex; align-items:center; gap:18px;">
+          <div style="position:relative; width:120px; height:104px;">
+            <div style="position:absolute; left:8px; top:6px; width:64px; height:58px; background:radial-gradient(circle at 32% 28%,rgba(47,255,192,0.9),rgba(28,139,255,0.55) 70%,rgba(6,34,43,0.4)); animation:ds-wobble 6s ease-in-out infinite, ds-drift 11s ease-in-out infinite; box-shadow:0 0 26px rgba(47,255,192,0.4);"></div>
+            <div style="position:absolute; right:4px; top:0; width:38px; height:34px; background:radial-gradient(circle at 60% 30%,rgba(28,139,255,0.85),rgba(6,34,43,0.5) 80%); animation:ds-wobble 8s ease-in-out infinite reverse, ds-drift 13s ease-in-out infinite reverse; box-shadow:0 0 18px rgba(28,139,255,0.4);"></div>
+            <div style="position:absolute; right:22px; bottom:2px; width:26px; height:24px; background:radial-gradient(circle at 40% 40%,rgba(189,251,230,0.8),rgba(47,255,192,0.35) 75%); animation:ds-wobble 5s ease-in-out infinite, ds-drift 9s ease-in-out infinite; box-shadow:0 0 14px rgba(47,255,192,0.35); opacity:0.85;"></div>
+          </div>
+          <div style="text-align:right;">
+            <div style="color:#bdfbe6; font-size:12px; font-weight:600;">session organism</div>
+            <div style="color:#2fffc0; font-size:11px; margin-top:2px;">healthy · molting in 42m</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- stats -->
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:16px;">
+        <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:16px 18px; backdrop-filter:blur(4px);">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">median latency</div>
+          <div style="font-family:'Cormorant Unicase',serif; font-weight:700; color:#bdfbe6; font-size:30px; margin-top:4px;">21 <span style="font-size:14px; color:#3e6a74;">ms</span></div>
+          <div style="color:#2fffc0; font-size:10px; margin-top:2px;">▾ 3ms vs yesterday</div>
+        </div>
+        <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:16px 18px; backdrop-filter:blur(4px);">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">active sessions</div>
+          <div style="font-family:'Cormorant Unicase',serif; font-weight:700; color:#bdfbe6; font-size:30px; margin-top:4px;">14</div>
+          <div style="color:#1c8bff; font-size:10px; margin-top:2px;">4 rotating · 10 pinned</div>
+        </div>
+        <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:16px 18px; backdrop-filter:blur(4px);">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">data today</div>
+          <div style="font-family:'Cormorant Unicase',serif; font-weight:700; color:#bdfbe6; font-size:30px; margin-top:4px;">312 <span style="font-size:14px; color:#3e6a74;">gb</span></div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">16% of monthly depth</div>
+        </div>
+        <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:16px 18px; backdrop-filter:blur(4px);">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">uptime</div>
+          <div style="font-family:'Cormorant Unicase',serif; font-weight:700; color:#2fffc0; font-size:30px; margin-top:4px; text-shadow:0 0 18px rgba(47,255,192,0.35);">99.98</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">90-day window</div>
+        </div>
+      </div>
+
+      <!-- bottom -->
+      <div style="display:grid; grid-template-columns:2fr 1fr; gap:16px;">
+        <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:20px 22px; backdrop-filter:blur(4px);">
+          <div style="display:flex; align-items:center; margin-bottom:14px;">
+            <div style="color:#bdfbe6; font-size:13px; font-weight:600;">exit nodes</div>
+            <a href="#" style="margin-left:auto; font-size:11px;">view all →</a>
+          </div>
+          <div style="display:flex; flex-direction:column;">
+            <div style="display:grid; grid-template-columns:16px 90px 1fr 70px 110px; gap:12px; align-items:center; padding:9px 0; color:#3e6a74; font-size:10px; letter-spacing:0.14em; border-bottom:1px solid #0d2b33;"><span></span><span>node</span><span>region</span><span>latency</span><span>load</span></div>
+            <div style="display:grid; grid-template-columns:16px 90px 1fr 70px 110px; gap:12px; align-items:center; padding:11px 0; border-bottom:1px solid #0d2b33;"><span style="width:7px; height:7px; background:#2fffc0; border-radius:50%; box-shadow:0 0 8px #2fffc0; animation:ds-pulse 2s ease-in-out infinite;"></span><span style="color:#2fffc0; font-size:12px; font-weight:600;">fra-07</span><span style="color:#bdfbe6; font-size:12px;">Frankfurt · current exit</span><span style="color:#2fffc0; font-size:12px;">12ms</span><span style="height:5px; background:#0d2b33; border-radius:3px;"><span style="display:block; width:34%; height:5px; background:linear-gradient(90deg,#2fffc0,#1c8bff); border-radius:3px;"></span></span></div>
+            <div style="display:grid; grid-template-columns:16px 90px 1fr 70px 110px; gap:12px; align-items:center; padding:11px 0; border-bottom:1px solid #0d2b33;"><span style="width:6px; height:6px; background:#1c8bff; border-radius:50%; box-shadow:0 0 6px #1c8bff;"></span><span style="color:#bdfbe6; font-size:12px;">ams-03</span><span style="color:#3e6a74; font-size:12px;">Amsterdam</span><span style="color:#bdfbe6; font-size:12px;">19ms</span><span style="height:5px; background:#0d2b33; border-radius:3px;"><span style="display:block; width:52%; height:5px; background:linear-gradient(90deg,#2fffc0,#1c8bff); border-radius:3px;"></span></span></div>
+            <div style="display:grid; grid-template-columns:16px 90px 1fr 70px 110px; gap:12px; align-items:center; padding:11px 0; border-bottom:1px solid #0d2b33;"><span style="width:6px; height:6px; background:#1c8bff; border-radius:50%; box-shadow:0 0 6px #1c8bff;"></span><span style="color:#bdfbe6; font-size:12px;">lhr-12</span><span style="color:#3e6a74; font-size:12px;">London</span><span style="color:#bdfbe6; font-size:12px;">23ms</span><span style="height:5px; background:#0d2b33; border-radius:3px;"><span style="display:block; width:47%; height:5px; background:linear-gradient(90deg,#2fffc0,#1c8bff); border-radius:3px;"></span></span></div>
+            <div style="display:grid; grid-template-columns:16px 90px 1fr 70px 110px; gap:12px; align-items:center; padding:11px 0; border-bottom:1px solid #0d2b33;"><span style="width:6px; height:6px; background:#1c8bff; border-radius:50%; box-shadow:0 0 6px #1c8bff;"></span><span style="color:#bdfbe6; font-size:12px;">ord-11</span><span style="color:#3e6a74; font-size:12px;">Chicago</span><span style="color:#bdfbe6; font-size:12px;">34ms</span><span style="height:5px; background:#0d2b33; border-radius:3px;"><span style="display:block; width:66%; height:5px; background:linear-gradient(90deg,#2fffc0,#1c8bff); border-radius:3px;"></span></span></div>
+            <div style="display:grid; grid-template-columns:16px 90px 1fr 70px 110px; gap:12px; align-items:center; padding:11px 0;"><span style="width:6px; height:6px; background:#3e6a74; border-radius:50%;"></span><span style="color:#bdfbe6; font-size:12px;">sgp-02</span><span style="color:#3e6a74; font-size:12px;">Singapore</span><span style="color:#3e6a74; font-size:12px;">88ms</span><span style="height:5px; background:#0d2b33; border-radius:3px;"><span style="display:block; width:81%; height:5px; background:linear-gradient(90deg,#1c8bff,#3e6a74); border-radius:3px;"></span></span></div>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <div style="border:1px solid rgba(47,255,192,0.3); border-radius:28px 10px 28px 10px; background:linear-gradient(180deg,rgba(28,139,255,0.12),rgba(2,9,15,0.75)); backdrop-filter:blur(5px); padding:20px 22px;">
+            <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">current exit</div>
+            <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
+              <span style="background:rgba(47,255,192,0.1); border:1px solid rgba(47,255,192,0.35); color:#2fffc0; font-size:13px; padding:6px 12px; border-radius:8px 3px 8px 3px;">185.199.7.42</span>
+              <a href="#" style="font-size:11px;">copy</a>
+            </div>
+            <div style="color:#3e6a74; font-size:10px; margin-top:10px;">held for 00:42:11 · auto-molts hourly</div>
+            <div style="margin-top:14px; background:rgba(47,255,192,0.08); border:1px solid rgba(47,255,192,0.3); color:#2fffc0; font-size:12px; font-weight:700; letter-spacing:0.14em; text-align:center; padding:11px; border-radius:14px 6px 14px 6px; cursor:pointer;" style-hover="background:rgba(47,255,192,0.16);">DETACH SESSION</div>
+          </div>
+          <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:18px 22px; backdrop-filter:blur(4px);">
+            <div style="color:#bdfbe6; font-size:12px; font-weight:600;">bloom activity</div>
+            <div style="color:#3e6a74; font-size:10px; margin-top:2px;">each drifting light is a live request stream</div>
+            <div style="display:flex; gap:16px; margin-top:12px; font-size:11px;">
+              <span style="display:flex; align-items:center; gap:6px; color:#bdfbe6;"><span style="width:6px; height:6px; background:#2fffc0; border-radius:50%; box-shadow:0 0 8px #2fffc0;"></span>outbound</span>
+              <span style="display:flex; align-items:center; gap:6px; color:#bdfbe6;"><span style="width:6px; height:6px; background:#1c8bff; border-radius:50%; box-shadow:0 0 8px #1c8bff;"></span>inbound</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;planktonCount&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:80,&quot;min&quot;:0,&quot;max&quot;:140,&quot;step&quot;:10,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Atmosphere&quot;},&quot;scanlines&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Atmosphere&quot;},&quot;dotGrid&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Atmosphere&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      scanlines: this.props.scanlines ?? true,
+      dotGrid: this.props.dotGrid ?? true,
+      canvasRef: (el) => {
+        if (el && !this._started) { this._started = true; this.canvas = el; this._start(); }
+      },
+    };
+  }
+  _start() {
+    const c = this.canvas, ctx = c.getContext('2d');
+    const fit = () => { c.width = c.offsetWidth; c.height = c.offsetHeight; };
+    fit();
+    this._fit = fit;
+    window.addEventListener('resize', fit);
+    const MAX = 140;
+    // swirling creatures: each particle orbits a slowly drifting nucleus with wobble
+    this.p = Array.from({ length: MAX }, () => ({
+      nx: Math.random(), ny: Math.random(),
+      r: 14 + Math.random() * 95,
+      a: Math.random() * Math.PI * 2,
+      spin: (0.15 + Math.random() * 0.55) * (Math.random() < 0.5 ? -1 : 1),
+      size: 0.8 + Math.random() * 2.1,
+      jade: Math.random() < 0.72,
+      ph: Math.random() * Math.PI * 2,
+      dph: Math.random() * Math.PI * 2,
+      ds: 0.04 + Math.random() * 0.12,
+      ecc: 0.5 + Math.random() * 0.5,
+    }));
+    let t = 0, last = performance.now();
+    const loop = (now) => {
+      this._raf = requestAnimationFrame(loop);
+      const dt = Math.min((now - last) / 1000, 0.05); last = now; t += dt;
+      const n = Math.max(0, Math.min(this.props.planktonCount ?? 80, MAX));
+      const w = c.width, h = c.height;
+      ctx.clearRect(0, 0, w, h);
+      for (let i = 0; i < n; i++) {
+        const p = this.p[i];
+        p.a += p.spin * dt;
+        const nx = (p.nx + 0.05 * Math.sin(t * p.ds + p.dph)) * w;
+        const ny = (p.ny + 0.05 * Math.cos(t * p.ds * 0.75 + p.dph)) * h;
+        const wob = 1 + 0.3 * Math.sin(t * 1.4 + p.ph);
+        const x = nx + Math.cos(p.a) * p.r * wob;
+        const y = ny + Math.sin(p.a * p.ecc) * p.r * wob * 0.7;
+        const tw = 0.2 + 0.6 * Math.abs(Math.sin(t * 1.8 + p.ph));
+        const col = p.jade ? '47,255,192' : '28,139,255';
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(${col},${tw.toFixed(3)})`;
+        ctx.shadowColor = `rgba(${col},0.8)`;
+        ctx.shadowBlur = 7;
+        ctx.arc(x, y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+    };
+    this._raf = requestAnimationFrame(loop);
+  }
+  componentWillUnmount() {
+    cancelAnimationFrame(this._raf);
+    window.removeEventListener('resize', this._fit);
+  }
+}
+</script>
+</body>
+</html>

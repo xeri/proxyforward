@@ -263,14 +263,31 @@ func TestSpliceReturnsDatagramsFromTheServer(t *testing.T) {
 	}
 }
 
-// TestDatagramConnCloseWriteIsNoop guards the half-close contract (D7): Splice
-// calls CloseWrite on EOF and treats a failure as a real error, but a
-// connectionless socket has no FIN to send. Reporting failure here would log an
-// error on every clean UDP session teardown.
-func TestDatagramConnCloseWriteIsNoop(t *testing.T) {
+// TestDatagramConnCloseWriteEndsTheFlow guards the half-close contract (D7).
+// Splice calls CloseWrite when one direction reaches EOF and then waits for the
+// other to notice. On a stream the FIN is what it notices; a datagram socket has
+// no FIN, so CloseWrite must close — otherwise the opposite copy stays blocked
+// on a socket nobody will write to again, and Splice never returns. That leak
+// costs a goroutine, a socket and a gate slot for every player who quits.
+func TestDatagramConnCloseWriteEndsTheFlow(t *testing.T) {
 	local, _ := udpPair(t)
-	if err := (DatagramConn{local}).CloseWrite(); err != nil {
+	dc := DatagramConn{local}
+
+	blocked := make(chan error, 1)
+	go func() {
+		_, err := dc.Read(make([]byte, 2048))
+		blocked <- err
+	}()
+	// Let the reader park before closing, so this tests the wake-up and not a
+	// read that never started.
+	time.Sleep(50 * time.Millisecond)
+	if err := dc.CloseWrite(); err != nil {
 		t.Fatalf("CloseWrite on a datagram socket: %v", err)
+	}
+	select {
+	case <-blocked:
+	case <-time.After(3 * time.Second):
+		t.Fatal("CloseWrite left the opposite direction blocked; Splice would never return")
 	}
 }
 

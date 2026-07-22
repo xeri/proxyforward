@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -157,11 +158,18 @@ func TestSupportedCapabilities(t *testing.T) {
 	if got := IntersectCaps(SupportedCapabilities, []string{CapGatewayConfig}); !reflect.DeepEqual(got, []string{CapGatewayConfig}) {
 		t.Fatalf("against a gateway-config-only peer: got %v want [gateway-config]", got)
 	}
-	// tunnel-udp is deliberately NOT advertised: it isn't implemented
-	// end-to-end (the gateway rejects udp specs), so offering it would be a
-	// protocol lie.
-	if s.Has("tunnel-udp") {
-		t.Fatal("tunnel-udp must not be advertised until it is implemented")
+	// tunnel-udp is advertised now that both ends honor it: the gateway binds a
+	// UDP listener for a udp spec and the agent serves those streams as
+	// datagrams. It spent a release withdrawn precisely because it was offered
+	// before that was true, so what is worth asserting is the pairing — the
+	// capability and the code that answers for it travel together.
+	if !s.Has(CapTunnelUDP) {
+		t.Fatal("tunnel-udp is implemented end-to-end and must be advertised")
+	}
+	// A peer without tunnel-udp must negotiate it away, so the gateway refuses
+	// its udp specs rather than binding a port it cannot serve.
+	if got := IntersectCaps([]string{CapTunnelSync}, SupportedCapabilities); slices.Contains(got, CapTunnelUDP) {
+		t.Fatalf("tunnel-udp survived negotiation with a peer that never offered it: %v", got)
 	}
 	// A sync-only peer (older build) must negotiate away conn-stats — an old
 	// agent that never offers conn-stats gets no RTT frames.

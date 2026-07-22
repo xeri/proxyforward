@@ -148,11 +148,20 @@ func (d *DatagramStream) Write(p []byte) (int, error) {
 }
 
 // DatagramConn adapts a connected UDP socket to Conn. A *net.UDPConn from
-// DialUDP already reads and writes one datagram per call, so the only thing
-// missing is CloseWrite: there is no FIN on a connectionless socket, so it is a
-// no-op that reports success — Splice calls it on EOF and must not read that as
-// a failure.
+// DialUDP already reads and writes one datagram per call; the only thing
+// missing is CloseWrite.
 type DatagramConn struct{ net.Conn }
 
-// CloseWrite is the no-op half-close described on DatagramConn.
-func (DatagramConn) CloseWrite() error { return nil }
+// CloseWrite ends the flow, because a datagram socket has no half-open state to
+// enter. Splice calls it when one direction reaches EOF and then relies on the
+// other direction noticing; on a stream that works because CloseWrite sends a
+// FIN the peer reads as EOF. A connectionless socket has no FIN, so a CloseWrite
+// that did nothing would leave the opposite copy blocked on a socket nobody will
+// ever write to again — parked until the idle reaper fired minutes later,
+// holding a goroutine, a socket and a gate slot per departed player.
+//
+// Closing instead is also the honest semantics: the far leg is gone, so there is
+// no one left to deliver the local server's replies to. Nothing is lost that a
+// half-close would have preserved — that guarantee exists for a stream's final
+// queued bytes, and a datagram flow has no such queue.
+func (d DatagramConn) CloseWrite() error { return d.Conn.Close() }

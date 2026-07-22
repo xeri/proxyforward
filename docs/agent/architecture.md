@@ -22,8 +22,10 @@ internal/
                         analytics_api.go = op registry; lifecycle_api.go = start/stop ops
   agent/                Dial→hello→register→serve; health probes; hot-apply; probe.go
   gateway/              TLS listener, pre-auth, admission; actor.go = ONE goroutine
-                        owning sessions+listeners; limits.go; per-conn RTT sampler
-  relay/                Splice (the hot path) + TapConn (read-only sniff hook)
+                        owning sessions+listeners; limits.go; per-conn RTT sampler;
+                        udp.go = UDP port presented as a net.Listener
+  relay/                Splice (the hot path) + TapConn (read-only sniff hook) +
+                        datagram framing/legs for udp tunnels (datagram.go)
   transport/            Session/Stream interfaces + tuned yamux & QUIC impls (only yamux/quic-go user)
   control/              Wire protocol: envelope framing, messages, capabilities
   link/                 Pairing codes, self-signed cert + pin, backoff
@@ -94,6 +96,9 @@ persisted to config.
 | Auto-transport re-probe cooldown | 5 min (cleared on network change) | `agent.go transportReprobeAfter` |
 | Splice buffer / write-stall deadline | 128 KiB pooled / 2 min | `relay.go` (`BufSize` / `WriteStallTimeout`) |
 | Splice idle reap | 10 min with no bytes in **either** direction (>30× Minecraft's 30 s keepalive limit) | `relay.go DefaultIdleTimeout` |
+| Datagram idle reap | 2 min — a UDP flow has no FIN, so the reaper is the only thing that retires it; both ends share the constant | `relay/datagram.go DatagramIdleTimeout` |
+| Datagram frame | 2-byte big-endian length + payload; max payload 65507 B, checked before the buffer is sized | `relay/datagram.go MaxDatagram` |
+| UDP session queue / datagram buffer | 64 datagrams per player (full = drop, never block the shared read loop) / 2048 B pooled | `gateway/udp.go udpSessionQueue udpBufSize` |
 | Bandwidth cap unit / burst | `Mbps × 125_000` B/s / `relay.BufSize` | `bwcap.go` |
 | Backoff | 1 s → 60 s full jitter, reset after 60 s stable | `link/backoff.go` |
 | Run stop grace | 10 s — the caller's wait for a clean unwind, not the run's; force skips it, over-IPC always does | `engine.go stopGrace`, `app.go engineStopGrace` |
@@ -336,6 +341,57 @@ schema field yet — there are no config migrations and the local config dir is 
 `pf1://` scheme was dropped outright rather than kept as a compat parser (pre-release, no codes
 in the wild). Several agent-management surfaces are backend-complete but not yet fully exposed in
 the GUI — tracked in `docs/agent/polish-backlog.md`.
+
+## UDP tunnels (`internal/gateway/udp.go`, `internal/relay/datagram.go`)
+
+A UDP port has no `accept()`, so `udpListener` manufactures one and thereby satisfies
+`net.Listener`: the first datagram from an unseen source address *is* the connection.
+That single decision is what makes the feature small — the actor's ghost-listener
+wait, per-agent eviction, the pause bits, conntrack, the bandwidth caps, and
+`handleClient` itself all apply through the code that already implements them for TCP.
+
+**Life of a player datagram**: player UDP → gateway `udpListener` read loop (one
+goroutine per port, one reusable scratch) → per-source `udpSession` (a `net.Conn`
+whose `Read` yields exactly one datagram) → `handleClient` as usual → `open_conn`
+header on a normal data stream → the stream leg wrapped in `relay.DatagramStream`
+(2-byte length prefix, so boundaries survive the reliable hop) → agent
+`serveDatagramStream` → connected `DialUDP` socket → local server. `relay.Splice` is
+**unmodified**: it works because every leg's `Read` returns one datagram and it writes
+once per read.
+
+Four things differ from TCP and each is load-bearing:
+
+- **Admission moves into the listener.** The first datagram is the connection, so the
+  `connGate` must decide before a session exists; `handleClient` skips its own
+  `admit` rather than counting one player twice. This is also what bounds the session
+  table by construction — the gate's global and per-network caps bound it, so there
+  is no second UDP-only limit to drift from the TCP policy.
+- **`CloseWrite` closes.** A datagram flow has no half-open state. Splice reaches EOF
+  on one direction and relies on the other noticing a FIN; with no FIN, a no-op
+  `CloseWrite` leaves the opposite copy parked until the idle reaper — a goroutine,
+  a socket and a gate slot per departed player. Both `udpSession` and
+  `relay.DatagramConn` therefore end the flow, and both must, or one side hangs.
+- **Idle reaping is the only teardown**, on a much shorter clock
+  (`DatagramIdleTimeout`), shared by both ends so neither reaps a session the other
+  still believes in.
+- **A full per-player queue drops.** One read loop serves every player on the port,
+  so blocking for a stalled client would freeze the others behind it — which is also
+  what a real socket's receive buffer does under the same pressure.
+
+**Ports are per protocol**: TCP 25565 and UDP 25565 are different ports and routinely
+both in use (Simple Voice Chat listens on UDP at the Java server's number), so
+`portHolder`/`portHolderDesc` are protocol-scoped and `portowner` — `GetExtendedTcpTable`,
+TCP-only — is consulted only for TCP.
+
+**Health is unknown, not up.** A UDP local address cannot be probed: `net.Dial("udp")`
+connects to a dead port as happily as a live one, and a real check would have to speak
+the server's protocol. So `probeTunnels` skips udp tunnels entirely; unknown health
+counts as up (`backendDown`), and the GUI shows "unknown" rather than a convincing lie.
+
+**Windows**: `ReadFromUDP` reports a *previous* send's ICMP Port Unreachable as
+`ECONNRESET`, on an unconnected socket, for a different peer. The read loop ignores it
+— returning would take the tunnel down the first time any player quit, leaving the
+port bound and answering nothing.
 
 ## Analytics data model (`internal/analytics/schema.go`)
 

@@ -321,9 +321,11 @@ func (s *udpSession) Write(p []byte) (int, error) {
 	return s.l.pc.WriteToUDP(p, s.addr)
 }
 
-// CloseWrite has no meaning on a datagram flow: there is no FIN to send. Splice
-// calls it on EOF and treats an error as real, so it must report success.
-func (s *udpSession) CloseWrite() error { return nil }
+// CloseWrite ends the session, for the reason relay.DatagramConn.CloseWrite
+// gives: a datagram flow has no half-open state, so a CloseWrite that did
+// nothing would leave the opposite copy parked on a session nobody will write to
+// again. Both ends of a UDP splice must behave this way or one of them hangs.
+func (s *udpSession) CloseWrite() error { return s.Close() }
 
 func (s *udpSession) Close() error {
 	s.once.Do(func() {

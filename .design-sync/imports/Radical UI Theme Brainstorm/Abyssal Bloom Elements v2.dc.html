@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Unicase:wght@500;700&family=Spline+Sans+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#02090f; }
+  a { color:#2fffc0; text-decoration:none; } a:hover { color:#bdfbe6; }
+  @keyframes ds-wobble { 0%,100% { border-radius:60% 40% 55% 45% / 50% 60% 40% 55%; } 25% { border-radius:44% 56% 38% 62% / 62% 40% 60% 38%; } 50% { border-radius:56% 44% 64% 36% / 40% 56% 44% 62%; } 75% { border-radius:38% 62% 46% 54% / 58% 38% 62% 42%; } }
+  @keyframes ds-drift { 0%,100% { transform:translate(0,0) rotate(0deg); } 30% { transform:translate(4px,-6px) rotate(4deg); } 60% { transform:translate(-5px,3px) rotate(-3deg); } 80% { transform:translate(2px,5px) rotate(2deg); } }
+  @keyframes ds-pulse { 0%,100% { opacity:0.55; } 50% { opacity:1; } }
+  @keyframes ds-blink { 0%,55% { opacity:1; } 56%,100% { opacity:0; } }
+  @keyframes ds-ring { 0% { transform:scale(0.5); opacity:0.9; } 100% { transform:scale(2.1); opacity:0; } }
+  @keyframes ds-ring-b { 0% { transform:scale(0.5); opacity:0.9; } 100% { transform:scale(2.1); opacity:0; } }
+  @keyframes ds-jelly { 0%,100% { transform:translateY(6px) scale(1,1); } 28% { transform:translateY(8px) scale(1.14,0.8); } 48% { transform:translateY(-7px) scale(0.85,1.15); } 74% { transform:translateY(-2px) scale(1.04,0.96); } }
+  @keyframes ds-bloom-in { 0% { opacity:0; transform:scale(0.55); filter:blur(6px); } 60% { opacity:1; transform:scale(1.07); filter:blur(0); } 100% { opacity:1; transform:scale(1); } }
+  @keyframes ds-sink { to { opacity:0; transform:translateY(9px) scale(0.85); filter:blur(4px); } }
+  @keyframes ds-rise { 0% { opacity:0; transform:translateY(18px) rotate(-2deg); } 55% { opacity:1; transform:translateY(-4px) rotate(1deg); } 100% { opacity:1; transform:translateY(0) rotate(0deg); } }
+  @keyframes ds-rise-b { 0% { opacity:0; transform:translateY(18px) rotate(-2deg); } 55% { opacity:1; transform:translateY(-4px) rotate(1deg); } 100% { opacity:1; transform:translateY(0) rotate(0deg); } }
+  @keyframes ds-quiver { 0%,100% { transform:translateX(0); } 18% { transform:translateX(-4px) rotate(-0.7deg); } 38% { transform:translateX(4px) rotate(0.7deg); } 58% { transform:translateX(-3px); } 78% { transform:translateX(2px); } }
+  @keyframes ds-fade-out { to { opacity:0; transform:translateY(-10px); } }
+  @keyframes ds-spore { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(var(--dx),var(--dy)) scale(0.3); opacity:0; } }
+  @keyframes ds-shed { 0% { transform:translate(0,0) rotate(0deg); opacity:0.9; } 100% { transform:translate(16px,28px) rotate(9deg); opacity:0; filter:blur(2px); } }
+  @keyframes ds-trail { 0% { opacity:0.45; transform:scale(1); } 100% { opacity:0; transform:scale(0.35); } }
+  @keyframes ds-ring-loop { 0%,30% { transform:scale(0.55); opacity:0; } 42% { opacity:0.5; } 100% { transform:scale(1.8); opacity:0; } }
+  @keyframes ds-spin-slow { to { transform:rotate(360deg); } }
+  @keyframes ds-breathe { 0%,100% { filter:brightness(1); } 50% { filter:brightness(1.18); } }
+  @keyframes ds-flow { to { background-position:-200% 0; } }
+  @keyframes ds-jelly-tail { 0%,100% { transform:translateY(6px) scaleY(1); } 28% { transform:translateY(9px) scaleY(1.18); } 48% { transform:translateY(-6px) scaleY(0.85); } 74% { transform:translateY(-2px) scaleY(1.02); } }
+  @keyframes ds-flow-sharp { to { background-position:-26px 0; } }
+  @keyframes ds-fade-in { from { opacity:0; } }
+  @keyframes ds-grow { from { transform:scaleX(0); } }
+  @keyframes ds-ping { 0% { opacity:1; transform:scale(1.7); } 14% { opacity:0.95; transform:scale(1.12); } 55% { opacity:0.3; transform:scale(1); } 100% { opacity:0.26; transform:scale(1); } }
+  input::placeholder { color:#3e6a74; }
+  ::selection { background:rgba(47,255,192,0.3); color:#02090f; }
+  ::-webkit-scrollbar { width:10px; height:10px; }
+  ::-webkit-scrollbar-track { background:#02090f; }
+  ::-webkit-scrollbar-thumb { background:#124450; border-radius:5px; border:2px solid #02090f; }
+  ::-webkit-scrollbar-thumb:hover { background:#3e6a74; }
+  @media (prefers-reduced-motion: reduce) { * { animation-play-state:paused !important; } [data-grow] { animation:none !important; } }
+</style>
+</helmet>
+
+<div style="position:relative; min-height:100vh; background:#02090f; background-image:radial-gradient(circle at 75% -5%,rgba(47,255,192,0.07),transparent 50%),radial-gradient(circle at 8% 100%,rgba(28,139,255,0.09),transparent 45%); font-family:'Spline Sans Mono',monospace; color:#bdfbe6; overflow-x:hidden;">
+  <sc-if value="{{ dotGrid }}" hint-placeholder-val="{{ true }}">
+    <div style="position:fixed; inset:0; background-image:radial-gradient(rgba(18,68,80,0.55) 1px,transparent 1px); background-size:26px 26px; pointer-events:none;"></div>
+  </sc-if>
+  <canvas ref="{{ canvasRef }}" style="position:fixed; inset:0; width:100%; height:100%; pointer-events:none;"></canvas>
+  <sc-if value="{{ scanlines }}" hint-placeholder-val="{{ true }}">
+    <div style="position:fixed; inset:0; background:repeating-linear-gradient(0deg,rgba(47,255,192,0.025) 0 1px,transparent 1px 4px); pointer-events:none; z-index:40;"></div>
+  </sc-if>
+
+  <div style="position:relative; z-index:1; max-width:1180px; margin:0 auto; padding:56px 40px 90px; display:flex; flex-direction:column; gap:64px;">
+
+    <!-- masthead -->
+    <div style="display:flex; align-items:flex-end; gap:28px;">
+      <div style="position:relative; width:74px; height:74px; background:radial-gradient(circle at 35% 30%,#2fffc0,#1c8bff 80%); animation:ds-wobble 7s ease-in-out infinite, ds-drift 12s ease-in-out infinite, ds-breathe 5s ease-in-out infinite; box-shadow:0 0 34px rgba(47,255,192,0.45); flex-shrink:0;"><span style="position:absolute; inset:-9px; border:1px solid rgba(47,255,192,0.4); border-radius:50%; animation:ds-ring-loop 5s cubic-bezier(0.22,1,0.36,1) infinite; pointer-events:none;"></span></div>
+      <div>
+        <div style="color:#3e6a74; font-size:11px; letter-spacing:0.22em;">design elements · specimen sheet · v2</div>
+        <div style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:58px; line-height:1; margin-top:6px; color:#bdfbe6;">Abyssal Bloom</div>
+        <div style="color:#3e6a74; font-size:12px; margin-top:8px; max-width:640px;">deep-sea bioluminescence · every element is an organism drifting in the water column. jade is life-signal, blue is the current, coral is distress.</div>
+      </div>
+    </div>
+
+    <!-- 01 palette -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">01</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Colour</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">bioluminescent signal on abyssal depth</span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px;">
+        <div style="border:1px solid #124450; border-radius:14px; overflow:hidden; background:rgba(6,34,43,0.6);"><div style="height:74px; background:#02090f; border-bottom:1px solid #0d2b33;"></div><div style="padding:10px 14px;"><div style="font-size:12px; font-weight:600;">abyss</div><div style="color:#3e6a74; font-size:10px;">#02090F · page floor</div></div></div>
+        <div style="border:1px solid #124450; border-radius:14px; overflow:hidden; background:rgba(6,34,43,0.6);"><div style="height:74px; background:#06222b; border-bottom:1px solid #0d2b33;"></div><div style="padding:10px 14px;"><div style="font-size:12px; font-weight:600;">trench</div><div style="color:#3e6a74; font-size:10px;">#06222B · panel body</div></div></div>
+        <div style="border:1px solid #124450; border-radius:14px; overflow:hidden; background:rgba(6,34,43,0.6);"><div style="height:74px; background:#124450; border-bottom:1px solid #0d2b33;"></div><div style="padding:10px 14px;"><div style="font-size:12px; font-weight:600;">ridge</div><div style="color:#3e6a74; font-size:10px;">#124450 · borders (hairline #0D2B33)</div></div></div>
+        <div style="border:1px solid #124450; border-radius:14px; overflow:hidden; background:rgba(6,34,43,0.6);"><div style="height:74px; background:#3e6a74; border-bottom:1px solid #0d2b33;"></div><div style="padding:10px 14px;"><div style="font-size:12px; font-weight:600;">silt</div><div style="color:#3e6a74; font-size:10px;">#3E6A74 · muted text</div></div></div>
+        <div style="border:1px solid #124450; border-radius:14px; overflow:hidden; background:rgba(6,34,43,0.6);"><div style="height:74px; background:#bdfbe6; border-bottom:1px solid #0d2b33;"></div><div style="padding:10px 14px;"><div style="font-size:12px; font-weight:600;">foam</div><div style="color:#3e6a74; font-size:10px;">#BDFBE6 · primary text</div></div></div>
+        <div style="border:1px solid #124450; border-radius:14px; overflow:hidden; background:rgba(6,34,43,0.6);"><div style="height:74px; background:#2fffc0; border-bottom:1px solid #0d2b33; box-shadow:inset 0 0 34px rgba(47,255,192,0.6);"></div><div style="padding:10px 14px;"><div style="font-size:12px; font-weight:600; color:#2fffc0;">jade · life-signal</div><div style="color:#3e6a74; font-size:10px;">#2FFFC0 · primary action, good, live</div></div></div>
+        <div style="border:1px solid #124450; border-radius:14px; overflow:hidden; background:rgba(6,34,43,0.6);"><div style="height:74px; background:#1c8bff; border-bottom:1px solid #0d2b33;"></div><div style="padding:10px 14px;"><div style="font-size:12px; font-weight:600; color:#1c8bff;">current · flow</div><div style="color:#3e6a74; font-size:10px;">#1C8BFF · secondary signal, inbound</div></div></div>
+        <div style="border:1px solid #124450; border-radius:14px; overflow:hidden; background:rgba(6,34,43,0.6);"><div style="height:74px; background:#ff5d73; border-bottom:1px solid #0d2b33;"></div><div style="padding:10px 14px;"><div style="font-size:12px; font-weight:600; color:#ff5d73;">coral · distress</div><div style="color:#3e6a74; font-size:10px;">#FF5D73 · errors only, never decoration</div></div></div>
+      </div>
+      <div style="display:flex; gap:14px;">
+        <div style="flex:1; border:1px solid #124450; border-radius:14px; padding:14px 18px; background:linear-gradient(180deg,rgba(28,139,255,0.12),rgba(2,9,15,0.7));"><div style="font-size:11px; color:#bdfbe6;">depth gradient</div><div style="color:#3e6a74; font-size:10px; margin-top:2px;">linear 180deg · rgba(28,139,255,.12) → rgba(2,9,15,.7) · sinking panels</div></div>
+        <div style="flex:1; border:1px solid rgba(47,255,192,0.35); border-radius:14px; padding:14px 18px; background:radial-gradient(circle at 78% 15%,rgba(47,255,192,0.16),rgba(6,34,43,0.72) 55%,rgba(2,9,15,0.85));"><div style="font-size:11px; color:#2fffc0;">bloom gradient</div><div style="color:#3e6a74; font-size:10px; margin-top:2px;">radial from a corner · jade glow feeding the frame · hero surfaces only</div></div>
+      </div>
+    </div>
+
+    <!-- 02 type -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">02</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Typography</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">unicase serif surfaces · mono depths</span>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div style="border:1px solid #124450; border-radius:28px 10px 28px 10px; padding:24px 28px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px);">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.18em;">display · cormorant unicase 700</div>
+          <div style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:64px; line-height:1.05; margin-top:10px;">Mesopelagic</div>
+          <div style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:32px; margin-top:10px;">Overview · 4.2 gb/s</div>
+          <div style="font-family:'Cormorant Unicase',serif; font-weight:500; font-size:19px; margin-top:10px; color:#3e6a74;">panel titles at 500 when quiet</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:14px;">hero 64–72 · page title 32 · metric 30 · panel 17–19 · never for body copy</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:24px 28px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px);">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.18em;">body · spline sans mono</div>
+          <div style="font-size:13px; margin-top:12px; font-weight:600;">13 / 600 — emphasis, panel headings</div>
+          <div style="font-size:12px; margin-top:8px;">12 / 400 — body rows, values, lowercase by default</div>
+          <div style="font-size:11px; margin-top:8px; color:#3e6a74;">11 / 400 — captions, timestamps</div>
+          <div style="font-size:10px; margin-top:8px; color:#3e6a74; letter-spacing:0.16em;">10 / 400 + 0.16em tracking — overlines</div>
+          <div style="font-size:13px; margin-top:14px; font-weight:700; letter-spacing:0.14em; color:#02090f; background:#2fffc0; display:inline-block; padding:6px 12px; border-radius:8px 3px 8px 3px;">BUTTONS SHOUT IN CAPS</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:12px;">everything lowercase except button labels and node codes · numerals tabular</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 03 radii & frames -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">03</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Radii &amp; Frames</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">asymmetry = importance · nothing important is symmetric</span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px;">
+        <div style="border:1px solid #124450; border-radius:14px; padding:18px; background:rgba(6,34,43,0.6); text-align:center;"><div style="height:64px; border:1px dashed #3e6a74; border-radius:14px; display:flex; align-items:center; justify-content:center; color:#3e6a74; font-size:11px;">14</div><div style="font-size:11px; margin-top:10px;">quiet card</div><div style="color:#3e6a74; font-size:10px;">symmetric · resting depth</div></div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:18px; background:rgba(6,34,43,0.6); text-align:center;"><div style="height:64px; border:1px dashed #2fffc0; border-radius:28px 10px 28px 10px; display:flex; align-items:center; justify-content:center; color:#2fffc0; font-size:11px;">28 / 10</div><div style="font-size:11px; margin-top:10px;">special frame</div><div style="color:#3e6a74; font-size:10px;">tl+br swell · one per screen</div></div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:18px; background:rgba(6,34,43,0.6); text-align:center;"><div style="height:64px; display:flex; align-items:center; justify-content:center; gap:10px;"><span style="border:1px dashed #3e6a74; border-radius:14px 6px 14px 6px; padding:10px 16px; color:#3e6a74; font-size:11px;">14/6</span><span style="border:1px dashed #3e6a74; border-radius:8px 3px 8px 3px; padding:6px 10px; color:#3e6a74; font-size:11px;">8/3</span></div><div style="font-size:11px; margin-top:10px;">buttons · chips</div><div style="color:#3e6a74; font-size:10px;">same diagonal, smaller swell</div></div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:18px; background:rgba(6,34,43,0.6); text-align:center;"><div style="height:64px; display:flex; align-items:center; justify-content:center;"><div style="width:52px; height:48px; background:radial-gradient(circle at 35% 30%,#2fffc0,#1c8bff 80%); animation:ds-wobble 6s ease-in-out infinite; box-shadow:0 0 18px rgba(47,255,192,0.4);"></div></div><div style="font-size:11px; margin-top:10px;">organism</div><div style="color:#3e6a74; font-size:10px;">animated wobble · alive things only</div></div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
+        <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:20px 22px; backdrop-filter:blur(4px);">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">normal frame</div>
+          <div style="font-size:13px; font-weight:600; margin-top:6px;">quiet card</div>
+          <div style="color:#3e6a74; font-size:11px; margin-top:6px;">trench @ 60% · ridge border · r-14 · blur(4px). most panels live here.</div>
+        </div>
+        <div style="border:1px solid rgba(47,255,192,0.3); border-radius:28px 10px 28px 10px; background:linear-gradient(180deg,rgba(28,139,255,0.12),rgba(2,9,15,0.75)); backdrop-filter:blur(5px); padding:20px 22px;">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">special frame</div>
+          <div style="font-size:13px; font-weight:600; margin-top:6px; color:#2fffc0;">signal frame</div>
+          <div style="color:#3e6a74; font-size:11px; margin-top:6px;">28/10 asym · jade border @ 30% · depth gradient · answers the pointer.</div>
+        </div>
+        <div style="position:relative; border:1px solid rgba(47,255,192,0.4); border-radius:28px 10px 28px 10px; background:radial-gradient(circle at 78% 15%,rgba(47,255,192,0.16),rgba(6,34,43,0.72) 55%,rgba(2,9,15,0.85)); box-shadow:0 0 34px rgba(47,255,192,0.16); backdrop-filter:blur(5px); padding:20px 22px; animation:ds-breathe 6s ease-in-out infinite;">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">hero frame</div>
+          <div style="font-size:13px; font-weight:600; margin-top:6px; color:#2fffc0;">bloom frame</div>
+          <div style="color:#3e6a74; font-size:11px; margin-top:6px;">bloom gradient + outer glow · exactly one per screen, hosts the organism.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 04 buttons -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">04</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Buttons</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">caps · 0.14em tracking · 14/6 radius · glow is the hover</span>
+      </div>
+      <div style="border:1px solid #124450; border-radius:14px; padding:26px 28px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-wrap:wrap; align-items:center; gap:18px;">
+        <div style="background:#2fffc0; color:#02090f; font-size:13px; font-weight:700; letter-spacing:0.14em; padding:12px 22px; border-radius:14px 6px 14px 6px; box-shadow:0 0 22px rgba(47,255,192,0.35); cursor:pointer; animation:ds-breathe 4.5s ease-in-out infinite; transition:box-shadow 0.5s cubic-bezier(0.22,1,0.36,1), transform 0.45s cubic-bezier(0.3,1.7,0.4,1);" style-hover="box-shadow:0 0 38px rgba(47,255,192,0.6);" style-active="transform:scale(0.94,0.9);">ROTATE IP</div>
+        <div style="border:1px solid #1c8bff; color:#1c8bff; font-size:13px; font-weight:700; letter-spacing:0.14em; padding:12px 22px; border-radius:14px 6px 14px 6px; cursor:pointer; transition:background 0.4s, color 0.4s;" style-hover="background:rgba(28,139,255,0.12); color:#bdfbe6;">NEW SESSION</div>
+        <div style="background:rgba(47,255,192,0.08); border:1px solid rgba(47,255,192,0.3); color:#2fffc0; font-size:12px; font-weight:700; letter-spacing:0.14em; padding:11px 20px; border-radius:14px 6px 14px 6px; cursor:pointer; transition:background 0.4s;" style-hover="background:rgba(47,255,192,0.16);">DETACH SESSION</div>
+        <div style="color:#3e6a74; font-size:12px; font-weight:700; letter-spacing:0.14em; padding:11px 16px; border:1px solid transparent; cursor:pointer; border-radius:14px 6px 14px 6px; transition:color 0.4s, border-color 0.4s;" style-hover="color:#bdfbe6; border-color:#124450;">GHOST</div>
+        <div style="border:1px solid #ff5d73; color:#ff5d73; font-size:12px; font-weight:700; letter-spacing:0.14em; padding:11px 20px; border-radius:14px 6px 14px 6px; cursor:pointer; transition:background 0.4s;" style-hover="background:rgba(255,93,115,0.12);">SEVER ALL</div>
+        <div style="background:#0d2b33; color:#3e6a74; font-size:12px; font-weight:700; letter-spacing:0.14em; padding:11px 20px; border-radius:14px 6px 14px 6px; cursor:not-allowed;">DISABLED</div>
+        <div style="width:100%; color:#3e6a74; font-size:10px;">primary (jade fill, one per view) · secondary (current outline) · tinted · ghost · destructive (coral, confirm twice) · disabled sinks to hairline · hovers arrive on current ease (.4–.5s), presses squish on propulsion</div>
+      </div>
+    </div>
+
+    <!-- 05 inputs -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">05</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Inputs</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">recessed wells · focus blooms jade</span>
+      </div>
+      <div style="border:1px solid #124450; border-radius:14px; padding:26px 28px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:grid; grid-template-columns:1fr 1fr; gap:26px;">
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <div>
+            <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em; margin-bottom:6px;">session label</div>
+            <input placeholder="name this organism…" style="width:100%; box-sizing:border-box; background:rgba(2,9,15,0.7); border:1px solid #124450; border-radius:10px 4px 10px 4px; color:#bdfbe6; font-family:'Spline Sans Mono',monospace; font-size:12px; padding:11px 14px; outline:none; transition:border-color 0.4s, box-shadow 0.5s cubic-bezier(0.22,1,0.36,1);" style-focus="border-color:rgba(47,255,192,0.55); box-shadow:0 0 16px rgba(47,255,192,0.18);">
+          </div>
+          <div>
+            <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em; margin-bottom:6px;">exit region · select</div>
+            <div style="display:flex; align-items:center; background:rgba(2,9,15,0.7); border:1px solid #124450; border-radius:10px 4px 10px 4px; color:#bdfbe6; font-size:12px; padding:11px 14px; cursor:pointer; transition:border-color 0.4s;" style-hover="border-color:#3e6a74;">frankfurt · fra-07<span style="margin-left:auto; color:#2fffc0;">▾</span></div>
+          </div>
+          <div>
+            <div style="color:#ff5d73; font-size:10px; letter-spacing:0.16em; margin-bottom:6px;">api key · error state</div>
+            <div style="display:flex; align-items:center; background:rgba(2,9,15,0.7); border:1px solid #ff5d73; border-radius:10px 4px 10px 4px; color:#bdfbe6; font-size:12px; padding:11px 14px; box-shadow:0 0 14px rgba(255,93,115,0.15);">pk_live_04…<span style="margin-left:auto; color:#ff5d73; font-size:10px;">key expired</span></div>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:18px;">
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div style="width:44px; height:24px; background:rgba(47,255,192,0.18); border:1px solid rgba(47,255,192,0.5); border-radius:999px; position:relative; cursor:pointer;"><div style="position:absolute; top:2px; right:2px; width:18px; height:18px; background:#2fffc0; border-radius:50%; box-shadow:0 0 10px rgba(47,255,192,0.7); animation:ds-wobble 5s ease-in-out infinite;"></div></div>
+            <div><div style="font-size:12px;">auto-molt hourly</div><div style="color:#3e6a74; font-size:10px;">switch on · thumb is a tiny organism</div></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div style="width:44px; height:24px; background:rgba(2,9,15,0.7); border:1px solid #124450; border-radius:999px; position:relative; cursor:pointer;"><div style="position:absolute; top:2px; left:2px; width:18px; height:18px; background:#3e6a74; border-radius:50%;"></div></div>
+            <div><div style="font-size:12px; color:#3e6a74;">sticky exit node</div><div style="color:#3e6a74; font-size:10px;">switch off · organism goes dormant</div></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div style="width:18px; height:18px; background:rgba(47,255,192,0.15); border:1px solid rgba(47,255,192,0.55); border-radius:6px 2px 6px 2px; display:flex; align-items:center; justify-content:center; color:#2fffc0; font-size:11px; cursor:pointer;">✓</div>
+            <div style="font-size:12px;">notify on molt</div>
+            <div style="width:18px; height:18px; background:rgba(2,9,15,0.7); border:1px solid #124450; border-radius:6px 2px 6px 2px; margin-left:18px; cursor:pointer;"></div>
+            <div style="font-size:12px; color:#3e6a74;">unchecked</div>
+          </div>
+          <div>
+            <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em; margin-bottom:8px;">depth · segmented</div>
+            <div style="display:inline-flex; background:rgba(2,9,15,0.7); border:1px solid #124450; border-radius:12px 5px 12px 5px; padding:3px; gap:3px;">
+              <span style="padding:7px 14px; font-size:11px; color:#02090f; background:#2fffc0; border-radius:9px 3px 9px 3px; font-weight:600; cursor:pointer;">photic</span>
+              <span style="padding:7px 14px; font-size:11px; color:#3e6a74; cursor:pointer; border-radius:9px 3px 9px 3px; transition:color 0.4s;" style-hover="color:#bdfbe6;">twilight</span>
+              <span style="padding:7px 14px; font-size:11px; color:#3e6a74; cursor:pointer; border-radius:9px 3px 9px 3px; transition:color 0.4s;" style-hover="color:#bdfbe6;">midnight</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 06 chips & status -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">06</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Chips &amp; Status</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">status is a dot + a word, never colour alone</span>
+      </div>
+      <div style="border:1px solid #124450; border-radius:14px; padding:26px 28px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column; gap:20px;">
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
+          <span style="background:rgba(47,255,192,0.1); border:1px solid rgba(47,255,192,0.35); color:#2fffc0; font-size:13px; padding:6px 12px; border-radius:8px 3px 8px 3px;">185.199.7.42</span>
+          <span style="background:rgba(2,9,15,0.7); border:1px solid #124450; color:#bdfbe6; font-size:13px; padding:6px 12px; border-radius:8px 3px 8px 3px;">:8443</span>
+          <span style="background:rgba(28,139,255,0.1); border:1px solid rgba(28,139,255,0.4); color:#1c8bff; font-size:13px; padding:6px 12px; border-radius:8px 3px 8px 3px;">socks5</span>
+          <span style="color:#3e6a74; font-size:10px;">mono chips · addresses, ports, protocols · 8/3 radius</span>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:14px;">
+          <span style="display:inline-flex; align-items:center; gap:8px; background:rgba(47,255,192,0.10); border:1px solid rgba(47,255,192,0.35); color:#2fffc0; font-size:11px; padding:8px 14px; border-radius:999px;"><span style="width:7px; height:7px; background:#2fffc0; border-radius:50%; box-shadow:0 0 10px #2fffc0; animation:ds-ping 6s linear infinite; animation-delay:-5.5s;"></span>tethered · fra-07</span>
+          <span style="display:inline-flex; align-items:center; gap:8px; background:rgba(28,139,255,0.10); border:1px solid rgba(28,139,255,0.35); color:#1c8bff; font-size:11px; padding:8px 14px; border-radius:999px;"><span style="width:7px; height:7px; background:#1c8bff; border-radius:50%; box-shadow:0 0 8px #1c8bff;"></span>rotating</span>
+          <span style="display:inline-flex; align-items:center; gap:8px; background:rgba(255,93,115,0.10); border:1px solid rgba(255,93,115,0.4); color:#ff5d73; font-size:11px; padding:8px 14px; border-radius:999px;"><span style="width:7px; height:7px; background:#ff5d73; border-radius:50%; box-shadow:0 0 10px #ff5d73; animation:ds-pulse 1.2s ease-in-out infinite;"></span>severed</span>
+          <span style="display:inline-flex; align-items:center; gap:8px; background:rgba(2,9,15,0.6); border:1px solid #124450; color:#3e6a74; font-size:11px; padding:8px 14px; border-radius:999px;"><span style="width:7px; height:7px; background:#3e6a74; border-radius:50%;"></span>dormant</span>
+          <span style="color:#3e6a74; font-size:10px;">status pills · only living pills glow · pulse speed = urgency</span>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:22px; font-size:11px;">
+          <span style="display:flex; align-items:center; gap:6px;"><span style="width:6px; height:6px; background:#2fffc0; border-radius:50%; box-shadow:0 0 8px #2fffc0;"></span>good / outbound</span>
+          <span style="display:flex; align-items:center; gap:6px;"><span style="width:6px; height:6px; background:#1c8bff; border-radius:50%; box-shadow:0 0 8px #1c8bff;"></span>info / inbound</span>
+          <span style="display:flex; align-items:center; gap:6px;"><span style="width:6px; height:6px; background:#ff5d73; border-radius:50%; box-shadow:0 0 8px #ff5d73;"></span>distress</span>
+          <span style="display:flex; align-items:center; gap:6px; color:#3e6a74;"><span style="width:6px; height:6px; background:#3e6a74; border-radius:50%;"></span>dormant</span>
+          <span style="color:#3e6a74; font-size:10px;">bare dots for table rows · unknown values render — never a fake 0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 07 data -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">07</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Data Display</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">metrics in unicase · only the leader flows · every live fill ends in a comet head</span>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:20px 22px; backdrop-filter:blur(4px);">
+          <div style="display:grid; grid-template-columns:16px 80px 1fr 60px 90px; gap:12px; align-items:center; padding:8px 0; color:#3e6a74; font-size:10px; letter-spacing:0.14em; border-bottom:1px solid #0d2b33;"><span></span><span>node</span><span>region</span><span>latency</span><span>load</span></div>
+          <div style="display:grid; grid-template-columns:16px 80px 1fr 60px 90px; gap:12px; align-items:center; padding:11px 0; border-bottom:1px solid #0d2b33;"><span style="width:7px; height:7px; background:#2fffc0; border-radius:50%; box-shadow:0 0 8px #2fffc0; animation:ds-pulse 2s ease-in-out infinite;"></span><span style="color:#2fffc0; font-size:12px; font-weight:600;">fra-07</span><span style="font-size:12px;">Frankfurt · current</span><span style="color:#2fffc0; font-size:12px;">12ms</span><span style="position:relative; height:5px; background:#0d2b33; border-radius:3px;"><span data-grow="1" style="display:block; position:relative; width:34%; height:5px; background:linear-gradient(90deg,#2fffc0,#1c8bff,#2fffc0); background-size:200% 100%; animation:ds-grow 1s cubic-bezier(0.22,1,0.36,1) both, ds-flow 3s linear infinite; transform-origin:left; border-radius:3px;" style-after="content:''; position:absolute; right:-2px; top:50%; margin-top:-3px; width:6px; height:6px; border-radius:50%; background:#2fffc0; box-shadow:0 0 8px #2fffc0;"></span></span></div>
+          <div style="display:grid; grid-template-columns:16px 80px 1fr 60px 90px; gap:12px; align-items:center; padding:11px 0;"><span style="width:6px; height:6px; background:#1c8bff; border-radius:50%; box-shadow:0 0 6px #1c8bff;"></span><span style="font-size:12px;">ams-03</span><span style="color:#3e6a74; font-size:12px;">Amsterdam</span><span style="font-size:12px;">19ms</span><span style="height:5px; background:#0d2b33; border-radius:3px;"><span data-grow="1" style="display:block; width:52%; height:5px; background:rgba(28,139,255,0.5); animation:ds-grow 1s cubic-bezier(0.22,1,0.36,1) 0.12s both; transform-origin:left; border-radius:3px;"></span></span></div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:12px;">tables: hairline rows only, no zebra · active row lights its dot + code · only the active load flows</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+            <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:16px 18px; backdrop-filter:blur(4px);"><div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">median latency</div><div style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:30px; margin-top:4px;">21 <span style="font-size:14px; color:#3e6a74;">ms</span></div><div style="color:#2fffc0; font-size:10px; margin-top:2px;">▾ 3ms vs yesterday</div><svg viewBox="0 0 96 18" preserveAspectRatio="none" style="width:100%; height:18px; margin-top:10px; display:block; overflow:visible;"><path d="M0,13.5 C7,12.8 11,10.6 18,11.4 C25,12.2 29,9.4 36,10.2 C43,11 47,8.2 54,9 C61,9.8 65,7 72,7.8 C79,8.6 83,6 90,6.6 L96,7.2" fill="none" stroke="#2fffc0" stroke-width="1.2" opacity="0.55"></path><circle cx="96" cy="7.2" r="2" fill="#2fffc0" style="filter:drop-shadow(0 0 4px #2fffc0); animation:ds-pulse 2.5s ease-in-out infinite;"></circle></svg></div>
+            <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:16px 18px; backdrop-filter:blur(4px);"><div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">uptime</div><div style="font-family:'Cormorant Unicase',serif; font-weight:700; color:#2fffc0; font-size:30px; margin-top:4px; text-shadow:0 0 18px rgba(47,255,192,0.35); animation:ds-breathe 5s ease-in-out infinite;">99.98</div><div style="color:#3e6a74; font-size:10px; margin-top:2px;">glow only when exceptional</div></div>
+          </div>
+          <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:16px 18px; backdrop-filter:blur(4px);">
+            <div style="display:flex; font-size:10px; color:#3e6a74;"><span>depth used · 16%</span><span style="margin-left:auto;">312 gb / 2 tb</span></div>
+            <div style="position:relative; height:5px; background:#0d2b33; border-radius:3px; margin-top:8px;"><div data-grow="1" style="position:relative; width:16%; height:5px; background:linear-gradient(90deg,#2fffc0,#1c8bff,#2fffc0); background-size:200% 100%; animation:ds-grow 1.1s cubic-bezier(0.22,1,0.36,1) both, ds-flow 3s linear infinite; transform-origin:left; border-radius:3px; box-shadow:0 0 8px rgba(47,255,192,0.5);" style-after="content:''; position:absolute; right:-2px; top:50%; margin-top:-3px; width:6px; height:6px; border-radius:50%; background:#2fffc0; box-shadow:0 0 9px #2fffc0;"></div><span style="position:absolute; left:80%; top:-2px; width:1px; height:9px; background:rgba(189,251,230,0.28);"></span></div>
+            <div style="display:flex; font-size:10px; color:#3e6a74; margin-top:14px;"><span style="color:#ff5d73;">depth used · 94% · nearing crush depth</span></div>
+            <div style="position:relative; height:5px; background:#0d2b33; border-radius:3px; margin-top:8px;"><div data-grow="1" style="position:relative; width:94%; height:5px; background:linear-gradient(90deg,#1c8bff,#ff5d73); background-size:200% 100%; animation:ds-grow 1.3s cubic-bezier(0.22,1,0.36,1) both, ds-flow 1.8s linear infinite; transform-origin:left; border-radius:3px; box-shadow:0 0 8px rgba(255,93,115,0.4);" style-after="content:''; position:absolute; right:-2px; top:50%; margin-top:-3px; width:6px; height:6px; border-radius:50%; background:#ff5d73; box-shadow:0 0 10px #ff5d73; animation:ds-pulse 1.2s ease-in-out infinite;"></div><span style="position:absolute; left:80%; top:-2px; width:1px; height:9px; background:rgba(189,251,230,0.28);"></span></div>
+            <div style="color:#3e6a74; font-size:10px; margin-top:12px;">fills grow from the left and end in a comet head · the tick is crush depth at 80%</div>
+          </div>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:16px 18px; backdrop-filter:blur(4px);">
+          <div style="display:flex; align-items:baseline;"><span style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">latency · 24h</span><span style="margin-left:auto; font-family:'Cormorant Unicase',serif; font-weight:700; font-size:24px; color:#2fffc0;">21 <span style="font-size:12px; color:#3e6a74;">ms</span></span></div>
+          <div style="position:relative; margin-top:6px; cursor:crosshair;" onMouseMove="{{ latMove }}" onMouseLeave="{{ latLeave }}">
+            <svg viewBox="0 0 320 64" preserveAspectRatio="none" style="width:100%; height:76px; display:block; overflow:visible;">
+              <defs><linearGradient id="sparkfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(47,255,192,0.3)"></stop><stop offset="100%" stop-color="rgba(47,255,192,0)"></stop></linearGradient></defs>
+              <line x1="0" y1="12.8" x2="320" y2="12.8" stroke="rgba(18,68,80,0.5)" stroke-dasharray="2 4"></line>
+              <line x1="0" y1="24.8" x2="320" y2="24.8" stroke="rgba(18,68,80,0.5)" stroke-dasharray="2 4"></line>
+              <line x1="0" y1="36.8" x2="320" y2="36.8" stroke="rgba(18,68,80,0.5)" stroke-dasharray="2 4"></line>
+              <line x1="0" y1="48.8" x2="320" y2="48.8" stroke="rgba(18,68,80,0.5)" stroke-dasharray="2 4"></line>
+              <path d="{{ latGhost }}" fill="none" stroke="#3e6a74" stroke-width="1" stroke-dasharray="3 4" opacity="0.5"></path>
+              <path d="{{ latArea }}" fill="url(#sparkfill)"></path>
+              <path d="{{ latPath }}" fill="none" stroke="#2fffc0" stroke-width="1.5" style="filter:drop-shadow(0 0 5px rgba(47,255,192,0.7));"></path>
+              <circle cx="26.7" cy="20" r="2" fill="#3e6a74"></circle>
+              <circle cx="266.7" cy="46.4" r="2" fill="#3e6a74"></circle>
+              <circle cx="320" cy="34.4" r="3.5" fill="#2fffc0" style="filter:drop-shadow(0 0 6px #2fffc0); animation:ds-pulse 2s ease-in-out infinite;"></circle>
+              <g opacity="{{ latCrossOp }}" style="transition:opacity 0.25s;">
+                <line x1="{{ latCrossX }}" y1="4" x2="{{ latCrossX }}" y2="62" stroke="rgba(189,251,230,0.3)" stroke-dasharray="2 3"></line>
+                <circle cx="{{ latCrossX }}" cy="{{ latCrossY }}" r="3" fill="#bdfbe6" style="filter:drop-shadow(0 0 5px rgba(189,251,230,0.8));"></circle>
+              </g>
+            </svg>
+            <span style="position:absolute; left:8.3%; top:2px; transform:translateX(-50%); font-size:9px; color:#3e6a74; pointer-events:none;">high 27</span>
+            <span style="position:absolute; left:83.3%; bottom:0; transform:translateX(-50%); font-size:9px; color:#3e6a74; pointer-events:none;">low 16</span>
+            <sc-if value="{{ latHover }}" hint-placeholder-val="{{ false }}">
+              <div style="{{ latTipStyle }}">{{ latTipText }}</div>
+            </sc-if>
+          </div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:8px;">the line swims smooth, axes stay silent · depth bands + yesterday's ghost give the scale · hover to take a sounding</div>
+        </div>
+        <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:16px 18px; backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">route · traffic rides the current</div>
+          <div style="flex:1; display:flex; align-items:center; gap:14px; padding:10px 4px 0;">
+            <div style="text-align:center; flex-shrink:0;"><div style="width:26px; height:24px; margin:0 auto; background:radial-gradient(circle at 40% 30%,rgba(189,251,230,0.85),rgba(62,106,116,0.5) 85%); animation:ds-wobble 9s ease-in-out infinite;"></div><div style="color:#3e6a74; font-size:10px; margin-top:6px;">you</div></div>
+            <div style="flex:1; height:2px; background:repeating-linear-gradient(90deg,rgba(47,255,192,0.75) 0 8px,transparent 8px 13px); animation:ds-flow-sharp 0.8s linear infinite reverse; box-shadow:0 0 8px rgba(47,255,192,0.2);"></div>
+            <div style="text-align:center; flex-shrink:0;"><div style="position:relative; width:34px; height:30px; margin:0 auto; background:radial-gradient(circle at 35% 30%,#2fffc0,#1c8bff 80%); animation:ds-wobble 6s ease-in-out infinite; box-shadow:0 0 18px rgba(47,255,192,0.45);"><span style="position:absolute; inset:-7px; border:1px solid rgba(47,255,192,0.4); border-radius:50%; animation:ds-ring-loop 4s cubic-bezier(0.22,1,0.36,1) infinite;"></span></div><div style="color:#2fffc0; font-size:10px; margin-top:6px;">fra-07</div></div>
+            <div style="flex:1; height:2px; background:repeating-linear-gradient(90deg,rgba(28,139,255,0.75) 0 8px,transparent 8px 13px); animation:ds-flow-sharp 1.1s linear infinite reverse; box-shadow:0 0 8px rgba(28,139,255,0.2);"></div>
+            <div style="text-align:center; flex-shrink:0;"><div style="width:26px; height:24px; margin:0 auto; background:rgba(62,106,116,0.35); border:1px dashed #3e6a74; border-radius:60% 40% 55% 45% / 50% 60% 40% 55%;"></div><div style="color:#3e6a74; font-size:10px; margin-top:6px;">destination</div></div>
+          </div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:10px;">dashes swim in the transit direction · jade leg is encrypted, current leg is open water · the relay wears the ring</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 08 organisms -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">08</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Organisms</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">living UI · wobble + drift, never static circles</span>
+      </div>
+      <div style="border:1px solid #124450; border-radius:14px; padding:26px 28px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:grid; grid-template-columns:repeat(4,1fr); gap:22px; align-items:center;">
+        <div style="text-align:center;"><div style="width:74px; height:66px; margin:0 auto; background:radial-gradient(circle at 32% 28%,rgba(47,255,192,0.9),rgba(28,139,255,0.55) 70%,rgba(6,34,43,0.4)); animation:ds-wobble 6s ease-in-out infinite, ds-drift 11s ease-in-out infinite; box-shadow:0 0 26px rgba(47,255,192,0.4);"></div><div style="font-size:11px; margin-top:12px;">session organism</div><div style="color:#3e6a74; font-size:10px;">healthy · 6s wobble + 11s drift</div></div>
+        <div style="text-align:center;"><div style="width:46px; height:42px; margin:0 auto; background:radial-gradient(circle at 60% 30%,rgba(28,139,255,0.85),rgba(6,34,43,0.5) 80%); animation:ds-wobble 8s ease-in-out infinite reverse, ds-drift 13s ease-in-out infinite reverse; box-shadow:0 0 18px rgba(28,139,255,0.4);"></div><div style="font-size:11px; margin-top:12px;">satellite</div><div style="color:#3e6a74; font-size:10px;">secondary process · reversed phase</div></div>
+        <div style="text-align:center;"><div style="width:38px; height:36px; margin:0 auto; background:radial-gradient(circle at 60% 30%,#1c8bff,#06222b 85%); border:1px solid #124450; animation:ds-wobble 9s ease-in-out infinite reverse;"></div><div style="font-size:11px; margin-top:12px;">avatar</div><div style="color:#3e6a74; font-size:10px;">people are organisms too</div></div>
+        <div style="text-align:center;"><div style="width:52px; height:48px; margin:0 auto; background:rgba(62,106,116,0.4); border:1px dashed #3e6a74; border-radius:60% 40% 55% 45% / 50% 60% 40% 55%;"></div><div style="font-size:11px; margin-top:12px;">dormant</div><div style="color:#3e6a74; font-size:10px;">dead session · wobble frozen, glow off</div></div>
+      </div>
+      <div style="color:#3e6a74; font-size:10px;">rules: each organism gets a unique duration (5–13s) and phase so no two move alike · glow radius tracks health · a killed process freezes mid-wobble.</div>
+    </div>
+
+    <!-- 09 atmosphere -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">09</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Atmosphere</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">three stacked layers, all pointer-transparent</span>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
+        <div style="border:1px solid #124450; border-radius:14px; overflow:hidden; background:rgba(6,34,43,0.6);">
+          <div style="height:110px; background:#02090f; background-image:radial-gradient(rgba(18,68,80,0.9) 1px,transparent 1px); background-size:26px 26px; border-bottom:1px solid #0d2b33;"></div>
+          <div style="padding:12px 16px;"><div style="font-size:12px; font-weight:600;">dot grid</div><div style="color:#3e6a74; font-size:10px;">26px lattice · ridge @ 55% · the seafloor sonar</div></div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; overflow:hidden; background:rgba(6,34,43,0.6);">
+          <div style="height:110px; background:#02090f; position:relative; border-bottom:1px solid #0d2b33;"><div style="position:absolute; inset:0; background:repeating-linear-gradient(0deg,rgba(47,255,192,0.06) 0 1px,transparent 1px 4px);"></div></div>
+          <div style="padding:12px 16px;"><div style="font-size:12px; font-weight:600;">scanlines</div><div style="color:#3e6a74; font-size:10px;">1px jade @ 2.5% every 4px · topmost layer</div></div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; overflow:hidden; background:rgba(6,34,43,0.6);">
+          <div style="height:110px; background:#02090f; position:relative; border-bottom:1px solid #0d2b33;">
+            <span style="position:absolute; left:22%; top:30%; width:5px; height:5px; background:#2fffc0; border-radius:50%; box-shadow:0 0 9px #2fffc0; animation:ds-pulse 2s ease-in-out infinite;"></span>
+            <span style="position:absolute; left:48%; top:58%; width:4px; height:4px; background:#1c8bff; border-radius:50%; box-shadow:0 0 8px #1c8bff; animation:ds-pulse 3s ease-in-out infinite;"></span>
+            <span style="position:absolute; left:70%; top:26%; width:3px; height:3px; background:#2fffc0; border-radius:50%; box-shadow:0 0 7px #2fffc0; animation:ds-pulse 2.6s ease-in-out infinite;"></span>
+            <span style="position:absolute; left:34%; top:74%; width:3px; height:3px; background:#2fffc0; border-radius:50%; box-shadow:0 0 7px #2fffc0; animation:ds-pulse 1.7s ease-in-out infinite;"></span>
+            <span style="position:absolute; left:82%; top:66%; width:4px; height:4px; background:#1c8bff; border-radius:50%; box-shadow:0 0 8px #1c8bff; animation:ds-pulse 2.2s ease-in-out infinite;"></span>
+          </div>
+          <div style="padding:12px 16px;"><div style="font-size:12px; font-weight:600;">plankton</div><div style="color:#3e6a74; font-size:10px;">canvas swarm · orbits a drifting nucleus · curious — leans toward your cursor (live on this page)</div></div>
+        </div>
+      </div>
+      <div style="color:#3e6a74; font-size:10px;">stack order: abyss gradient → dot grid → plankton canvas → content → scanlines. glass panels blur(4–5px) so plankton smear behind them like light through water.</div>
+    </div>
+
+    <!-- 10 nav & misc -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">10</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Navigation &amp; Misc</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">active = lit lure · everything else waits in the dark</span>
+      </div>
+      <div style="display:grid; grid-template-columns:280px 1fr; gap:14px;">
+        <div style="border:1px solid #124450; border-radius:14px; padding:18px; background:linear-gradient(180deg,rgba(6,34,43,0.55),rgba(2,9,15,0.92)); display:flex; flex-direction:column; gap:6px;">
+          <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:14px 6px 14px 6px; background:rgba(47,255,192,0.09); border:1px solid rgba(47,255,192,0.32); color:#2fffc0; font-size:12px; font-weight:600;"><span style="width:6px; height:6px; background:#2fffc0; border-radius:50%; box-shadow:0 0 8px #2fffc0;"></span>overview</div>
+          <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:14px 6px 14px 6px; border:1px solid transparent; color:#3e6a74; font-size:12px; cursor:pointer; transition:color 0.4s, background 0.4s;" style-hover="color:#bdfbe6; background:rgba(18,68,80,0.25);">exit nodes</div>
+          <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:14px 6px 14px 6px; border:1px solid transparent; color:#3e6a74; font-size:12px; cursor:pointer; transition:color 0.4s, background 0.4s;" style-hover="color:#bdfbe6; background:rgba(18,68,80,0.25);">sessions <span style="margin-left:auto; background:rgba(28,139,255,0.15); border:1px solid rgba(28,139,255,0.4); color:#1c8bff; font-size:10px; padding:1px 7px; border-radius:999px;">14</span></div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:8px;">nav item: active gets dot + jade tint · badge counts ride in current-blue pills</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div style="border:1px solid #124450; border-radius:14px; padding:18px 22px; background:rgba(6,34,43,0.6); display:flex; align-items:center; gap:16px;">
+            <span style="color:#3e6a74; font-size:11px;">tooltip / toast</span>
+            <span style="background:#06222b; border:1px solid rgba(47,255,192,0.4); border-radius:10px 4px 10px 4px; padding:8px 14px; font-size:11px; box-shadow:0 0 20px rgba(2,9,15,0.8);">ip rotated → <span style="color:#2fffc0;">185.199.7.43</span></span>
+            <span style="background:#06222b; border:1px solid rgba(255,93,115,0.5); border-radius:10px 4px 10px 4px; padding:8px 14px; font-size:11px; color:#ff5d73;">node sgp-02 unreachable</span>
+          </div>
+          <div style="border:1px solid #124450; border-radius:14px; padding:18px 22px; background:rgba(6,34,43,0.6); display:flex; align-items:center; gap:16px;">
+            <span style="color:#3e6a74; font-size:11px;">focus ring</span>
+            <span style="border:1px solid #124450; border-radius:14px 6px 14px 6px; padding:9px 16px; font-size:11px; outline:2px solid rgba(47,255,192,0.5); outline-offset:3px;">keyboard focus blooms</span>
+            <span style="color:#3e6a74; font-size:11px; margin-left:12px;">cursor blink</span>
+            <span style="font-size:12px; color:#2fffc0;">req.stream_<span style="display:inline-block; width:8px; height:14px; background:#2fffc0; vertical-align:middle; animation:ds-blink 1.1s step-end infinite;"></span></span>
+          </div>
+          <div style="border:1px solid #124450; border-radius:14px; padding:18px 22px; background:rgba(6,34,43,0.6);">
+            <div style="display:flex; align-items:center; gap:14px;">
+              <span style="color:#3e6a74; font-size:11px;">loading</span>
+              <span style="width:120px; height:12px; border-radius:6px 2px 6px 2px; background:linear-gradient(90deg,#0d2b33 25%,#124450 50%,#0d2b33 75%); background-size:200% 100%; animation:ds-pulse 1.6s ease-in-out infinite;"></span>
+              <span style="color:#3e6a74; font-size:10px;">skeletons breathe (opacity pulse), they never slide</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 11 overlays -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">11</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Overlays &amp; Messaging</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">popups are opaque trench glass · alerts bleed their glow · try them</span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:14px;">
+        <div style="position:relative; z-index:30; border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="height:110px; display:flex; flex-direction:column; justify-content:center;">
+            <div style="position:relative;">
+              <div onClick="{{ toggleMenu }}" style="display:flex; align-items:center; background:rgba(2,9,15,0.7); border:1px solid #124450; border-radius:10px 4px 10px 4px; color:#bdfbe6; font-size:12px; padding:11px 14px; cursor:pointer; user-select:none; transition:border-color 0.4s;" style-hover="border-color:#3e6a74;">{{ regionLabel }}<span style="{{ caretStyle }}">▾</span></div>
+              <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute; left:0; right:0; top:calc(100% + 8px); z-index:40; background:#06222b; border:1px solid #124450; border-radius:14px 6px 14px 6px; box-shadow:0 18px 44px rgba(2,9,15,0.85), 0 0 24px rgba(47,255,192,0.07); padding:6px; transform-origin:top left; animation:ds-bloom-in 0.35s cubic-bezier(0.22,1,0.36,1);">
+                  <sc-for list="{{ menuItems }}" as="mi" hint-placeholder-count="3">
+                    <div onClick="{{ mi.pick }}" style="{{ mi.style }}" style-hover="background:rgba(18,68,80,0.35);"><span style="{{ mi.dotStyle }}"></span><span>{{ mi.city }} · {{ mi.code }}</span><span style="{{ mi.msStyle }}">{{ mi.ms }}ms</span></div>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+          <div style="font-size:11px;">menu · opaque glass</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">menus never go translucent — opaque trench so options stay legible · blooms from the anchor corner · active row keeps its dot lit</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="height:110px; display:flex; align-items:center; justify-content:center;">
+            <span onClick="{{ openModal }}" style="border:1px solid #1c8bff; color:#1c8bff; font-size:12px; font-weight:700; letter-spacing:0.14em; padding:11px 20px; border-radius:14px 6px 14px 6px; cursor:pointer; user-select:none; transition:background 0.4s, color 0.4s;" style-hover="background:rgba(28,139,255,0.12); color:#bdfbe6;">OPEN DIALOG</span>
+          </div>
+          <div style="font-size:11px;">dialog · surfaces from the deep</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">backdrop is deeper water — abyss @ 80% + blur(6px) · the dialog blooms in on current ease · scanlines stay above everything</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="height:110px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px;">
+            <span onClick="{{ sever }}" style="{{ severStyle }}">{{ severLabel }}</span>
+            <sc-if value="{{ severDone }}" hint-placeholder-val="{{ false }}">
+              <span style="display:inline-flex; align-items:center; gap:8px; background:rgba(255,93,115,0.1); border:1px solid rgba(255,93,115,0.4); color:#ff5d73; font-size:11px; padding:6px 12px; border-radius:999px; animation:ds-rise 0.6s cubic-bezier(0.22,1,0.36,1);"><span style="width:7px; height:7px; background:#ff5d73; border-radius:50%; box-shadow:0 0 10px #ff5d73; animation:ds-pulse 1.2s ease-in-out infinite;"></span>all sessions severed</span>
+            </sc-if>
+          </div>
+          <div style="font-size:11px;">confirm twice · destructive</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">first press arms it — quiver + countdown · second press severs · walk away and it disarms itself</div>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1.6fr 1fr; gap:14px;">
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; align-items:center; gap:14px; border:1px solid rgba(255,93,115,0.4); border-radius:14px; padding:14px 18px; background:linear-gradient(90deg,rgba(255,93,115,0.12),rgba(6,34,43,0.6) 55%); box-shadow:0 0 30px rgba(255,93,115,0.12); animation:ds-breathe 3s ease-in-out infinite;">
+            <span style="width:8px; height:8px; background:#ff5d73; border-radius:50%; box-shadow:0 0 12px #ff5d73; animation:ds-pulse 1.2s ease-in-out infinite; flex-shrink:0;"></span>
+            <div><div style="font-size:12px; font-weight:600; color:#ff5d73;">crush depth warning</div><div style="color:#3e6a74; font-size:11px; margin-top:2px;">trench storage at 94% — sessions start shedding logs in 2h</div></div>
+            <span style="margin-left:auto; flex-shrink:0; border:1px solid rgba(255,93,115,0.5); color:#ff5d73; font-size:11px; font-weight:700; letter-spacing:0.14em; padding:8px 14px; border-radius:14px 6px 14px 6px; cursor:pointer; transition:background 0.4s;" style-hover="background:rgba(255,93,115,0.12);">EXPAND</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:14px; border:1px solid rgba(28,139,255,0.35); border-radius:14px; padding:14px 18px; background:linear-gradient(90deg,rgba(28,139,255,0.1),rgba(6,34,43,0.6) 55%); animation:ds-breathe 6s ease-in-out infinite;">
+            <span style="width:8px; height:8px; background:#1c8bff; border-radius:50%; box-shadow:0 0 10px #1c8bff; animation:ds-pulse 2.6s ease-in-out infinite; flex-shrink:0;"></span>
+            <div><div style="font-size:12px; font-weight:600; color:#1c8bff;">new exit region</div><div style="color:#3e6a74; font-size:11px; margin-top:2px;">osaka · osa-01 joined the water column · 84ms from you</div></div>
+            <span style="margin-left:auto; flex-shrink:0; border:1px solid #1c8bff; color:#1c8bff; font-size:11px; font-weight:700; letter-spacing:0.14em; padding:8px 14px; border-radius:14px 6px 14px 6px; cursor:pointer; transition:background 0.4s;" style-hover="background:rgba(28,139,255,0.12);">TRY IT</span>
+          </div>
+          <div style="color:#3e6a74; font-size:10px;">bleed banners · the glow leaks past the border, no solid fills · distress breathes at 3s, info at 6s — urgency is a tempo</div>
+        </div>
+        <div style="border:1px dashed #124450; border-radius:14px; padding:22px; background:rgba(2,9,15,0.35); display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+          <div style="width:44px; height:40px; background:rgba(62,106,116,0.25); border:1px dashed #3e6a74; border-radius:60% 40% 55% 45% / 50% 60% 40% 55%;"></div>
+          <div style="font-size:13px; font-weight:600; margin-top:12px;">nothing lives here yet</div>
+          <div style="color:#3e6a74; font-size:11px; margin-top:4px;">no sessions in this water column</div>
+          <span style="margin-top:14px; background:#2fffc0; color:#02090f; font-size:11px; font-weight:700; letter-spacing:0.14em; padding:9px 16px; border-radius:14px 6px 14px 6px; box-shadow:0 0 18px rgba(47,255,192,0.3); cursor:pointer; transition:box-shadow 0.5s cubic-bezier(0.22,1,0.36,1);" style-hover="box-shadow:0 0 32px rgba(47,255,192,0.55);">SPAWN SESSION</span>
+          <div style="color:#3e6a74; font-size:10px; margin-top:12px;">empty state · dashed dormant frame · the cta is the only glow</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 12 motion -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">12</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Motion &amp; Interaction</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">water physics · every specimen below is alive — click it</span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:14px;">
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="height:110px; display:flex; align-items:center; justify-content:center;">
+            <div style="position:relative;">
+              <sc-for list="{{ ripples }}" as="rp" hint-placeholder-count="0"><span style="{{ rp.style }}"></span></sc-for>
+              <div onClick="{{ emitRipple }}" style="position:relative; background:#2fffc0; color:#02090f; font-size:12px; font-weight:700; letter-spacing:0.14em; padding:11px 20px; border-radius:14px 6px 14px 6px; box-shadow:0 0 22px rgba(47,255,192,0.35); cursor:pointer; user-select:none; animation:ds-breathe 4s ease-in-out infinite; transition:transform 0.45s cubic-bezier(0.3,1.7,0.4,1), box-shadow 0.5s cubic-bezier(0.22,1,0.36,1);" style-hover="box-shadow:0 0 38px rgba(47,255,192,0.6);" style-active="transform:scale(0.93,0.88);">ROTATE IP</div>
+            </div>
+          </div>
+          <div style="font-size:11px;">press bloom</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">contracts on press (propulsion) · release ejects a spore burst — every spore its own tiny organism</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="height:110px; display:flex; align-items:center; justify-content:center; gap:14px;">
+            <div onClick="{{ toggleSwim }}" style="{{ trackStyle }}"><sc-for list="{{ trails }}" as="tl" hint-placeholder-count="0"><span style="{{ tl.style }}"></span></sc-for><div style="{{ thumbStyle }}"></div></div>
+            <span style="font-size:11px; color:#3e6a74; min-width:86px;">{{ swimLabel }}</span>
+          </div>
+          <div style="font-size:11px;">swimming toggle</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">thumb swims across with overshoot, shedding an afterimage trail · wobbles while alive</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="height:110px; display:flex; align-items:center; justify-content:center;">
+            <div style="position:relative;">
+              <span style="position:absolute; left:50%; top:-4px; width:46px; height:42px; margin-left:-24px; border:1px solid rgba(47,255,192,0.45); border-radius:50%; animation:ds-ring-loop 1.9s cubic-bezier(0.22,1,0.36,1) infinite; pointer-events:none;"></span>
+              <div style="width:46px; height:34px; background:radial-gradient(circle at 50% 18%,rgba(47,255,192,0.95),rgba(28,139,255,0.5) 78%); border-radius:50% 50% 44% 44% / 70% 70% 34% 34%; box-shadow:0 0 24px rgba(47,255,192,0.45); animation:ds-jelly 1.9s cubic-bezier(0.45,0,0.3,1) infinite;"></div>
+              <div style="display:flex; justify-content:center; gap:7px; margin-top:3px; transform-origin:top center; animation:ds-jelly-tail 1.9s cubic-bezier(0.45,0,0.3,1) -1.78s infinite;">
+                <span style="width:1.5px; height:13px; background:linear-gradient(180deg,rgba(47,255,192,0.55),transparent);"></span>
+                <span style="width:1.5px; height:18px; background:linear-gradient(180deg,rgba(47,255,192,0.6),transparent);"></span>
+                <span style="width:1.5px; height:14px; background:linear-gradient(180deg,rgba(47,255,192,0.5),transparent);"></span>
+              </div>
+            </div>
+          </div>
+          <div style="font-size:11px;">medusa loader</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">indeterminate wait · bell contracts and glides, pushing a pressure ring each stroke</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="height:110px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;">
+            <span style="position:relative; background:rgba(47,255,192,0.1); border:1px solid rgba(47,255,192,0.35); color:#2fffc0; font-size:13px; padding:6px 12px; border-radius:8px 3px 8px 3px; min-width:112px; text-align:center;">
+              <sc-if value="{{ sinkPhase }}" hint-placeholder-val="{{ false }}"><span style="display:inline-block; animation:ds-sink 0.3s ease-in forwards;">{{ ip }}</span><span style="position:absolute; inset:-1px; border:1px dashed rgba(47,255,192,0.55); border-radius:8px 3px 8px 3px; animation:ds-shed 0.9s ease-out forwards; pointer-events:none;"></span></sc-if>
+              <sc-if value="{{ bloomPhase }}" hint-placeholder-val="{{ false }}"><span style="display:inline-block; animation:ds-bloom-in 0.7s cubic-bezier(0.22,1,0.36,1);">{{ ip }}</span><span style="position:absolute; inset:-5px; border:1px solid rgba(47,255,192,0.6); border-radius:11px 5px 11px 5px; animation:ds-ring 0.8s cubic-bezier(0.22,1,0.36,1) forwards; pointer-events:none;"></span></sc-if>
+              <sc-if value="{{ idlePhase }}" hint-placeholder-val="{{ true }}"><span style="display:inline-block;">{{ ip }}</span></sc-if>
+            </span>
+            <span onClick="{{ molt }}" style="border:1px solid #1c8bff; color:#1c8bff; font-size:11px; font-weight:700; letter-spacing:0.14em; padding:8px 16px; border-radius:14px 6px 14px 6px; cursor:pointer; user-select:none; transition:background 0.4s, color 0.4s;" style-hover="background:rgba(28,139,255,0.12); color:#bdfbe6;">MOLT</span>
+          </div>
+          <div style="font-size:11px;">molt · value change</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">old value sheds its skin — the husk drifts off · new one blooms in (.7s) · a ring announces it</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div onMouseMove="{{ trackPointer }}" onMouseLeave="{{ resetPointer }}" style="height:110px; display:flex; align-items:center; justify-content:center; cursor:crosshair;">
+            <div style="{{ organismStyle }}"><span style="{{ ciliaStyle }}"><span style="position:absolute; left:50%; top:-2px; width:3px; height:3px; margin-left:-1.5px; border-radius:50%; background:#2fffc0; box-shadow:0 0 6px #2fffc0;"></span><span style="position:absolute; left:96%; top:28%; width:3px; height:3px; border-radius:50%; background:#2fffc0; box-shadow:0 0 6px #2fffc0;"></span><span style="position:absolute; left:88%; top:82%; width:3px; height:3px; border-radius:50%; background:#1c8bff; box-shadow:0 0 6px #1c8bff;"></span><span style="position:absolute; left:50%; top:99%; width:3px; height:3px; margin-left:-1.5px; border-radius:50%; background:#2fffc0; box-shadow:0 0 6px #2fffc0;"></span><span style="position:absolute; left:6%; top:82%; width:3px; height:3px; border-radius:50%; background:#2fffc0; box-shadow:0 0 6px #2fffc0;"></span><span style="position:absolute; left:0%; top:28%; width:3px; height:3px; border-radius:50%; background:#1c8bff; box-shadow:0 0 6px #1c8bff;"></span></span></div>
+          </div>
+          <div style="font-size:11px;">approach response</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">it notices you — glow swells and cilia flare at close range · .6s water lag</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="height:110px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:12px;">
+            <div style="min-height:33px; display:flex; align-items:flex-end;">
+              <sc-if value="{{ toastVisible }}" hint-placeholder-val="{{ false }}"><span style="{{ toastStyle }}"><span style="{{ toastDotStyle }}"></span>{{ toastMsg }}</span></sc-if>
+            </div>
+            <div style="display:flex; gap:10px;">
+              <span onClick="{{ surfaceToast }}" style="background:rgba(47,255,192,0.08); border:1px solid rgba(47,255,192,0.3); color:#2fffc0; font-size:11px; font-weight:700; letter-spacing:0.14em; padding:8px 14px; border-radius:14px 6px 14px 6px; cursor:pointer; user-select:none; transition:background 0.4s;" style-hover="background:rgba(47,255,192,0.16);">SURFACE</span>
+              <span onClick="{{ severToast }}" style="border:1px solid #ff5d73; color:#ff5d73; font-size:11px; font-weight:700; letter-spacing:0.14em; padding:8px 14px; border-radius:14px 6px 14px 6px; cursor:pointer; user-select:none; transition:background 0.4s;" style-hover="background:rgba(255,93,115,0.12);">SEVER</span>
+            </div>
+          </div>
+          <div style="font-size:11px;">toasts surface</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">surface like bubbles with a sway · a live dot rides every toast · distress quivers on arrival</div>
+        </div>
+      </div>
+      <div style="border:1px solid #124450; border-radius:14px; padding:14px 22px; background:rgba(6,34,43,0.6); display:flex; flex-wrap:wrap; gap:10px 26px; font-size:10px; color:#3e6a74;">
+        <span><span style="color:#2fffc0;">current</span> ease · cubic-bezier(.22,1,.36,1) · arrivals, hovers, glow</span>
+        <span><span style="color:#2fffc0;">propulsion</span> ease · cubic-bezier(.3,1.7,.4,1) · presses, toggles — small overshoot, a push through water</span>
+        <span>births bloom .7s · deaths sink .3s · distress quivers .5s · nothing moves linearly, ever</span>
+        <span>idle is never still — living surfaces breathe (brightness ±18%, 4–6s) · bars flow with the current</span>
+        <span>prefers-reduced-motion honoured — the whole sea goes still, plankton included (live on this sheet)</span>
+      </div>
+    </div>
+
+    <!-- 13 in situ -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">13</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">In Situ</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">the rules composed · one bloom frame, everything else stays quiet</span>
+      </div>
+      <div style="display:grid; grid-template-columns:1.6fr 1fr; gap:14px; align-items:start;">
+        <div style="position:relative; border:1px solid rgba(47,255,192,0.4); border-radius:28px 10px 28px 10px; background:radial-gradient(circle at 78% 15%,rgba(47,255,192,0.14),rgba(6,34,43,0.72) 55%,rgba(2,9,15,0.85)); box-shadow:0 0 34px rgba(47,255,192,0.14); backdrop-filter:blur(5px); padding:26px 30px;">
+          <div style="display:flex; align-items:center; gap:16px;">
+            <div style="position:relative; width:54px; height:50px; flex-shrink:0; background:radial-gradient(circle at 32% 28%,rgba(47,255,192,0.9),rgba(28,139,255,0.55) 70%,rgba(6,34,43,0.4)); animation:ds-wobble 6s ease-in-out infinite, ds-drift 11s ease-in-out infinite, ds-breathe 5s ease-in-out infinite; box-shadow:0 0 26px rgba(47,255,192,0.4);"><span style="position:absolute; inset:-8px; border:1px solid rgba(47,255,192,0.35); border-radius:50%; animation:ds-ring-loop 5s cubic-bezier(0.22,1,0.36,1) infinite;"></span></div>
+            <div>
+              <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">session · alive 6h 12m</div>
+              <div style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:30px; line-height:1.1; margin-top:2px;">tor-relay-04</div>
+            </div>
+            <span style="margin-left:auto; display:inline-flex; align-items:center; gap:8px; background:rgba(47,255,192,0.10); border:1px solid rgba(47,255,192,0.35); color:#2fffc0; font-size:11px; padding:8px 14px; border-radius:999px; flex-shrink:0;"><span style="width:7px; height:7px; background:#2fffc0; border-radius:50%; box-shadow:0 0 10px #2fffc0; animation:ds-ping 6s linear infinite; animation-delay:-5.5s;"></span>tethered · fra-07</span>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-top:24px;">
+            <div><div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">throughput</div><div style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:28px; color:#2fffc0; margin-top:4px; text-shadow:0 0 18px rgba(47,255,192,0.35); animation:ds-breathe 5s ease-in-out infinite;">4.2 <span style="font-size:13px; color:#3e6a74; text-shadow:none;">gb/s</span></div></div>
+            <div><div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">latency</div><div style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:28px; margin-top:4px;">12 <span style="font-size:13px; color:#3e6a74;">ms</span></div></div>
+            <div><div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">rotations</div><div style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:28px; margin-top:4px;">47</div></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; margin-top:24px; padding-top:18px; border-top:1px solid rgba(18,68,80,0.5); flex-wrap:wrap;">
+            <span style="background:rgba(47,255,192,0.1); border:1px solid rgba(47,255,192,0.35); color:#2fffc0; font-size:12px; padding:5px 10px; border-radius:8px 3px 8px 3px;">185.199.7.42</span>
+            <span style="background:rgba(2,9,15,0.7); border:1px solid #124450; color:#bdfbe6; font-size:12px; padding:5px 10px; border-radius:8px 3px 8px 3px;">:8443</span>
+            <span style="background:rgba(28,139,255,0.1); border:1px solid rgba(28,139,255,0.4); color:#1c8bff; font-size:12px; padding:5px 10px; border-radius:8px 3px 8px 3px;">socks5</span>
+            <span style="margin-left:auto; background:#2fffc0; color:#02090f; font-size:12px; font-weight:700; letter-spacing:0.14em; padding:10px 18px; border-radius:14px 6px 14px 6px; box-shadow:0 0 22px rgba(47,255,192,0.35); cursor:pointer; animation:ds-breathe 4.5s ease-in-out infinite; transition:box-shadow 0.5s cubic-bezier(0.22,1,0.36,1), transform 0.45s cubic-bezier(0.3,1.7,0.4,1);" style-hover="box-shadow:0 0 38px rgba(47,255,192,0.6);" style-active="transform:scale(0.94,0.9);">ROTATE IP</span>
+            <span style="color:#3e6a74; font-size:12px; font-weight:700; letter-spacing:0.14em; padding:10px 14px; border:1px solid transparent; cursor:pointer; border-radius:14px 6px 14px 6px; transition:color 0.4s, border-color 0.4s;" style-hover="color:#bdfbe6; border-color:#124450;">DETAILS</span>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:16px 18px; backdrop-filter:blur(4px);">
+            <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">water column</div>
+            <div style="display:flex; align-items:center; gap:10px; padding:10px 0 9px; border-bottom:1px solid #0d2b33; margin-top:6px;"><span style="width:7px; height:7px; background:#2fffc0; border-radius:50%; box-shadow:0 0 8px #2fffc0; animation:ds-pulse 2s ease-in-out infinite;"></span><span style="color:#2fffc0; font-size:12px; font-weight:600;">fra-07</span><span style="margin-left:auto; font-size:12px;">12ms</span></div>
+            <div style="display:flex; align-items:center; gap:10px; padding:10px 0 9px; border-bottom:1px solid #0d2b33;"><span style="width:6px; height:6px; background:#1c8bff; border-radius:50%; box-shadow:0 0 6px #1c8bff;"></span><span style="font-size:12px;">ams-03</span><span style="margin-left:auto; color:#3e6a74; font-size:12px;">19ms</span></div>
+            <div style="display:flex; align-items:center; gap:10px; padding:10px 0 0;"><span style="width:6px; height:6px; background:#3e6a74; border-radius:50%;"></span><span style="color:#3e6a74; font-size:12px;">sgp-02</span><span style="margin-left:auto; color:#3e6a74; font-size:12px;">—</span></div>
+          </div>
+          <div style="background:rgba(6,34,43,0.6); border:1px solid #124450; border-radius:14px; padding:16px 18px; backdrop-filter:blur(4px);">
+            <div style="display:flex; font-size:10px; color:#3e6a74;"><span>depth used · 16%</span><span style="margin-left:auto;">312 gb / 2 tb</span></div>
+            <div style="position:relative; height:5px; background:#0d2b33; border-radius:3px; margin-top:8px;"><div data-grow="1" style="position:relative; width:16%; height:5px; background:linear-gradient(90deg,#2fffc0,#1c8bff,#2fffc0); background-size:200% 100%; animation:ds-grow 1.1s cubic-bezier(0.22,1,0.36,1) both, ds-flow 3s linear infinite; transform-origin:left; border-radius:3px; box-shadow:0 0 8px rgba(47,255,192,0.5);" style-after="content:''; position:absolute; right:-2px; top:50%; margin-top:-3px; width:6px; height:6px; border-radius:50%; background:#2fffc0; box-shadow:0 0 9px #2fffc0;"></div><span style="position:absolute; left:80%; top:-2px; width:1px; height:9px; background:rgba(189,251,230,0.28);"></span></div>
+          </div>
+          <div style="color:#3e6a74; font-size:10px; line-height:1.7;">exactly one bloom frame answers the pointer · neighbours wait in quiet trench glass · metadata is typography on whitespace, no extra boxes · unknown latency renders —, never a fake 0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 14 console & command -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">14</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Console &amp; Command</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">config wells · keys are pebbles · ⌘K summons the lure</span>
+      </div>
+      <div style="display:grid; grid-template-columns:1.2fr 1fr 1fr; gap:14px;">
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="width:6px; height:6px; background:#2fffc0; border-radius:50%; box-shadow:0 0 8px #2fffc0;"></span>
+            <span style="font-size:11px;">proxy.toml</span>
+            <span onClick="{{ copyConfig }}" style="{{ copyStyle }}">{{ copyLabel }}</span>
+          </div>
+          <div style="margin-top:12px; background:rgba(2,9,15,0.75); border:1px solid #0d2b33; border-radius:10px 4px 10px 4px; padding:14px 16px; font-size:12px; line-height:1.9;">
+            <div style="display:flex; gap:14px;"><span style="color:#124450; width:12px; text-align:right; flex-shrink:0;">1</span><span style="color:#1c8bff;">[tunnel]</span></div>
+            <div style="display:flex; gap:14px;"><span style="color:#124450; width:12px; text-align:right; flex-shrink:0;">2</span><span><span style="display:inline-block; width:56px; color:#bdfbe6;">exit</span><span style="color:#3e6a74;">= </span><span style="color:#2fffc0;">"fra-07"</span></span></div>
+            <div style="display:flex; gap:14px;"><span style="color:#124450; width:12px; text-align:right; flex-shrink:0;">3</span><span><span style="display:inline-block; width:56px; color:#bdfbe6;">proto</span><span style="color:#3e6a74;">= </span><span style="color:#2fffc0;">"socks5"</span></span></div>
+            <div style="display:flex; gap:14px;"><span style="color:#124450; width:12px; text-align:right; flex-shrink:0;">4</span><span><span style="display:inline-block; width:56px; color:#bdfbe6;">port</span><span style="color:#3e6a74;">= </span><span style="color:#1c8bff;">8443</span></span></div>
+            <div style="display:flex; gap:14px;"><span style="color:#124450; width:12px; text-align:right; flex-shrink:0;">5</span><span><span style="display:inline-block; width:56px; color:#bdfbe6;">molt</span><span style="color:#3e6a74;">= </span><span style="color:#2fffc0;">"1h"</span></span></div>
+          </div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:10px;">recessed config well · strings glow jade, numbers ride the current, line numbers sink to ridge · absorb = copy — the button drinks it</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="flex:1; min-height:150px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px;">
+            <span onClick="{{ openPalette }}" style="background:rgba(47,255,192,0.08); border:1px solid rgba(47,255,192,0.3); color:#2fffc0; font-size:12px; font-weight:700; letter-spacing:0.14em; padding:11px 20px; border-radius:14px 6px 14px 6px; cursor:pointer; user-select:none; transition:background 0.4s;" style-hover="background:rgba(47,255,192,0.16);">SUMMON LURE</span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="background:rgba(2,9,15,0.75); border:1px solid #124450; border-bottom-width:3px; border-radius:8px 3px 8px 3px; padding:4px 9px; font-size:11px; box-shadow:inset 0 1px 0 rgba(189,251,230,0.07);">⌘</span>
+              <span style="background:rgba(2,9,15,0.75); border:1px solid #124450; border-bottom-width:3px; border-radius:8px 3px 8px 3px; padding:4px 9px; font-size:11px; box-shadow:inset 0 1px 0 rgba(189,251,230,0.07);">K</span>
+            </div>
+            <div style="color:#3e6a74; font-size:10px;">last strike · <span style="color:#2fffc0;">{{ lastCmd }}</span></div>
+          </div>
+          <div style="font-size:11px;">command palette</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">the lure hangs mid-water — opaque trench glass, blooms from above · ↑↓ swim, ↵ strike, esc release · works on this sheet</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="flex:1; min-height:150px; display:flex; flex-direction:column; justify-content:center; gap:10px;">
+            <div onClick="{{ togglePacket }}" style="display:flex; align-items:center; gap:10px; background:rgba(2,9,15,0.7); border:1px solid #124450; border-radius:10px 4px 10px 4px; font-size:12px; padding:11px 14px; cursor:pointer; user-select:none; transition:border-color 0.4s;" style-hover="border-color:#3e6a74;"><span style="width:6px; height:6px; background:#1c8bff; border-radius:50%; box-shadow:0 0 6px #1c8bff; flex-shrink:0;"></span>packet 0x4f2a · 1.2kb<span style="{{ chevStyle }}">›</span></div>
+            <sc-if value="{{ packetOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="background:rgba(2,9,15,0.75); border:1px solid #0d2b33; border-radius:10px 4px 10px 4px; padding:12px 14px; font-size:11px; line-height:1.9; animation:ds-bloom-in 0.35s cubic-bezier(0.22,1,0.36,1); transform-origin:top center;">
+                <div><span style="color:#3e6a74;">src </span>10.0.0.4:51820 <span style="color:#2fffc0;">→</span> <span style="color:#3e6a74;">dst </span>185.199.7.42:8443</div>
+                <div><span style="color:#3e6a74;">proto </span><span style="color:#1c8bff;">socks5</span><span style="color:#3e6a74;"> · ttl </span>64</div>
+                <div><span style="color:#3e6a74;">cipher </span><span style="color:#2fffc0;">chacha20-poly1305</span></div>
+              </div>
+            </sc-if>
+          </div>
+          <div style="font-size:11px;">disclosure · packet inspector</div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:2px;">closed things stay dark · detail blooms in from the row · chevron swims 90° on the current ease</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 15 sediment log -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">15</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Sediment Log</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">events settle downward · this feed is live</span>
+      </div>
+      <div style="display:grid; grid-template-columns:1.6fr 1fr; gap:14px; align-items:start;">
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px 22px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px);">
+          <div style="display:flex; align-items:center;">
+            <span style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">activity · water column</span>
+            <span style="margin-left:auto; display:inline-flex; align-items:center; gap:8px; background:rgba(47,255,192,0.10); border:1px solid rgba(47,255,192,0.35); color:#2fffc0; font-size:10px; padding:5px 11px; border-radius:999px;"><span style="width:6px; height:6px; background:#2fffc0; border-radius:50%; box-shadow:0 0 8px #2fffc0; animation:ds-pulse 2s ease-in-out infinite;"></span>live feed</span>
+          </div>
+          <div style="margin-top:8px;">
+            <sc-for list="{{ events }}" as="ev" hint-placeholder-count="4">
+              <div style="{{ ev.rowStyle }}"><span style="{{ ev.dotStyle }}"></span><span style="color:#3e6a74; font-size:10px; width:58px; flex-shrink:0;">{{ ev.ts }}</span><span style="{{ ev.msgStyle }}">{{ ev.msg }}</span><span style="{{ ev.tagStyle }}">{{ ev.tag }}</span></div>
+            </sc-for>
+          </div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:12px;">newest surfaces with a rise and holds the light · hairline rows, never zebra · five events max — older ones settle into the floor</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px 22px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px);">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">reading the sediment</div>
+          <div style="display:flex; align-items:center; gap:10px; padding:11px 0 10px; border-bottom:1px solid #0d2b33; margin-top:6px;"><span style="width:7px; height:7px; background:#2fffc0; border-radius:50%; box-shadow:0 0 8px #2fffc0; flex-shrink:0;"></span><span style="font-size:12px;">life events</span><span style="margin-left:auto; color:#3e6a74; font-size:10px;">molt · tether · spawn</span></div>
+          <div style="display:flex; align-items:center; gap:10px; padding:11px 0 10px; border-bottom:1px solid #0d2b33;"><span style="width:7px; height:7px; background:#1c8bff; border-radius:50%; box-shadow:0 0 8px #1c8bff; flex-shrink:0;"></span><span style="font-size:12px;">the column shifts</span><span style="margin-left:auto; color:#3e6a74; font-size:10px;">nodes join · schedules</span></div>
+          <div style="display:flex; align-items:center; gap:10px; padding:11px 0 10px;"><span style="width:7px; height:7px; background:#ff5d73; border-radius:50%; box-shadow:0 0 10px #ff5d73; animation:ds-pulse 1.2s ease-in-out infinite; flex-shrink:0;"></span><span style="font-size:12px;">distress</span><span style="margin-left:auto; color:#3e6a74; font-size:10px;">always paired with a word</span></div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:12px; line-height:1.7;">timestamps are real · tags ride right in thin pills · a distress row never relies on colour alone — the word carries it</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 16 telemetry -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:1px solid #0d2b33; padding-bottom:10px;">
+        <span style="color:#2fffc0; font-size:11px; letter-spacing:0.22em;">16</span>
+        <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">Telemetry &amp; Geography</span>
+        <span style="color:#3e6a74; font-size:11px; margin-left:auto;">streams breathe in real time · the sonar never sleeps</span>
+      </div>
+      <div style="display:grid; grid-template-columns:1.6fr 1fr; gap:14px; align-items:stretch;">
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px 22px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px); display:flex; flex-direction:column;">
+          <div style="display:flex; align-items:baseline; gap:16px;">
+            <span style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">bandwidth · live stream</span>
+            <span style="margin-left:auto; font-family:'Cormorant Unicase',serif; font-weight:700; font-size:24px; color:#2fffc0;">{{ upNow }} <span style="font-size:12px; color:#3e6a74;">gb/s ↑</span></span>
+            <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:24px; color:#1c8bff;">{{ downNow }} <span style="font-size:12px; color:#3e6a74;">gb/s ↓</span></span>
+          </div>
+          <div style="position:relative; flex:1; margin-top:12px;">
+            <svg viewBox="0 0 320 104" preserveAspectRatio="none" style="width:100%; height:128px; display:block; overflow:visible;">
+              <defs>
+                <linearGradient id="bwup" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(47,255,192,0.26)"></stop><stop offset="100%" stop-color="rgba(47,255,192,0)"></stop></linearGradient>
+                <linearGradient id="bwdown" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(28,139,255,0)"></stop><stop offset="100%" stop-color="rgba(28,139,255,0.22)"></stop></linearGradient>
+              </defs>
+              <line x1="0" y1="14" x2="320" y2="14" stroke="rgba(18,68,80,0.45)" stroke-dasharray="2 4"></line>
+              <line x1="0" y1="30" x2="320" y2="30" stroke="rgba(18,68,80,0.45)" stroke-dasharray="2 4"></line>
+              <line x1="0" y1="46" x2="320" y2="46" stroke="rgba(18,68,80,0.45)" stroke-dasharray="2 4"></line>
+              <line x1="0" y1="83" x2="320" y2="83" stroke="rgba(18,68,80,0.45)" stroke-dasharray="2 4"></line>
+              <line x1="0" y1="62" x2="320" y2="62" stroke="rgba(189,251,230,0.18)"></line>
+              <line x1="0" y1="{{ peakY }}" x2="320" y2="{{ peakY }}" stroke="rgba(47,255,192,0.3)" stroke-dasharray="1 4"></line>
+              <path d="{{ upArea }}" fill="url(#bwup)"></path>
+              <path d="{{ downArea }}" fill="url(#bwdown)"></path>
+              <path d="{{ upPath }}" fill="none" stroke="#2fffc0" stroke-width="1.5" style="filter:drop-shadow(0 0 5px rgba(47,255,192,0.6));"></path>
+              <path d="{{ downPath }}" fill="none" stroke="#1c8bff" stroke-width="1.2" opacity="0.9" style="filter:drop-shadow(0 0 4px rgba(28,139,255,0.6));"></path>
+              <circle cx="320" cy="{{ upDotY }}" r="3" fill="#2fffc0" style="filter:drop-shadow(0 0 6px #2fffc0); animation:ds-pulse 2s ease-in-out infinite;"></circle>
+              <circle cx="320" cy="{{ downDotY }}" r="2.5" fill="#1c8bff" style="filter:drop-shadow(0 0 5px #1c8bff); animation:ds-pulse 2.7s ease-in-out infinite;"></circle>
+            </svg>
+            <span style="{{ peakChipStyle }}">crest {{ peakLabel }} gb/s</span>
+          </div>
+          <div style="display:flex; margin-top:4px; color:#3e6a74; font-size:9px;"><span>-20s</span><span style="margin:0 auto;">-10s</span><span>now</span></div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:10px;">mirrored around the waterline — jade rises out, current sinks back in · a sample every half-second · the dashed crest remembers the window's peak · still no axes, the water is the scale</div>
+        </div>
+        <div style="border:1px solid #124450; border-radius:14px; padding:20px 22px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px);">
+          <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">sonar · node bearings</div>
+          <div style="position:relative; width:170px; height:170px; margin:14px auto 0; border-radius:50%; overflow:hidden; border:1px solid #124450; background:radial-gradient(circle,rgba(6,34,43,0.4),rgba(2,9,15,0.8));">
+            <div style="position:absolute; inset:18%; border:1px solid rgba(18,68,80,0.8); border-radius:50%;"></div>
+            <div style="position:absolute; inset:36%; border:1px solid rgba(18,68,80,0.8); border-radius:50%;"></div>
+            <span style="position:absolute; left:50%; top:18%; transform:translate(4px,-5px); font-size:8px; color:#3e6a74;">80ms</span>
+            <span style="position:absolute; left:50%; top:36%; transform:translate(4px,-5px); font-size:8px; color:#3e6a74;">40ms</span>
+            <div style="position:absolute; left:50%; top:0; bottom:0; width:1px; background:rgba(13,43,51,0.9);"></div>
+            <div style="position:absolute; top:50%; left:0; right:0; height:1px; background:rgba(13,43,51,0.9);"></div>
+            <div style="position:absolute; inset:0; background:conic-gradient(from 0deg, transparent 0deg 250deg, rgba(47,255,192,0.02) 262deg, rgba(47,255,192,0.28) 360deg); animation:ds-spin-slow 6s linear infinite;"></div>
+            <span style="position:absolute; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; background:#bdfbe6; border-radius:50%; box-shadow:0 0 8px rgba(189,251,230,0.8);"></span>
+            <span style="position:absolute; left:64%; top:26%;"><span style="display:block; width:6px; height:6px; background:#2fffc0; border-radius:50%; box-shadow:0 0 10px #2fffc0; animation:ds-ping 6s linear infinite; animation-delay:-5.5s;"></span><span style="position:absolute; left:10px; top:-3px; color:#2fffc0; font-size:9px; white-space:nowrap;">fra-07</span></span>
+            <span style="position:absolute; left:36%; top:16%;"><span style="display:block; width:5px; height:5px; background:#1c8bff; border-radius:50%; box-shadow:0 0 8px #1c8bff; animation:ds-ping 6s linear infinite; animation-delay:-0.37s;"></span></span>
+            <span style="position:absolute; left:76%; top:64%;"><span style="display:block; width:5px; height:5px; background:#1c8bff; border-radius:50%; box-shadow:0 0 8px #1c8bff; animation:ds-ping 6s linear infinite; animation-delay:-4.03s;"></span></span>
+            <span style="position:absolute; left:24%; top:70%;"><span style="display:block; width:5px; height:5px; background:#ff5d73; border-radius:50%; box-shadow:0 0 10px #ff5d73; animation:ds-pulse 1.2s ease-in-out infinite;"></span><span style="position:absolute; left:9px; top:-3px; color:#ff5d73; font-size:9px; white-space:nowrap;">sgp-02</span></span>
+          </div>
+          <div style="color:#3e6a74; font-size:10px; margin-top:14px; text-align:center;">the beam ignites each blip as it passes — then it decays into the dark · distress pulses on its own clock · rings read range in ms</div>
+        </div>
+      </div>
+      <div style="border:1px solid #124450; border-radius:14px; padding:20px 22px; background:rgba(6,34,43,0.6); backdrop-filter:blur(4px);">
+        <div style="color:#3e6a74; font-size:10px; letter-spacing:0.16em;">traffic share · by exit region</div>
+        <div data-grow="1" style="display:flex; height:10px; gap:2px; margin-top:12px; border-radius:6px; overflow:hidden; transform-origin:left; animation:ds-grow 1.2s cubic-bezier(0.22,1,0.36,1) both;"><span style="width:46%; background:linear-gradient(90deg,#2fffc0,#1c8bff,#2fffc0); background-size:200% 100%; animation:ds-flow 3s linear infinite; box-shadow:0 0 12px rgba(47,255,192,0.35);"></span><span style="width:24%; background:rgba(28,139,255,0.6);"></span><span style="width:14%; background:rgba(28,139,255,0.38);"></span><span style="flex:1; background:rgba(62,106,116,0.3);"></span></div>
+        <div style="display:grid; grid-template-columns:34px 100px 1fr 90px; gap:14px; align-items:center; padding:11px 0 10px; border-bottom:1px solid #0d2b33; margin-top:6px;">
+          <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:20px; color:#2fffc0; text-shadow:0 0 14px rgba(47,255,192,0.4);">1</span>
+          <span style="display:flex; align-items:center; gap:8px;"><span style="width:6px; height:6px; background:#2fffc0; border-radius:50%; box-shadow:0 0 8px #2fffc0;"></span><span style="color:#2fffc0; font-size:12px; font-weight:600;">fra-07</span></span>
+          <span style="position:relative; height:7px; background:#0d2b33; border-radius:4px;"><span data-grow="1" style="display:block; position:relative; width:46%; height:7px; background:linear-gradient(90deg,#2fffc0,#1c8bff,#2fffc0); background-size:200% 100%; animation:ds-grow 1.1s cubic-bezier(0.22,1,0.36,1) both, ds-flow 3s linear infinite; transform-origin:left; border-radius:4px; box-shadow:0 0 8px rgba(47,255,192,0.4);" style-after="content:''; position:absolute; right:-2px; top:50%; margin-top:-3.5px; width:7px; height:7px; border-radius:50%; background:#2fffc0; box-shadow:0 0 10px #2fffc0;"></span></span>
+          <span style="font-size:12px; text-align:right;">46%</span>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 100px 1fr 90px; gap:14px; align-items:center; padding:11px 0 10px; border-bottom:1px solid #0d2b33;">
+          <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:20px; color:#3e6a74;">2</span>
+          <span style="display:flex; align-items:center; gap:8px;"><span style="width:6px; height:6px; background:#1c8bff; border-radius:50%; box-shadow:0 0 6px #1c8bff;"></span><span style="font-size:12px;">ams-03</span></span>
+          <span style="height:7px; background:#0d2b33; border-radius:4px;"><span data-grow="1" style="display:block; width:24%; height:7px; background:rgba(28,139,255,0.55); animation:ds-grow 1.1s cubic-bezier(0.22,1,0.36,1) 0.12s both; transform-origin:left; border-radius:4px;"></span></span>
+          <span style="font-size:12px; text-align:right; color:#3e6a74;">24%</span>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 100px 1fr 90px; gap:14px; align-items:center; padding:11px 0 10px; border-bottom:1px solid #0d2b33;">
+          <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:20px; color:#3e6a74;">3</span>
+          <span style="display:flex; align-items:center; gap:8px;"><span style="width:6px; height:6px; background:#1c8bff; border-radius:50%; box-shadow:0 0 6px #1c8bff;"></span><span style="font-size:12px;">osa-01</span></span>
+          <span style="height:7px; background:#0d2b33; border-radius:4px;"><span data-grow="1" style="display:block; width:14%; height:7px; background:rgba(28,139,255,0.45); animation:ds-grow 1.1s cubic-bezier(0.22,1,0.36,1) 0.24s both; transform-origin:left; border-radius:4px;"></span></span>
+          <span style="font-size:12px; text-align:right; color:#3e6a74;">14%</span>
+        </div>
+        <div style="display:grid; grid-template-columns:34px 100px 1fr 90px; gap:14px; align-items:center; padding:11px 0 0;">
+          <span style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:20px; color:#3e6a74;">4</span>
+          <span style="display:flex; align-items:center; gap:8px;"><span style="width:6px; height:6px; background:#ff5d73; border-radius:50%; box-shadow:0 0 8px #ff5d73; animation:ds-pulse 1.2s ease-in-out infinite;"></span><span style="color:#3e6a74; font-size:12px;">sgp-02</span></span>
+          <span style="height:7px; border:1px dashed #124450; border-radius:4px; background:transparent;"></span>
+          <span style="color:#ff5d73; font-size:11px; text-align:right;">severed · —</span>
+        </div>
+        <div style="color:#3e6a74; font-size:10px; margin-top:12px;">the ribbon reads the whole column in one glance — silt is the long tail · rank numerals in unicase · only the leader flows and carries the comet head · a severed region shows a dashed empty bar and — , never a fake 0</div>
+      </div>
+    </div>
+
+    <sc-if value="{{ paletteOpen }}" hint-placeholder-val="{{ false }}">
+      <div onClick="{{ closePalette }}" style="position:fixed; inset:0; z-index:30; background:rgba(2,9,15,0.78); backdrop-filter:blur(6px); display:flex; align-items:flex-start; justify-content:center; padding-top:16vh; animation:ds-fade-in 0.3s ease;">
+        <div onClick="{{ eatClick }}" style="width:520px; max-width:calc(100vw - 48px); border:1px solid rgba(47,255,192,0.3); border-radius:28px 10px 28px 10px; background:#06222b; box-shadow:0 30px 80px rgba(2,9,15,0.9), 0 0 40px rgba(47,255,192,0.08); animation:ds-bloom-in 0.4s cubic-bezier(0.22,1,0.36,1); overflow:hidden;">
+          <div style="display:flex; align-items:center; gap:10px; padding:16px 18px; border-bottom:1px solid #0d2b33;">
+            <span style="color:#2fffc0; font-size:14px;">/</span>
+            <input ref="{{ palRef }}" value="{{ palQuery }}" onChange="{{ onPalInput }}" placeholder="strike a command…" style="flex:1; background:transparent; border:none; outline:none; color:#bdfbe6; font-family:'Spline Sans Mono',monospace; font-size:13px;">
+            <span style="background:rgba(2,9,15,0.75); border:1px solid #124450; border-bottom-width:3px; border-radius:8px 3px 8px 3px; padding:3px 8px; font-size:10px; color:#3e6a74;">ESC</span>
+          </div>
+          <div style="padding:8px;">
+            <sc-for list="{{ palItems }}" as="pc" hint-placeholder-count="4">
+              <div onClick="{{ pc.strike }}" onMouseEnter="{{ pc.hover }}" style="{{ pc.rowStyle }}"><span style="{{ pc.dotStyle }}"></span><span>{{ pc.label }}</span><span style="{{ pc.hintStyle }}">{{ pc.hint }}</span></div>
+            </sc-for>
+            <sc-if value="{{ palEmpty }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:18px; text-align:center; color:#3e6a74; font-size:11px;">nothing answers that call</div>
+            </sc-if>
+          </div>
+          <div style="display:flex; gap:18px; padding:10px 18px; border-top:1px solid #0d2b33; color:#3e6a74; font-size:10px;"><span>↑↓ swim</span><span>↵ strike</span><span>esc release</span><span style="margin-left:auto; color:#124450;">the lure</span></div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ modalOpen }}" hint-placeholder-val="{{ false }}">
+      <div onClick="{{ closeModal }}" style="position:fixed; inset:0; z-index:30; background:rgba(2,9,15,0.8); backdrop-filter:blur(6px); display:flex; align-items:center; justify-content:center; animation:ds-fade-in 0.4s ease;">
+        <div onClick="{{ eatClick }}" style="width:420px; max-width:calc(100vw - 48px); border:1px solid rgba(47,255,192,0.3); border-radius:28px 10px 28px 10px; background:linear-gradient(180deg,rgba(28,139,255,0.12),rgba(2,9,15,0.55)), #06222b; padding:26px 28px; box-shadow:0 30px 80px rgba(2,9,15,0.9), 0 0 40px rgba(47,255,192,0.08); animation:ds-bloom-in 0.5s cubic-bezier(0.22,1,0.36,1);">
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div style="width:36px; height:32px; flex-shrink:0; background:radial-gradient(circle at 35% 30%,#ff5d73,rgba(6,34,43,0.6) 85%); animation:ds-wobble 6s ease-in-out infinite; box-shadow:0 0 16px rgba(255,93,115,0.35);"></div>
+            <div style="font-family:'Cormorant Unicase',serif; font-weight:700; font-size:26px;">sever session?</div>
+          </div>
+          <div style="color:#3e6a74; font-size:12px; margin-top:12px; line-height:1.7;">session <span style="color:#bdfbe6;">tor-relay-04</span> has been alive for 6h 12m. severing releases <span style="color:#2fffc0;">185.199.7.42</span> back into the water column. this cannot be undone.</div>
+          <div style="display:flex; justify-content:flex-end; align-items:center; gap:12px; margin-top:24px;">
+            <span onClick="{{ closeModal }}" style="color:#3e6a74; font-size:12px; font-weight:700; letter-spacing:0.14em; padding:10px 16px; border:1px solid transparent; cursor:pointer; user-select:none; border-radius:14px 6px 14px 6px; transition:color 0.4s, border-color 0.4s;" style-hover="color:#bdfbe6; border-color:#124450;">KEEP ALIVE</span>
+            <span onClick="{{ closeModal }}" style="border:1px solid #ff5d73; color:#ff5d73; font-size:12px; font-weight:700; letter-spacing:0.14em; padding:10px 18px; border-radius:14px 6px 14px 6px; cursor:pointer; user-select:none; transition:background 0.4s;" style-hover="background:rgba(255,93,115,0.12);">SEVER</span>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <div style="color:#3e6a74; font-size:10px; border-top:1px solid #0d2b33; padding-top:16px; display:flex;">abyssal bloom · specimen sheet · 16 sections<span style="margin-left:auto;">jade #2FFFC0 · current #1C8BFF · coral #FF5D73 · foam #BDFBE6</span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1260,&quot;height&quot;:3000},&quot;planktonCount&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:20,&quot;min&quot;:0,&quot;max&quot;:140,&quot;step&quot;:10,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Atmosphere&quot;},&quot;scanlines&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Atmosphere&quot;},&quot;dotGrid&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Atmosphere&quot;},&quot;liveFeed&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Live Data&quot;}}">
+class Component extends DCLogic {
+  state = { ripples: [], trails: [], latIdx: null, swimOn: true, ip: '185.199.7.42', moltPhase: null, px: 0, py: 0, near: 0, toast: null, menuOpen: false, region: 'fra-07', modalOpen: false, severState: null, severCount: 3,
+    copied: false, paletteOpen: false, palQuery: '', palIdx: 0, lastCmd: null, packetOpen: false,
+    events: (() => { const n = Date.now(), f = (s) => new Date(n - s * 1000).toTimeString().slice(0, 8); return [
+      { id: 4, k: 'good', tag: 'session', msg: 'tor-relay-04 tethered · fra-07', ts: f(9) },
+      { id: 3, k: 'good', tag: 'molt', msg: 'ip rotated → 185.199.7.42', ts: f(64) },
+      { id: 2, k: 'info', tag: 'node', msg: 'osa-01 joined the water column', ts: f(198) },
+      { id: 1, k: 'bad', tag: 'node', msg: 'sgp-02 unreachable · rerouting', ts: f(311) },
+    ]; })(),
+    bwUp: Array.from({ length: 40 }, (_, i) => 3.4 + Math.sin(i / 3.2) * 0.9 + Math.random() * 0.4),
+    bwDown: Array.from({ length: 40 }, (_, i) => 1.5 + Math.cos(i / 4) * 0.5 + Math.random() * 0.3),
+  };
+  _cmds = [
+    { label: 'rotate ip', hint: '⌘R', dot: '#2fffc0' },
+    { label: 'spawn session', hint: '⌘N', dot: '#2fffc0' },
+    { label: 'switch exit · frankfurt', hint: 'fra-07', dot: '#1c8bff' },
+    { label: 'switch exit · amsterdam', hint: 'ams-03', dot: '#1c8bff' },
+    { label: 'detach session', hint: '⇧⌘D', dot: '#3e6a74' },
+    { label: 'sever all sessions', hint: 'hold', dot: '#ff5d73' },
+  ];
+  _pool = [
+    { k: 'good', tag: 'molt', msg: 'ip rotated → 91.203.44.18' },
+    { k: 'info', tag: 'node', msg: 'osa-01 joined the water column' },
+    { k: 'bad', tag: 'node', msg: 'sgp-02 unreachable · rerouting' },
+    { k: 'good', tag: 'session', msg: 'tor-relay-04 tethered · fra-07' },
+    { k: 'info', tag: 'molt', msg: 'auto-molt scheduled · 42m' },
+    { k: 'bad', tag: 'depth', msg: 'trench 94% · shedding logs' },
+  ];
+  _filtered() { const q = this.state.palQuery.toLowerCase(); return this._cmds.filter(c => c.label.includes(q)); }
+  _strike(label) { this.setState({ paletteOpen: false, lastCmd: label }); }
+  _curve(pts) { if (!pts.length) return ''; let d = 'M' + pts[0][0].toFixed(1) + ',' + pts[0][1].toFixed(1); for (let i = 0; i < pts.length - 1; i++) { const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2; d += ' C' + (p1[0] + (p2[0] - p0[0]) / 6).toFixed(1) + ',' + (p1[1] + (p2[1] - p0[1]) / 6).toFixed(1) + ' ' + (p2[0] - (p3[0] - p1[0]) / 6).toFixed(1) + ',' + (p2[1] - (p3[1] - p1[1]) / 6).toFixed(1) + ' ' + p2[0].toFixed(1) + ',' + p2[1].toFixed(1); } return d; }
+  _upPts(a) { return a.map((v, i) => [i * 320 / (a.length - 1), 62 - v * 8]); }
+  _downPts(a) { return a.map((v, i) => [i * 320 / (a.length - 1), 62 + v * 10.5]); }
+  _latY(v) { return 8 + (32 - v) * 2.4; }
+  _lat = [27, 26, 27, 25, 26, 24, 25, 23, 24, 22, 23, 21, 22, 20, 21, 19, 20, 18, 19, 17, 16, 18, 19, 20, 21];
+  _bwVals() {
+    const up = this.state.bwUp, dn = this.state.bwDown;
+    const upC = this._curve(this._upPts(up)), dnC = this._curve(this._downPts(dn));
+    const pk = Math.max(...up), pkY = 62 - pk * 8;
+    return { upPath: upC, upArea: upC + ' L320,62 L0,62 Z', downPath: dnC, downArea: dnC + ' L320,62 L0,62 Z',
+      upDotY: +(62 - up[up.length - 1] * 8).toFixed(1), downDotY: +(62 + dn[dn.length - 1] * 10.5).toFixed(1),
+      peakY: +pkY.toFixed(1), peakLabel: pk.toFixed(1),
+      peakChipStyle: { position: 'absolute', left: 0, top: Math.max(0, Math.round(pkY / 104 * 128) - 13), fontSize: 9, color: '#2fffc0', opacity: 0.8, pointerEvents: 'none', transition: 'top 0.4s' } };
+  }
+  _latVals() {
+    if (!this._latGeo) { const pts = this._lat.map((v, i) => [i * 320 / 24, this._latY(v)]); const c = this._curve(pts); this._latGeo = { path: c, area: c + ' L320,64 L0,64 Z', ghost: this._curve(this._lat.map((v, i) => [i * 320 / 24, this._latY(Math.min(v + 3, 31))])) }; }
+    const li = this.state.latIdx; if (li != null) this._lastLat = li;
+    const si = li != null ? li : (this._lastLat != null ? this._lastLat : 12), v = this._lat[si], x = si * 320 / 24;
+    return { latPath: this._latGeo.path, latArea: this._latGeo.area, latGhost: this._latGeo.ghost,
+      latHover: li != null, latCrossOp: li != null ? 1 : 0, latCrossX: +x.toFixed(1), latCrossY: +this._latY(v).toFixed(1),
+      latTipText: v + ' ms · ' + (si === 24 ? 'now' : String(si).padStart(2, '0') + ':00'),
+      latTipStyle: { position: 'absolute', left: Math.min(90, Math.max(10, x / 3.2)) + '%', top: -2, transform: 'translate(-50%,-100%)', background: '#06222b', border: '1px solid rgba(47,255,192,0.4)', borderRadius: '8px 3px 8px 3px', padding: '3px 9px', fontSize: 10, color: '#bdfbe6', whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 2, boxShadow: '0 0 14px rgba(2,9,15,0.8)' },
+      latMove: this._latMoveH || (this._latMoveH = (e) => { const r = e.currentTarget.getBoundingClientRect(); const i = Math.round(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * 24); if (i !== this.state.latIdx) this.setState({ latIdx: i }); }),
+      latLeave: this._latLeaveH || (this._latLeaveH = () => this.setState({ latIdx: null })) };
+  }
+  componentDidMount() {
+    this._key = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); this.setState(s => ({ paletteOpen: !s.paletteOpen, palQuery: '', palIdx: 0 })); return; }
+      if (!this.state.paletteOpen) return;
+      const items = this._filtered();
+      if (e.key === 'Escape') this.setState({ paletteOpen: false });
+      else if (e.key === 'ArrowDown') { e.preventDefault(); this.setState(s => ({ palIdx: Math.min(s.palIdx + 1, Math.max(items.length - 1, 0)) })); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); this.setState(s => ({ palIdx: Math.max(s.palIdx - 1, 0) })); }
+      else if (e.key === 'Enter' && items[this.state.palIdx]) this._strike(items[this.state.palIdx].label);
+    };
+    window.addEventListener('keydown', this._key);
+    const step = (arr, lo, hi, j) => [...arr.slice(1), Math.max(lo, Math.min(hi, arr[arr.length - 1] + (Math.random() - 0.5) * j))];
+    this._bwT = setInterval(() => { if ((this.props.liveFeed ?? true) === false) return; this.setState(s => ({ bwUp: step(s.bwUp, 0.8, 6.6, 0.9), bwDown: step(s.bwDown, 0.4, 3.4, 0.6) })); }, 520);
+    this._evT = setInterval(() => {
+      if ((this.props.liveFeed ?? true) === false) return;
+      const src = this._pool[(this._pi = ((this._pi ?? -1) + 1) % this._pool.length)];
+      const id = (this._eid = (this._eid || 100) + 1);
+      this.setState(s => ({ events: [{ id, ...src, ts: new Date().toTimeString().slice(0, 8) }, ...s.events].slice(0, 5) }));
+    }, 4600);
+  }
+  _ips = ['185.199.7.42', '91.203.44.18', '203.0.113.87', '172.104.9.55'];
+  _regions = [{ city: 'frankfurt', code: 'fra-07', ms: 12 }, { city: 'amsterdam', code: 'ams-03', ms: 19 }, { city: 'singapore', code: 'sgp-02', ms: 97 }];
+  _toast(kind) {
+    const id = (this._tid = (this._tid || 0) + 1);
+    const rise = id % 2 ? 'ds-rise' : 'ds-rise-b';
+    const style = {
+      display: 'flex', alignItems: 'center', padding: '8px 14px', fontSize: 11, borderRadius: '16px 7px 14px 9px', background: '#06222b',
+      boxShadow: '0 0 20px rgba(2,9,15,0.8)', whiteSpace: 'nowrap',
+      border: kind === 'bad' ? '1px solid rgba(255,93,115,0.5)' : '1px solid rgba(47,255,192,0.4)',
+      color: kind === 'bad' ? '#ff5d73' : '#bdfbe6',
+      animation: kind === 'bad'
+        ? rise + ' 0.7s cubic-bezier(0.22,1,0.36,1), ds-quiver 0.5s ease 0.75s, ds-fade-out 0.5s ease 2.1s forwards'
+        : rise + ' 0.7s cubic-bezier(0.22,1,0.36,1), ds-fade-out 0.5s ease 2.1s forwards',
+    };
+    const msg = kind === 'bad' ? 'node sgp-02 unreachable' : 'ip rotated → 91.203.44.18';
+    const dc = kind === 'bad' ? '#ff5d73' : '#2fffc0';
+    const dot = { width: 7, height: 7, borderRadius: '50%', flexShrink: 0, marginRight: 8, background: dc, boxShadow: '0 0 8px ' + dc, animation: 'ds-wobble 3s ease-in-out infinite, ds-pulse 1.6s ease-in-out infinite' };
+    this.setState({ toast: { id, msg, style, dot } });
+    setTimeout(() => { if (this.state.toast && this.state.toast.id === id) this.setState({ toast: null }); }, 2650);
+  }
+  renderVals() {
+    const on = this.state.swimOn, near = this.state.near;
+    return {
+      scanlines: this.props.scanlines ?? true,
+      dotGrid: this.props.dotGrid ?? true,
+      ripples: this.state.ripples,
+      emitRipple: () => {
+        const base = (this._rid = (this._rid || 0) + 1) * 100;
+        const ring = (base / 100) % 2 ? 'ds-ring' : 'ds-ring-b';
+        const items = [{ id: base, style: { position: 'absolute', inset: '-4px', border: '1.5px solid rgba(47,255,192,0.6)', borderRadius: '16px 8px 16px 8px', animation: ring + ' 0.8s cubic-bezier(0.22,1,0.36,1) forwards', pointerEvents: 'none' } }];
+        for (let i = 0; i < 7; i++) {
+          const a = Math.random() * Math.PI * 2, d = 34 + Math.random() * 30, jade = Math.random() < 0.7, sz = 3 + Math.random() * 4;
+          items.push({ id: base + i + 1, style: { position: 'absolute', left: '50%', top: '50%', width: sz, height: sz * 0.9, marginLeft: -sz / 2, marginTop: -sz / 2, borderRadius: '60% 40% 55% 45%', background: jade ? '#2fffc0' : '#1c8bff', boxShadow: '0 0 8px ' + (jade ? 'rgba(47,255,192,0.8)' : 'rgba(28,139,255,0.8)'), '--dx': (Math.cos(a) * d).toFixed(0) + 'px', '--dy': (Math.sin(a) * d - 14).toFixed(0) + 'px', animation: 'ds-spore ' + (0.55 + Math.random() * 0.35).toFixed(2) + 's cubic-bezier(0.22,1,0.36,1) forwards', pointerEvents: 'none' } });
+        }
+        this.setState(s => ({ ripples: [...s.ripples, ...items] }));
+        setTimeout(() => this.setState(s => ({ ripples: s.ripples.filter(r => r.id < base || r.id > base + 99) })), 950);
+      },
+      swimLabel: on ? 'auto-molt on' : 'dormant',
+      trails: this.state.trails,
+      toggleSwim: () => {
+        const wasOn = this.state.swimOn, tid = (this._trid = (this._trid || 0) + 1) * 10;
+        const trail = [0, 1, 2].map(i => {
+          const frac = wasOn ? 1 - (i + 1) / 4 : (i + 1) / 4;
+          return { id: tid + i, style: { position: 'absolute', top: '3px', left: (2 + frac * 26).toFixed(0) + 'px', width: 20, height: 20, borderRadius: '50%', background: 'rgba(47,255,192,0.28)', filter: 'blur(1px)', opacity: 0, animation: 'ds-trail 0.55s ease-out ' + (i * 0.07).toFixed(2) + 's forwards', pointerEvents: 'none' } };
+        });
+        this.setState(s => ({ swimOn: !s.swimOn, trails: trail }));
+        setTimeout(() => this.setState({ trails: [] }), 900);
+      },
+      trackStyle: { width: 54, height: 28, borderRadius: 999, position: 'relative', cursor: 'pointer', flexShrink: 0, background: on ? 'rgba(47,255,192,0.18)' : 'rgba(2,9,15,0.7)', border: on ? '1px solid rgba(47,255,192,0.5)' : '1px solid #124450', transition: 'background 0.45s, border-color 0.45s' },
+      thumbStyle: { position: 'absolute', top: 2, left: 2, width: 22, height: 22, borderRadius: '50%', background: on ? '#2fffc0' : '#3e6a74', boxShadow: on ? '0 0 12px rgba(47,255,192,0.7)' : 'none', transform: on ? 'translateX(26px)' : 'translateX(0px)', transition: 'transform 0.55s cubic-bezier(0.3,1.7,0.4,1), background 0.45s, box-shadow 0.45s', animation: on ? 'ds-wobble 5s ease-in-out infinite' : 'none' },
+      ip: this.state.ip,
+      sinkPhase: this.state.moltPhase === 'sink',
+      bloomPhase: this.state.moltPhase === 'bloom',
+      idlePhase: !this.state.moltPhase,
+      molt: () => {
+        if (this.state.moltPhase) return;
+        this.setState({ moltPhase: 'sink' });
+        setTimeout(() => this.setState({ ip: this._ips[(this._ips.indexOf(this.state.ip) + 1) % this._ips.length], moltPhase: 'bloom' }), 300);
+        setTimeout(() => this.setState({ moltPhase: null }), 1050);
+      },
+      trackPointer: (e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        const dx = e.clientX - r.left - r.width / 2, dy = e.clientY - r.top - r.height / 2;
+        this.setState({ px: dx, py: dy, near: Math.max(0, 1 - Math.hypot(dx, dy) / 200) });
+      },
+      resetPointer: () => this.setState({ px: 0, py: 0, near: 0 }),
+      organismStyle: { position: 'relative', width: 58, height: 52, background: 'radial-gradient(circle at 32% 28%, rgba(47,255,192,0.9), rgba(28,139,255,0.55) 70%, rgba(6,34,43,0.4))', animation: 'ds-wobble 7s ease-in-out infinite, ds-breathe 4s ease-in-out infinite', transform: 'translate(' + (this.state.px * 0.16).toFixed(1) + 'px, ' + (this.state.py * 0.16).toFixed(1) + 'px) scale(' + (1 + near * 0.12).toFixed(3) + ')', boxShadow: '0 0 ' + Math.round(16 + near * 30) + 'px rgba(47,255,192,' + (0.3 + near * 0.4).toFixed(2) + ')', transition: 'transform 0.6s cubic-bezier(0.22,1,0.36,1), box-shadow 0.3s ease', pointerEvents: 'none' },
+      ciliaStyle: { position: 'absolute', inset: -9, animation: 'ds-spin-slow 7s linear infinite', opacity: +near.toFixed(2), transition: 'opacity 0.4s' },
+      toastVisible: !!this.state.toast,
+      toastMsg: this.state.toast ? this.state.toast.msg : '',
+      toastStyle: this.state.toast ? this.state.toast.style : {},
+      toastDotStyle: this.state.toast ? this.state.toast.dot : {},
+      surfaceToast: () => this._toast('good'),
+      severToast: () => this._toast('bad'),
+      menuOpen: this.state.menuOpen,
+      toggleMenu: () => this.setState(s => ({ menuOpen: !s.menuOpen })),
+      regionLabel: (() => { const r = this._regions.find(x => x.code === this.state.region); return r.city + ' · ' + r.code; })(),
+      caretStyle: { marginLeft: 'auto', color: '#2fffc0', display: 'inline-block', transition: 'transform 0.4s cubic-bezier(0.22,1,0.36,1)', transform: this.state.menuOpen ? 'rotate(180deg)' : 'none' },
+      menuItems: this._regions.map(r => {
+        const act = r.code === this.state.region;
+        return {
+          city: r.city, code: r.code, ms: r.ms,
+          pick: () => this.setState({ region: r.code, menuOpen: false }),
+          style: { display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: '9px 4px 9px 4px', fontSize: 12, cursor: 'pointer', color: act ? '#2fffc0' : '#3e6a74', background: act ? 'rgba(47,255,192,0.08)' : 'transparent', transition: 'background 0.3s, color 0.3s' },
+          dotStyle: { width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: act ? '#2fffc0' : '#124450', boxShadow: act ? '0 0 8px #2fffc0' : 'none' },
+          msStyle: { marginLeft: 'auto', fontSize: 10, color: act ? '#2fffc0' : '#3e6a74' },
+        };
+      }),
+      modalOpen: this.state.modalOpen,
+      openModal: () => this.setState({ modalOpen: true }),
+      closeModal: () => this.setState({ modalOpen: false }),
+      eatClick: (e) => e.stopPropagation(),
+      severDone: this.state.severState === 'done',
+      severLabel: this.state.severState === 'armed' ? 'CONFIRM · ' + this.state.severCount : this.state.severState === 'done' ? 'SEVERED' : 'SEVER ALL',
+      severStyle: (() => {
+        const base = { fontSize: 12, fontWeight: 700, letterSpacing: '0.14em', padding: '11px 20px', borderRadius: '14px 6px 14px 6px', userSelect: 'none', transition: 'background 0.4s, box-shadow 0.4s, color 0.4s' };
+        const st = this.state.severState;
+        if (st === 'armed') return { ...base, cursor: 'pointer', border: '1px solid #ff5d73', color: '#ff5d73', background: 'rgba(255,93,115,0.16)', boxShadow: '0 0 26px rgba(255,93,115,0.3)', animation: 'ds-quiver 0.5s ease, ds-breathe 1.2s ease-in-out infinite' };
+        if (st === 'done') return { ...base, cursor: 'default', border: '1px solid #0d2b33', color: '#3e6a74', background: '#0d2b33' };
+        return { ...base, cursor: 'pointer', border: '1px solid #ff5d73', color: '#ff5d73', background: 'transparent' };
+      })(),
+      sever: () => {
+        const st = this.state.severState;
+        if (st === 'done') return;
+        if (st === 'armed') {
+          clearInterval(this._sevT);
+          this.setState({ severState: 'done' });
+          this._sevD = setTimeout(() => this.setState({ severState: null }), 2400);
+          return;
+        }
+        this.setState({ severState: 'armed', severCount: 3 });
+        this._sevT = setInterval(() => {
+          const c = this.state.severCount - 1;
+          if (c <= 0) { clearInterval(this._sevT); this.setState({ severState: null, severCount: 3 }); }
+          else this.setState({ severCount: c });
+        }, 1000);
+      },
+      copyConfig: () => {
+        if (this.state.copied) return;
+        const txt = '[tunnel]\nexit  = "fra-07"\nproto = "socks5"\nport  = 8443\nmolt  = "1h"';
+        try { navigator.clipboard.writeText(txt); } catch (err) {}
+        this.setState({ copied: true });
+        setTimeout(() => this.setState({ copied: false }), 1900);
+      },
+      copyLabel: this.state.copied ? '✓ ABSORBED' : 'ABSORB',
+      copyStyle: { marginLeft: 'auto', fontSize: 10, fontWeight: 700, letterSpacing: '0.14em', padding: '6px 12px', borderRadius: '10px 4px 10px 4px', cursor: 'pointer', userSelect: 'none', transition: 'background 0.4s, color 0.4s, box-shadow 0.4s', ...(this.state.copied ? { border: '1px solid #2fffc0', background: '#2fffc0', color: '#02090f', boxShadow: '0 0 18px rgba(47,255,192,0.5)' } : { border: '1px solid rgba(47,255,192,0.35)', color: '#2fffc0', background: 'rgba(47,255,192,0.06)' }) },
+      lastCmd: this.state.lastCmd || '—',
+      paletteOpen: this.state.paletteOpen,
+      openPalette: () => this.setState({ paletteOpen: true, palQuery: '', palIdx: 0 }),
+      closePalette: () => this.setState({ paletteOpen: false }),
+      palRef: this._palRef ?? (this._palRef = (el) => { if (el) setTimeout(() => el.focus(), 30); }),
+      palQuery: this.state.palQuery,
+      onPalInput: (e) => this.setState({ palQuery: e.target.value, palIdx: 0 }),
+      palItems: this._filtered().map((c, i) => {
+        const act = i === this.state.palIdx;
+        return { label: c.label, hint: c.hint, strike: () => this._strike(c.label), hover: () => this.setState({ palIdx: i }),
+          rowStyle: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: '10px 4px 10px 4px', fontSize: 12, cursor: 'pointer', color: act ? '#bdfbe6' : '#3e6a74', background: act ? 'rgba(47,255,192,0.08)' : 'transparent', transition: 'background 0.25s, color 0.25s' },
+          dotStyle: { width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: c.dot, boxShadow: act ? '0 0 8px ' + c.dot : 'none' },
+          hintStyle: { marginLeft: 'auto', fontSize: 10, color: act ? '#2fffc0' : '#124450', letterSpacing: '0.1em' } };
+      }),
+      palEmpty: this._filtered().length === 0,
+      packetOpen: this.state.packetOpen,
+      togglePacket: () => this.setState(s => ({ packetOpen: !s.packetOpen })),
+      chevStyle: { marginLeft: 'auto', color: '#2fffc0', display: 'inline-block', transition: 'transform 0.4s cubic-bezier(0.22,1,0.36,1)', transform: this.state.packetOpen ? 'rotate(90deg)' : 'none' },
+      events: this.state.events.map((ev, i) => {
+        const col = ev.k === 'good' ? '#2fffc0' : ev.k === 'info' ? '#1c8bff' : '#ff5d73';
+        return { ts: ev.ts, msg: ev.msg, tag: ev.tag,
+          rowStyle: { display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #0d2b33', animation: i === 0 ? (ev.id % 2 ? 'ds-rise' : 'ds-rise-b') + ' 0.6s cubic-bezier(0.22,1,0.36,1)' : 'none' },
+          dotStyle: { width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: col, boxShadow: '0 0 8px ' + col, animation: i === 0 ? 'ds-pulse 2s ease-in-out infinite' : 'none' },
+          msgStyle: { fontSize: 12, color: i === 0 ? '#bdfbe6' : '#3e6a74' },
+          tagStyle: { marginLeft: 'auto', flexShrink: 0, fontSize: 10, padding: '2px 8px', borderRadius: 999, border: '1px solid ' + (ev.k === 'bad' ? 'rgba(255,93,115,0.4)' : ev.k === 'info' ? 'rgba(28,139,255,0.35)' : 'rgba(47,255,192,0.3)'), color: col } };
+      }),
+      upNow: this.state.bwUp[this.state.bwUp.length - 1].toFixed(1),
+      downNow: this.state.bwDown[this.state.bwDown.length - 1].toFixed(1),
+      ...this._bwVals(),
+      ...this._latVals(),
+      canvasRef: (el) => {
+        if (el && !this._started) { this._started = true; this.canvas = el; this._start(); }
+      },
+    };
+  }
+  _start() {
+    const c = this.canvas, ctx = c.getContext('2d');
+    const fit = () => { const d = window.devicePixelRatio || 1; c.width = c.offsetWidth * d; c.height = c.offsetHeight * d; ctx.setTransform(d, 0, 0, d, 0, 0); };
+    fit();
+    this._fit = fit;
+    window.addEventListener('resize', fit);
+    this._mm = (e) => { this._mx = e.clientX; this._my = e.clientY; };
+    window.addEventListener('mousemove', this._mm);
+    const MAX = 140;
+    this.p = Array.from({ length: MAX }, () => ({
+      nx: Math.random(), ny: Math.random(),
+      r: 14 + Math.random() * 95,
+      a: Math.random() * Math.PI * 2,
+      spin: (0.15 + Math.random() * 0.55) * (Math.random() < 0.5 ? -1 : 1),
+      size: 0.8 + Math.random() * 2.1,
+      jade: Math.random() < 0.72,
+      ph: Math.random() * Math.PI * 2,
+      dph: Math.random() * Math.PI * 2,
+      ds: 0.04 + Math.random() * 0.12,
+      ecc: 0.5 + Math.random() * 0.5,
+    }));
+    let t = 0, last = performance.now();
+    const rm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const loop = (now) => {
+      if (!rm) this._raf = requestAnimationFrame(loop);
+      const dt = Math.min((now - last) / 1000, 0.05); last = now; t += dt;
+      const n = Math.max(0, Math.min(this.props.planktonCount ?? 60, MAX));
+      const w = c.offsetWidth, h = c.offsetHeight;
+      ctx.clearRect(0, 0, w, h);
+      for (let i = 0; i < n; i++) {
+        const p = this.p[i];
+        p.a += p.spin * dt;
+        const nx = (p.nx + 0.05 * Math.sin(t * p.ds + p.dph)) * w;
+        const ny = (p.ny + 0.05 * Math.cos(t * p.ds * 0.75 + p.dph)) * h;
+        const wob = 1 + 0.3 * Math.sin(t * 1.4 + p.ph);
+        let x = nx + Math.cos(p.a) * p.r * wob;
+        let y = ny + Math.sin(p.a * p.ecc) * p.r * wob * 0.7;
+        p.ox = (p.ox || 0) * 0.94; p.oy = (p.oy || 0) * 0.94;
+        if (this._mx != null) {
+          const ddx = this._mx - x, ddy = this._my - y, dist = Math.hypot(ddx, ddy) || 1;
+          if (dist < 170) { const f = (1 - dist / 170) * 42 * dt; p.ox += ddx / dist * f; p.oy += ddy / dist * f; }
+        }
+        x += p.ox; y += p.oy;
+        const tw = 0.2 + 0.6 * Math.abs(Math.sin(t * 1.8 + p.ph));
+        const col = p.jade ? '47,255,192' : '28,139,255';
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(${col},${tw.toFixed(3)})`;
+        ctx.shadowColor = `rgba(${col},0.8)`;
+        ctx.shadowBlur = 7;
+        ctx.arc(x, y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+    };
+    this._raf = requestAnimationFrame(loop);
+  }
+  componentWillUnmount() {
+    cancelAnimationFrame(this._raf);
+    clearInterval(this._sevT);
+    clearTimeout(this._sevD);
+    clearInterval(this._bwT);
+    clearInterval(this._evT);
+    window.removeEventListener('keydown', this._key);
+    window.removeEventListener('resize', this._fit);
+    window.removeEventListener('mousemove', this._mm);
+  }
+}
+</script>
+</body>
+</html>

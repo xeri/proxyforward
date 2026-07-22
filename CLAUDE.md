@@ -74,6 +74,15 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   single commit point for both — so a rejected edit has nothing to roll back — and an
   edit the gateway cannot see (`LocalAddr`, PP2) applies unproposed. Mechanics in
   `docs/agent/architecture.md`.
+- **A udp tunnel is a datagram flow wearing a stream's clothes** (`CapTunnelUDP`): a
+  UDP port is presented as a `net.Listener` (`gateway/udp.go`) so eviction, pause,
+  the conn gate and `handleClient` apply unchanged, and the tunnel leg is length-framed
+  (`relay/datagram.go`) so boundaries survive — `relay.Splice` is untouched. Two rules
+  have no TCP analogue: admission happens in the *listener* (the first datagram is the
+  connection, so the gate is what bounds the session table), and `CloseWrite` must
+  **close** on both datagram legs — there is no FIN, so a no-op parks the opposite copy
+  until the reaper. Ports are per protocol; health is *unknown*, never probed. Mechanics
+  in `docs/agent/architecture.md`.
 - **Pause is arbitration with two owners** (`CapPause`): each side holds its own bit,
   clears only its own, and a tunnel serves iff neither covers it — so resume can never
   expand what the agent exposes. The bits are state, not config: they must never reach
@@ -243,8 +252,7 @@ The README and the Settings UI **oversell**. Ground truth re-verified by the
 
 | Feature (advertised in README/UI) | Actual state |
 |---|---|
-| UDP tunnels | Not implemented: no UDP socket code, `validateSpec` rejects `type:"udp"`. No longer advertised (the `tunnel-udp` capability was removed); config still accepts `type:"udp"` but the gateway rejects it — a latent gap, not an oversell. |
-| MC status polling (MOTD/players) | Only login sniffing (`mcsniff/`); the health probe is a bare TCP dial (`health.go probeOnce`). |
+| MC status polling (MOTD/players) | Only login sniffing (`mcsniff/`); the health probe is a bare TCP dial (`health.go probeOnce`), and udp tunnels are not probed at all — a UDP port cannot be dialled to prove it is alive, so their health stays *unknown* rather than fabricated. |
 | Autostart ("Start on login") | Stored (`config.go` `Autostart`), consumed by nothing, and shown nowhere since the honesty pass. The tray half of this row shipped (close-to-tray, run-state icon — `app/tray.go`). |
 | Linux / macOS binaries | CI **builds** them (`.github/workflows/ci.yml`) so the `*_other.go` stubs can't rot, but they **cannot run**: `ipc.Serve` returns `ErrUnsupported` off Windows and every engine must serve the pipe (`engine.go Run`), so the window opens and the engine dies. Unpublished artifacts, never release assets. Fixing this means a real unix-socket IPC port. |
 

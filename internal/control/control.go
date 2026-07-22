@@ -94,9 +94,9 @@ const (
 	// bind it, because a legacy agent would splice the datagram stream as raw
 	// bytes and silently corrupt every packet boundary.
 	//
-	// This constant was once advertised without an implementation behind it,
-	// which is precisely the bug the SupportedCapabilities comment warns about;
-	// it joins that list only in the commit that completes the path end to end.
+	// This constant was once advertised without an implementation behind it and
+	// had to be withdrawn — the bug the SupportedCapabilities comment warns
+	// about. It is on that list again only because both ends now honor it.
 	CapTunnelUDP = "tunnel-udp"
 )
 
@@ -104,7 +104,7 @@ const (
 // capability joins this list only once BOTH ends honor it end-to-end — the
 // peer acts on the offer, so advertising early is a live protocol bug (the
 // tunnel-udp lesson, CLAUDE.md "Reality check").
-var SupportedCapabilities = []string{CapTunnelSync, CapConnStats, CapPerConn, CapGatewayConfig, CapConfigConsent, CapPause}
+var SupportedCapabilities = []string{CapTunnelSync, CapConnStats, CapPerConn, CapGatewayConfig, CapConfigConsent, CapPause, CapTunnelUDP}
 
 // IntersectCaps returns offered ∩ supported, preserving supported's order.
 // Nil-safe on both arguments; unknown offered strings are simply dropped.

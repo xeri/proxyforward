@@ -109,6 +109,8 @@ type harnessOpts struct {
 	offerCaps []string
 	// mcAware marks the tunnel Minecraft-aware so both seams sniff logins.
 	mcAware bool
+	// tunnelType overrides the tunnel's protocol; empty means config.TunnelTCP.
+	tunnelType string
 	// offlineMOTD, when set, configures the tunnel's offline responder message.
 	offlineMOTD string
 	// bandwidthMbps/bandwidthScope cap the default tunnel (0 = uncapped).
@@ -183,10 +185,14 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 	if opts.transport != "" {
 		agentCfg.Agent.Transport = opts.transport
 	}
+	tunnelType := opts.tunnelType
+	if tunnelType == "" {
+		tunnelType = config.TunnelTCP
+	}
 	agentCfg.Agent.Tunnels = []config.Tunnel{{
 		ID:         tunnelID,
 		Name:       "test",
-		Type:       config.TunnelTCP,
+		Type:       tunnelType,
 		LocalAddr:  localAddr,
 		PublicPort: 0, // gateway picks
 		Enabled:    true,

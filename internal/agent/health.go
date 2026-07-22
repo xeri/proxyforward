@@ -83,6 +83,19 @@ func (a *Agent) probeTunnels(ctx context.Context, dialTimeout time.Duration) {
 		if ctx.Err() != nil {
 			return
 		}
+		if t.Type == config.TunnelUDP {
+			// A UDP local address cannot be probed. There is no handshake, so
+			// net.Dial("udp") connects to a dead port just as happily as a live
+			// one and would report every UDP tunnel healthy; a real check would
+			// have to speak the server's protocol, which "any UDP tunnel" rules
+			// out. So report nothing instead of a verdict we cannot support —
+			// unknown health counts as up (backendDown), which keeps a working
+			// server serving, and the GUI shows "unknown" rather than a
+			// convincing lie. Any stale entry from when this tunnel was TCP is
+			// dropped so it cannot outlive the type change.
+			a.localUp.Delete(t.ID)
+			continue
+		}
 		up := probeOnce(ctx, t.LocalAddr, dialTimeout)
 		prev, known := a.LocalUp(t.ID)
 		if known && prev == up {

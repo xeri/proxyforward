@@ -320,7 +320,7 @@ func (a *Agent) SetCapabilityOffer(caps []string) { a.offerCaps = caps }
 // regardless and force it on every agent. QUIC and mux offer no per-conn-data (QUIC
 // rides the mux data plane; the auto ladder computes this per rung).
 func offerFor(transport string) []string {
-	caps := []string{control.CapTunnelSync, control.CapConnStats, control.CapGatewayConfig, control.CapConfigConsent, control.CapPause}
+	caps := []string{control.CapTunnelSync, control.CapConnStats, control.CapGatewayConfig, control.CapConfigConsent, control.CapPause, control.CapTunnelUDP}
 	if transport == config.TransportPerConn {
 		caps = append(caps, control.CapPerConn)
 	}
