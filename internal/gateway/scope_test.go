@@ -18,26 +18,26 @@ func TestValidateSpecScope(t *testing.T) {
 		return control.TunnelSpec{ID: id, Name: id, Type: config.TunnelTCP, PublicPort: port}
 	}
 
-	if berr := g.validateSpec(tcp("t1", 25565), scoped); berr != nil {
+	if berr := g.validateSpec(tcp("t1", 25565), scoped, nil); berr != nil {
 		t.Fatalf("in-scope port rejected: %v", berr)
 	}
-	berr := g.validateSpec(tcp("t1", 25566), scoped)
+	berr := g.validateSpec(tcp("t1", 25566), scoped, nil)
 	if berr == nil || berr.code != control.ErrCodePortNotAllowed {
 		t.Fatalf("out-of-scope port: want port_not_allowed, got %v", berr)
 	}
-	if berr := g.validateSpec(tcp("t1", 25566), Scope{}); berr != nil {
+	if berr := g.validateSpec(tcp("t1", 25566), Scope{}, nil); berr != nil {
 		t.Fatalf("empty scope must allow any port: %v", berr)
 	}
-	if berr := g.validateSpec(tcp("t1", 0), scoped); berr != nil {
+	if berr := g.validateSpec(tcp("t1", 0), scoped, nil); berr != nil {
 		t.Fatalf("ephemeral port must not be scope-checked: %v", berr)
 	}
 
 	// Tunnel-ID scope.
 	idScope := Scope{TunnelIDs: []string{"tnl_ok"}}
-	if berr := g.validateSpec(tcp("tnl_ok", 0), idScope); berr != nil {
+	if berr := g.validateSpec(tcp("tnl_ok", 0), idScope, nil); berr != nil {
 		t.Fatalf("in-scope tunnel rejected: %v", berr)
 	}
-	if berr := g.validateSpec(tcp("tnl_no", 0), idScope); berr == nil || berr.code != control.ErrCodeBadTunnel {
+	if berr := g.validateSpec(tcp("tnl_no", 0), idScope, nil); berr == nil || berr.code != control.ErrCodeBadTunnel {
 		t.Fatalf("out-of-scope tunnel: want bad_tunnel, got %v", berr)
 	}
 }

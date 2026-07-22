@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 )
 
 // MaxDatagram is the largest payload a UDP datagram can carry: 65535 minus the
@@ -20,6 +21,21 @@ const MaxDatagram = 65507
 // datagramHdr is the length prefix: 2 bytes, big-endian, like the control
 // envelope's 4-byte one. Two suffice because MaxDatagram fits in a uint16.
 const datagramHdr = 2
+
+// DatagramIdleTimeout is how long a datagram splice may move nothing in either
+// direction before it is reaped, and it is much shorter than DefaultIdleTimeout
+// for a structural reason: a TCP splice earns ten minutes because a FIN will
+// eventually prove the peer is gone, while a UDP flow has no close at all. Left
+// on the TCP clock, every player who quit would hold a conn-gate slot, a tunnel
+// stream, and a local socket for ten minutes after leaving.
+//
+// Two minutes sits far above any keepalive this tunnel carries — RakNet pings
+// every few seconds and Simple Voice Chat keeps its channel warm — and far below
+// the point where a player pausing at a menu would be cut.
+//
+// Both ends use this one constant so neither can reap a session the other still
+// believes in.
+const DatagramIdleTimeout = 2 * time.Minute
 
 // DatagramStream adapts a byte-oriented tunnel stream into a datagram-oriented
 // Conn: every Read yields exactly one datagram, every Write sends exactly one,

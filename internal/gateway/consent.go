@@ -188,7 +188,7 @@ func (g *Gateway) ProposeAgentConfig(agentID string, tunnels []control.TunnelSpe
 		return fmt.Errorf("agent %s runs a build without config-consent — update it to edit its tunnels from here", agentID)
 	}
 	for _, spec := range tunnels {
-		if berr := g.validateSpec(spec, sess.scope); berr != nil {
+		if berr := g.validateSpec(spec, sess.scope, sess.caps); berr != nil {
 			return fmt.Errorf("tunnel %q: %s", spec.Name, berr.msg)
 		}
 	}

@@ -629,6 +629,19 @@ func (g *Gateway) ReclaimPort(requesterID, tunnelID string, port int) (bool, err
 	if g.agents == nil || port <= 0 {
 		return false, nil
 	}
+	// Which protocol's port 25565 is being reclaimed matters: TCP and UDP hold
+	// that number independently, and bumping the holder of the other one would
+	// evict a tunnel that was never in the way. Resolved from the requester's
+	// stored config, which is where the tunnel's type lives.
+	proto := config.TunnelTCP
+	if stored, _, ok := g.agents.DesiredConfig(requesterID); ok {
+		for _, s := range stored {
+			if s.ID == tunnelID {
+				proto = specProto(s)
+				break
+			}
+		}
+	}
 	// Resolve the requester's session and the port's current holder together on the
 	// actor goroutine — the agent and listener maps are its to read.
 	var (
@@ -637,7 +650,7 @@ func (g *Gateway) ReclaimPort(requesterID, tunnelID string, port int) (bool, err
 	)
 	if ran := a.do(func() {
 		requester = a.agents[requesterID]
-		incumbent, incumbentTunnel = a.portHolder(port)
+		incumbent, incumbentTunnel = a.portHolder(port, proto)
 	}); !ran {
 		return false, fmt.Errorf("gateway is shutting down")
 	}
@@ -1750,10 +1763,25 @@ type bindError struct {
 }
 
 // validateSpec checks a tunnel spec against protocol and policy limits; it is
-// shared by the legacy register path and the desired-state sync path.
-func (g *Gateway) validateSpec(spec control.TunnelSpec, scope Scope) *bindError {
-	if spec.ID == "" || spec.Type != config.TunnelTCP {
-		return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q: only tcp tunnels with an id are supported", spec.Name)}
+// shared by the legacy register path and the desired-state sync path. caps is
+// the session's negotiated capability set (nil for a peer that offered none).
+func (g *Gateway) validateSpec(spec control.TunnelSpec, scope Scope, caps control.CapSet) *bindError {
+	if spec.ID == "" {
+		return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q: a tunnel needs an id", spec.Name)}
+	}
+	switch spec.Type {
+	case config.TunnelTCP:
+	case config.TunnelUDP:
+		// The gateway must not bind a UDP port for an agent that cannot serve
+		// datagrams: it would open the port, accept players, and hand the agent
+		// a framed stream it would splice as raw bytes — corrupting every packet
+		// boundary silently, which looks like a broken server rather than a
+		// version mismatch. Refusing names the actual problem.
+		if !caps.Has(control.CapTunnelUDP) {
+			return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q: this agent's build does not support udp tunnels; update the agent", spec.Name)}
+		}
+	default:
+		return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q: unsupported type %q", spec.Name, spec.Type)}
 	}
 	if spec.PublicPort < 0 || spec.PublicPort > 65535 {
 		return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q: invalid public port %d", spec.Name, spec.PublicPort)}
@@ -1792,6 +1820,7 @@ func (g *Gateway) policy() bindPolicy {
 		bindAddr:   g.cfg.Gateway.BindAddr,
 		allowlist:  g.cfg.Gateway.PortAllowlist,
 		maxTunnels: g.cfg.Gateway.MaxTunnelsPerAgent,
+		gate:       g.gate,
 	}
 }
 
@@ -1809,7 +1838,7 @@ func bindErrCode(err error) string {
 // bindTunnel validates a spec and asks the actor to bind its public
 // listener; accepted client conns are spliced onto fresh streams.
 func (g *Gateway) bindTunnel(sess *agentSession, spec control.TunnelSpec) (int, *bindError) {
-	if berr := g.validateSpec(spec, sess.scope); berr != nil {
+	if berr := g.validateSpec(spec, sess.scope, sess.caps); berr != nil {
 		return 0, berr
 	}
 	port, err := g.act().bindTunnel(sess, spec, g.policy(), g.handleClient)
@@ -1826,7 +1855,7 @@ func (g *Gateway) syncTunnels(sess *agentSession, sync *control.SyncTunnels) con
 	results := make([]control.SyncTunnelResult, 0, len(sync.Tunnels))
 	valid := make([]control.TunnelSpec, 0, len(sync.Tunnels))
 	for _, spec := range sync.Tunnels {
-		if berr := g.validateSpec(spec, sess.scope); berr != nil {
+		if berr := g.validateSpec(spec, sess.scope, sess.caps); berr != nil {
 			sess.logger.Warn("tunnel sync rejected spec", "tunnel", spec.Name, "port", spec.PublicPort, "err", berr.msg)
 			results = append(results, control.SyncTunnelResult{TunnelID: spec.ID, Code: berr.code, Message: berr.msg})
 			continue
@@ -1858,7 +1887,7 @@ func (g *Gateway) syncTunnels(sess *agentSession, sync *control.SyncTunnels) con
 func (g *Gateway) validSpecs(sess *agentSession, specs []control.TunnelSpec) []control.TunnelSpec {
 	valid := make([]control.TunnelSpec, 0, len(specs))
 	for _, spec := range specs {
-		if berr := g.validateSpec(spec, sess.scope); berr != nil {
+		if berr := g.validateSpec(spec, sess.scope, sess.caps); berr != nil {
 			sess.logger.Warn("config spec rejected", "tunnel", spec.Name, "port", spec.PublicPort, "err", berr.msg)
 			continue
 		}
@@ -1971,23 +2000,37 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	sess, spec := pl.owner, pl.spec
 	defer clientConn.Close()
 	ip := remoteIP(clientConn)
-	if !g.gate.admit(ip) {
-		g.logger.Debug("public conn rejected: connection cap reached", "client", clientConn.RemoteAddr().String(), "tunnel", spec.Name)
-		return
+	// A UDP session was already admitted by its listener — the first datagram
+	// from a new source *is* the connection, so admission had to happen there,
+	// before the session existed. Admitting again here would count one player
+	// twice and release a slot that was never taken.
+	udp, isUDP := clientConn.(*udpSession)
+	if !isUDP {
+		if !g.gate.admit(ip) {
+			g.logger.Debug("public conn rejected: connection cap reached", "client", clientConn.RemoteAddr().String(), "tunnel", spec.Name)
+			return
+		}
+		defer g.gate.release(ip)
 	}
-	defer g.gate.release(ip)
 	mux := sess.session()
 	if mux == nil || pl.paused.Load() || backendDown(sess, spec.ID) {
 		// No live session, a paused tunnel (either side's bit — the listener
 		// stays bound, so the port is held by construction), or the agent
 		// reports the local server down: answer with the offline MOTD when
-		// configured, else fall through to a clean close.
-		g.serveOffline(clientConn, spec)
+		// configured, else fall through to a clean close. A UDP session has no
+		// MOTD to answer with (the status protocol is TCP) and no close to
+		// observe, so it simply goes away and the client retries.
+		if !isUDP {
+			g.serveOffline(clientConn, spec)
+		}
 		return
 	}
-	tcp, ok := clientConn.(*net.TCPConn)
-	if !ok {
-		return
+	var tcp *net.TCPConn
+	if !isUDP {
+		var ok bool
+		if tcp, ok = clientConn.(*net.TCPConn); !ok {
+			return
+		}
 	}
 	// ConnID correlates this connection with the RTT reports the gateway sends
 	// the agent; the entry's own key lets the local recorder attribute gateway
@@ -2008,7 +2051,9 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	stream, releaseFlow, err := sess.dp.openFlow(sess, connID)
 	if err != nil {
 		sess.logger.Debug("open data leg failed", "client", clientConn.RemoteAddr().String(), "err", err)
-		g.serveOffline(clientConn, spec)
+		if !isUDP {
+			g.serveOffline(clientConn, spec)
+		}
 		return
 	}
 	defer releaseFlow()
@@ -2025,23 +2070,37 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	}
 	stream.SetWriteDeadline(time.Time{})
 
-	// Track for RTT sampling over this connection's lifetime.
-	sess.rttConns.Store(connID, &rttConn{tcp: tcp, entry: entry})
-	defer sess.rttConns.Delete(connID)
-
-	// Minecraft-aware tunnels sniff the client's login handshake (read from
-	// the player leg here) to attribute the connection to a player. Read-only:
-	// the tap forwards bytes unchanged.
-	var client relay.Conn = tcp
-	if spec.MinecraftAware {
-		client = mcsniff.Tap(tcp, entry)
-	}
-	// Splice(client, stream): AToB is client→server (inbound), BToA is
+	// Splice(client, leg): AToB is client→server (inbound), BToA is
 	// server→client (outbound). Parent on the session ctx so eviction cancels a
 	// throttled WaitN.
 	inbound, outbound := bwcap.Resolve(pl.limiters.Load())
 	opts := relay.SpliceOpts{Ctx: sess.ctx, LimitAToB: inbound, LimitBToA: outbound}
-	if err := relay.Splice(client, stream, entry.Counters, opts); err != nil {
+	var client, leg relay.Conn = tcp, stream
+
+	if isUDP {
+		// The tunnel leg carries framed datagrams so boundaries survive the
+		// reliable hop; the player leg already yields one datagram per Read.
+		// Nothing else changes — the same Splice, counters, and caps apply.
+		client, leg = udp, &relay.DatagramStream{Conn: stream}
+		// A datagram flow has no FIN, so the idle reaper is the only thing that
+		// can ever retire this session; it runs on a much shorter clock than the
+		// TCP default for that reason (udpIdleTimeout).
+		opts.IdleTimeout = relay.DatagramIdleTimeout
+	} else {
+		// Track for RTT sampling over this connection's lifetime. Kernel RTT
+		// comes from TCP_INFO, which a datagram flow has no equivalent of — a
+		// UDP session reports "no sample" rather than a fabricated number.
+		sess.rttConns.Store(connID, &rttConn{tcp: tcp, entry: entry})
+		defer sess.rttConns.Delete(connID)
+
+		// Minecraft-aware tunnels sniff the client's login handshake (read from
+		// the player leg here) to attribute the connection to a player.
+		// Read-only: the tap forwards bytes unchanged.
+		if spec.MinecraftAware {
+			client = mcsniff.Tap(tcp, entry)
+		}
+	}
+	if err := relay.Splice(client, leg, entry.Counters, opts); err != nil {
 		sess.logger.Debug("splice ended with error", "client", clientConn.RemoteAddr().String(), "err", err)
 	}
 }

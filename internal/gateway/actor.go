@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"proxyforward/internal/bwcap"
+	"proxyforward/internal/config"
 	"proxyforward/internal/control"
 	"proxyforward/internal/linkquality"
 	"proxyforward/internal/portowner"
@@ -197,6 +198,14 @@ type bindPolicy struct {
 	// maxTunnels is the per-agent listener cap; 0 disables it (tests that predate
 	// the cap, never a served config — config.Validate floors it at 1).
 	maxTunnels int
+	// gate is the gateway's connection gate, which a UDP listener needs at bind
+	// time: a datagram from an unseen source *is* the new connection, so the
+	// listener admits it itself rather than leaving admission to handleClient
+	// after the session already exists. It rides here for the reason the other
+	// three do — a limit passed loosely is a limit some call site forgets, and a
+	// forgotten one silently is not a limit. Binding a udp tunnel without it is
+	// refused rather than allowed unbounded.
+	gate *connGate
 }
 
 // errTooManyListeners is the per-agent listener cap refusing a bind. A sentinel
@@ -522,6 +531,12 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, pol bind
 	if pol.maxTunnels > 0 && len(subtree) >= pol.maxTunnels {
 		return 0, fmt.Errorf("tunnel %q: %w (%d; gateway.max_tunnels_per_agent)", spec.Name, errTooManyListeners, pol.maxTunnels)
 	}
+	// A udp tunnel needs a gate to bind at all (bindPolicy.gate). Refusing here
+	// keeps the "bounded in every dimension" rule true by construction: there is
+	// no path that opens a UDP port whose session table nothing bounds.
+	if spec.Type == config.TunnelUDP && pol.gate == nil {
+		return 0, fmt.Errorf("tunnel %q: refusing to bind a udp listener with no connection gate", spec.Name)
+	}
 	var ln net.Listener
 	if spec.PublicPort == 0 {
 		// "Gateway, you choose." The choice is the gateway's, so it must obey the
@@ -529,13 +544,13 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, pol bind
 		// never from the OS's ephemeral range. Binding :0 here was the scope escape
 		// — an agent scoped to one port got a public listener on a port nobody
 		// allowed just by asking for 0, and could repeat it per invented tunnel id.
-		ln = listenFirstFree(pol.bindAddr, allowedPorts(sess.scope, pol.allowlist))
+		ln = bindFirstFree(spec, pol, allowedPorts(sess.scope, pol.allowlist), a.logger)
 		if ln == nil {
 			return 0, fmt.Errorf("tunnel %q: no public port this agent is allowed to bind is free", spec.Name)
 		}
 	} else {
 		var err error
-		ln, err = net.Listen("tcp", net.JoinHostPort(pol.bindAddr, strconv.Itoa(spec.PublicPort)))
+		ln, err = bindPort(spec, pol, spec.PublicPort, a.logger)
 		if err != nil {
 			if !portowner.IsAddrInUse(err) {
 				return 0, portowner.DecorateBindError(spec.PublicPort, err)
@@ -544,18 +559,18 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, pol bind
 			// failing, so the tunnel comes up; the listener keeps the *requested* spec
 			// so a later reconcile of the same spec is a no-op (sameListener) and the
 			// reassigned port stays put rather than re-contending on every sync.
-			reln := listenFirstFree(pol.bindAddr, reassignCandidates(spec.PublicPort, sess.scope, pol.allowlist))
+			reln := bindFirstFree(spec, pol, reassignCandidates(spec.PublicPort, sess.scope, pol.allowlist), a.logger)
 			if reln == nil {
 				return 0, portowner.DecorateBindError(spec.PublicPort, err)
 			}
-			actual := reln.Addr().(*net.TCPAddr).Port
+			actual := listenerPort(reln)
 			a.recordEvent(GatewayEvent{
 				Kind:          EventPortReassigned,
 				AgentID:       sess.agentID,
 				TunnelID:      spec.ID,
 				RequestedPort: spec.PublicPort,
 				ActualPort:    actual,
-				Message:       fmt.Sprintf("%q could not take port %d (in use by %s); it is on port %d until you reclaim %d", spec.Name, spec.PublicPort, a.portHolderDesc(spec.PublicPort), actual, spec.PublicPort),
+				Message:       fmt.Sprintf("%q could not take port %d (in use by %s); it is on port %d until you reclaim %d", spec.Name, spec.PublicPort, a.portHolderDesc(spec.PublicPort, specProto(spec)), actual, spec.PublicPort),
 			})
 			a.logger.Warn("public port in use; reassigned tunnel", "tunnel_id", spec.ID, "requested_port", spec.PublicPort, "actual_port", actual)
 			ln = reln
@@ -572,7 +587,7 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, pol bind
 	}
 	subtree[spec.ID] = pl
 	go a.acceptClients(pl, handle)
-	return ln.Addr().(*net.TCPAddr).Port, nil
+	return listenerPort(ln), nil
 }
 
 // refreshPause folds both sides' pause sets into every live listener's combined
@@ -625,20 +640,61 @@ func listenFirstFree(bindAddr string, candidates []int) net.Listener {
 	return nil
 }
 
-// portHolderDesc names whatever holds a public port, for a reassignment message:
-// another of this gateway's agents (found in the listener map — the "evict other"
-// case) when it is an internal clash, else the owning OS process (portowner) when
-// identifiable. Runs on the actor goroutine, so reading listeners is race-free.
-func (a *actor) portHolderDesc(port int) string {
+// bindPort opens one public port for the tunnel's protocol. The protocol is a
+// property of the spec, so every bind path routes through here rather than
+// naming "tcp" at the call site — which is how a new path ends up binding the
+// wrong one.
+func bindPort(spec control.TunnelSpec, pol bindPolicy, port int, logger *slog.Logger) (net.Listener, error) {
+	if spec.Type == config.TunnelUDP {
+		return newUDPListener(pol.bindAddr, port, pol.gate, logger)
+	}
+	return net.Listen("tcp", net.JoinHostPort(pol.bindAddr, strconv.Itoa(port)))
+}
+
+// bindFirstFree is listenFirstFree for either protocol.
+func bindFirstFree(spec control.TunnelSpec, pol bindPolicy, candidates []int, logger *slog.Logger) net.Listener {
+	if spec.Type == config.TunnelUDP {
+		if l := listenUDPFirstFree(pol.bindAddr, candidates, pol.gate, logger); l != nil {
+			return l
+		}
+		return nil
+	}
+	return listenFirstFree(pol.bindAddr, candidates)
+}
+
+// specProto normalizes a spec's protocol. An empty Type means TCP: config
+// validation requires an explicit one, but specs built in tests and specs from
+// a legacy peer predate the field, and defaulting them to UDP would bind the
+// wrong socket type.
+func specProto(spec control.TunnelSpec) string {
+	if spec.Type == config.TunnelUDP {
+		return config.TunnelUDP
+	}
+	return config.TunnelTCP
+}
+
+// portHolderDesc names whatever holds a public port *on one protocol*, for a
+// reassignment message: another of this gateway's agents (found in the listener
+// map — the "evict other" case) when it is an internal clash, else the owning OS
+// process (portowner) when identifiable. Runs on the actor goroutine, so reading
+// listeners is race-free.
+//
+// Protocol-scoped because TCP 25565 and UDP 25565 are different ports and
+// routinely both in use: Simple Voice Chat listens on UDP at the same number as
+// the Java server's TCP. Naming the TCP holder in a UDP tunnel's conflict
+// message would send an operator hunting a clash that does not exist.
+func (a *actor) portHolderDesc(port int, proto string) string {
 	for agentID, subtree := range a.listeners {
 		for _, pl := range subtree {
-			if pl.ln.Addr().(*net.TCPAddr).Port == port {
+			if listenerPort(pl.ln) == port && specProto(pl.spec) == proto {
 				return "agent " + agentID
 			}
 		}
 	}
-	if o, ok := portowner.Lookup(port); ok {
-		return o.String()
+	if proto == config.TunnelTCP {
+		if o, ok := portowner.Lookup(port); ok {
+			return o.String()
+		}
 	}
 	return "another process"
 }
@@ -686,13 +742,18 @@ func (a *actor) unbindTunnel(sess *agentSession, tunnelID string) {
 	})
 }
 
-// portHolder finds the session currently bound to port and the tunnel it holds it
-// with, or (nil, "") when no agent holds it. Runs on the actor goroutine (the caller
-// wraps it in do), so reading the listener map is race-free.
-func (a *actor) portHolder(port int) (*agentSession, string) {
+// portHolder finds the session currently bound to port *on proto* and the tunnel
+// it holds it with, or (nil, "") when no agent holds it. Runs on the actor
+// goroutine (the caller wraps it in do), so reading the listener map is
+// race-free.
+//
+// Protocol-scoped for the reason portHolderDesc gives: a UDP tunnel asking for
+// 25565 must not bump the TCP tunnel on 25565, because they were never in
+// conflict — that pair is the ordinary Java-plus-voice-chat layout.
+func (a *actor) portHolder(port int, proto string) (*agentSession, string) {
 	for _, subtree := range a.listeners {
 		for tunnelID, pl := range subtree {
-			if pl.ln.Addr().(*net.TCPAddr).Port == port {
+			if listenerPort(pl.ln) == port && specProto(pl.spec) == proto {
 				return pl.owner, tunnelID
 			}
 		}
@@ -753,7 +814,7 @@ func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, pol 
 						pl.limiters.Store(set)
 					}
 				}
-				outcomes = append(outcomes, reconcileOutcome{ID: spec.ID, Port: pl.ln.Addr().(*net.TCPAddr).Port})
+				outcomes = append(outcomes, reconcileOutcome{ID: spec.ID, Port: listenerPort(pl.ln)})
 				continue
 			}
 			port, err := a.bindLocked(sess, spec, pol, handle)
@@ -831,7 +892,7 @@ func (a *actor) tunnels() []TunnelSnapshot {
 					AgentID:             pl.owner.agentID,
 					ID:                  pl.spec.ID,
 					Name:                pl.spec.Name,
-					PublicPort:          pl.ln.Addr().(*net.TCPAddr).Port,
+					PublicPort:          listenerPort(pl.ln),
 					RequestedPort:       pl.spec.PublicPort,
 					BandwidthLimitMbps:  pl.spec.BandwidthLimitMbps,
 					BandwidthLimitScope: pl.spec.BandwidthLimitScope,
@@ -869,7 +930,7 @@ func (a *actor) tunnelPort(tunnelID string) (int, bool) {
 	a.do(func() {
 		for _, subtree := range a.listeners {
 			if pl, ok := subtree[tunnelID]; ok {
-				port, found = pl.ln.Addr().(*net.TCPAddr).Port, true
+				port, found = listenerPort(pl.ln), true
 				return
 			}
 		}

@@ -1233,6 +1233,14 @@ func (s *session) handleDataStream(st relay.Conn) {
 		s.agent.logger.Debug("refusing open_conn for a paused tunnel", "tunnel_id", oc.TunnelID)
 		return
 	}
+	if tun.Type == config.TunnelUDP {
+		// Same header, same stream, different body: from here the leg carries
+		// framed datagrams rather than a byte stream. Split out rather than
+		// branched inline because none of what follows — the TCP dial, NoDelay,
+		// PROXY protocol, the Minecraft tap — applies to a datagram flow.
+		s.serveDatagramStream(st, tun, oc)
+		return
+	}
 	local, err := net.DialTimeout("tcp", tun.LocalAddr, localDialTimeout)
 	if err != nil {
 		// Milestone 3's health checks make this state visible before
@@ -1281,6 +1289,50 @@ func (s *session) handleDataStream(st relay.Conn) {
 	inbound, outbound := s.agent.bwLimiters.Resolve(tun.ID, tun.Options.BandwidthLimitMbps, tun.Options.BandwidthLimitScope)
 	opts := relay.SpliceOpts{Ctx: s.ctx, LimitAToB: outbound, LimitBToA: inbound}
 	if err := relay.Splice(tcp, src, entry.Counters, opts); err != nil {
+		s.agent.logger.Debug("splice ended with error", "client", oc.ClientAddr, "err", err)
+	}
+	s.agent.logger.Debug("client disconnected", "tunnel", tun.Name, "client", oc.ClientAddr)
+}
+
+// serveDatagramStream is handleDataStream's UDP half: dial the local server as
+// a connected UDP socket and splice datagrams to it, with the tunnel leg framed
+// so message boundaries survive the reliable hop.
+//
+// A connected socket (DialUDP, not ListenUDP) is what makes one flow per player
+// work: the kernel delivers only that server's replies to it, so no demultiplex
+// step is needed on this side and a stray datagram from elsewhere cannot be
+// forwarded to a player as if the server had sent it.
+func (s *session) serveDatagramStream(st relay.Conn, tun *config.Tunnel, oc *control.OpenConn) {
+	local, err := net.DialTimeout("udp", tun.LocalAddr, localDialTimeout)
+	if err != nil {
+		// A UDP dial only fails on a malformed or unresolvable address — there is
+		// no handshake to refuse — so this is a configuration fault, not a server
+		// that happens to be down. The health probe is what reports the latter.
+		s.agent.logger.Warn("cannot open a local udp socket", "tunnel", tun.Name, "local_addr", tun.LocalAddr, "err", err)
+		return
+	}
+	defer local.Close()
+
+	s.agent.logger.Debug("client connected", "tunnel", tun.Name, "client", oc.ClientAddr)
+	// Splice(local, stream): AToB is local→client, so In (client→server) is the
+	// B→A side — inIsAToB=false, exactly as on the TCP path.
+	entry, closeEntry := s.agent.Conns.Open(s.agent.cfg.Agent.AgentID, tun.ID, tun.Name, oc.ClientAddr, oc.ConnID, false)
+	defer closeEntry()
+	// Track the local leg so pause-with-disconnect can drop this tunnel's
+	// players by closing it (either leg closing unwinds the splice).
+	lcID := s.agent.liveConnSeq.Add(1)
+	s.agent.liveConns.Store(lcID, &liveConn{tunnelID: tun.ID, local: local})
+	defer s.agent.liveConns.Delete(lcID)
+
+	inbound, outbound := s.agent.bwLimiters.Resolve(tun.ID, tun.Options.BandwidthLimitMbps, tun.Options.BandwidthLimitScope)
+	opts := relay.SpliceOpts{
+		Ctx: s.ctx, LimitAToB: outbound, LimitBToA: inbound,
+		// The gateway reaps its side of an idle datagram session on the same
+		// clock; matching it here keeps the local socket from outliving the
+		// player it belongs to, since UDP offers no close to observe.
+		IdleTimeout: relay.DatagramIdleTimeout,
+	}
+	if err := relay.Splice(relay.DatagramConn{Conn: local}, &relay.DatagramStream{Conn: st}, entry.Counters, opts); err != nil {
 		s.agent.logger.Debug("splice ended with error", "client", oc.ClientAddr, "err", err)
 	}
 	s.agent.logger.Debug("client disconnected", "tunnel", tun.Name, "client", oc.ClientAddr)
