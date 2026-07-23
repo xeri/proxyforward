@@ -1884,6 +1884,17 @@ func (g *Gateway) validateSpec(spec control.TunnelSpec, scope Scope, caps contro
 	default:
 		return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q: unsupported type %q", spec.Name, spec.Type)}
 	}
+	// A grouped tunnel is bound behind its group's shared listener, so its own
+	// declared PublicPort is ignored — the group's port governs, and that port is
+	// scope-checked at membership (actor.go reconcileGroupMembers), not here. Only the
+	// tunnel-ID scope still applies. Checking the ignored port here would drop a
+	// legitimately-tagged tunnel whose declared port happens to fall outside scope.
+	if spec.GroupID != "" {
+		if !scope.AllowsTunnel(spec.ID) {
+			return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q is outside this agent's allowed scope", spec.ID)}
+		}
+		return nil
+	}
 	if spec.PublicPort < 0 || spec.PublicPort > 65535 {
 		return &bindError{control.ErrCodeBadTunnel, fmt.Sprintf("tunnel %q: invalid public port %d", spec.Name, spec.PublicPort)}
 	}
@@ -1997,6 +2008,29 @@ func (g *Gateway) validSpecs(sess *agentSession, specs []control.TunnelSpec) []c
 	return valid
 }
 
+// partitionDesired splits a validated desired set into solo tunnels (each bound on
+// its own port via the actor's listeners map) and grouped tunnels (bound behind a
+// configured group's shared listener, their declared port ignored). A spec is
+// grouped iff its GroupID names a currently-configured group; a tag naming an
+// unconfigured group falls back to solo — a working tunnel is never silently dropped
+// because its group has not been created yet.
+func (g *Gateway) partitionDesired(specs []control.TunnelSpec) (solo, grouped []control.TunnelSpec) {
+	configured := make(map[string]struct{})
+	for _, gs := range g.agents.Groups() {
+		configured[gs.ID] = struct{}{}
+	}
+	for _, s := range specs {
+		if s.GroupID != "" {
+			if _, ok := configured[s.GroupID]; ok {
+				grouped = append(grouped, s)
+				continue
+			}
+		}
+		solo = append(solo, s)
+	}
+	return solo, grouped
+}
+
 // resolvePorts returns specs with each PublicPort replaced by the port the gateway
 // actually bound (from reconcile outcomes), so the stored + pushed config carries
 // concrete ports even when the agent proposed an ephemeral (0) port.
@@ -2032,7 +2066,12 @@ func (g *Gateway) pushConfigOnConnect(sess *agentSession) {
 	// with no listener behind it. In the common (unchanged-scope) case valid==stored,
 	// so the hash and payload are identical and nothing changes.
 	valid := g.validSpecs(sess, stored)
-	g.act().reconcile(sess, valid, g.policy(), g.handleClient)
+	// Group-tagged tunnels are bound behind their group's shared listener, not their
+	// own port — keep them off the solo reconcile and route them to membership. The
+	// pushed/hashed set stays the full valid set (tags ride to the agent for display).
+	solo, grouped := g.partitionDesired(valid)
+	g.act().reconcile(sess, solo, g.policy(), g.handleClient)
+	g.act().reconcileGroupMembers(sess, grouped)
 	hash := control.HashTunnels(valid)
 	if sess.reportedConfigHash == hash && sess.agentConfigGen.Load() == gen {
 		return // agent is already in sync; listeners are (re)bound, nothing to push
@@ -2054,10 +2093,12 @@ func (g *Gateway) pushConfigOnConnect(sess *agentSession) {
 // shutting down or the agent left the store — nothing was adopted.
 func (g *Gateway) adoptAndPush(sess *agentSession, specs []control.TunnelSpec) (gen uint64, hash string, ok bool) {
 	valid := g.validSpecs(sess, specs)
-	outcomes, ran := g.act().reconcile(sess, valid, g.policy(), g.handleClient)
+	solo, grouped := g.partitionDesired(valid)
+	outcomes, ran := g.act().reconcile(sess, solo, g.policy(), g.handleClient)
 	if !ran {
 		return 0, "", false
 	}
+	g.act().reconcileGroupMembers(sess, grouped)
 	resolved := resolvePorts(valid, outcomes)
 	gen, ok = g.agents.AdoptConfig(sess.agentID, resolved)
 	if !ok {

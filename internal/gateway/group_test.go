@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"proxyforward/internal/config"
+	"proxyforward/internal/control"
 )
 
 // groupFixture is a gateway with a live actor and an enrollment store, the minimum
@@ -33,6 +34,47 @@ func newGroupFixture(t *testing.T) *groupFixture {
 	g.agents = store
 	g.actor.Store(a)
 	return &groupFixture{g: g, a: a, store: store}
+}
+
+// admit builds and admits a bare agent session (unrestricted scope), the minimum a
+// membership test needs — reconcileGroupMembers keys off admission, not a live
+// transport (that matters only for the pick, Phase 4).
+func (f *groupFixture) admit(t *testing.T, id string) *agentSession {
+	t.Helper()
+	s := &agentSession{agentID: id, scope: Scope{}, logger: discardLogger()}
+	if _, err := f.a.admit(s); err != nil {
+		t.Fatalf("admit %s: %v", id, err)
+	}
+	return s
+}
+
+// snapOrder reads a group's snapshot member identities in sorted (joinOrdinal)
+// order, on the actor goroutine so it never races the copy-on-write swap.
+func (f *groupFixture) snapOrder(groupID string) []agentTun {
+	var out []agentTun
+	f.a.do(func() {
+		gl := f.a.groupListeners[groupID]
+		if gl == nil {
+			return
+		}
+		for _, m := range *gl.snap.Load() {
+			out = append(out, agentTun{AgentID: m.sess.agentID, TunnelID: m.tunnelID})
+		}
+	})
+	return out
+}
+
+// ordinalOf returns a member's joinOrdinal (0 if absent), read on the actor goroutine.
+func (f *groupFixture) ordinalOf(groupID string, key agentTun) uint64 {
+	var ord uint64
+	f.a.do(func() {
+		if gl := f.a.groupListeners[groupID]; gl != nil {
+			if m, ok := gl.members[key]; ok {
+				ord = m.joinOrdinal
+			}
+		}
+	})
+	return ord
 }
 
 // portIsFree reports whether a fresh listener can take the port right now.
@@ -74,5 +116,103 @@ func TestGroupSocketBoundAtConfigTime(t *testing.T) {
 	}
 	if len(f.g.ListGroups()) != 0 {
 		t.Fatalf("group not removed from the store: %+v", f.g.ListGroups())
+	}
+}
+
+// tag is a group-tagged desired tunnel spec for a member.
+func tag(tunnelID, groupID string) control.TunnelSpec {
+	return control.TunnelSpec{ID: tunnelID, Name: tunnelID, Type: config.TunnelTCP, GroupID: groupID}
+}
+
+// TestGroupJoinStampsMonotonicOrdinals: joins stamp increasing ordinals; a re-sync
+// keeps a member's ordinal (standby priority is not reset by a benign reconcile); and
+// a member that leaves and rejoins gets a new, HIGHER ordinal — so a recovered
+// ex-primary never reclaims primary (standby no-failback, by construction). (groups)
+func TestGroupJoinStampsMonotonicOrdinals(t *testing.T) {
+	f := newGroupFixture(t)
+	if err := f.g.SetGroup(GroupSpec{ID: "grp_a", PublicPort: freePort(t), Proto: "tcp", Policy: PolicyStandby}); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	sessA := f.admit(t, "agt_a")
+	sessB := f.admit(t, "agt_b")
+	keyA := agentTun{AgentID: "agt_a", TunnelID: "t_a"}
+	keyB := agentTun{AgentID: "agt_b", TunnelID: "t_b"}
+
+	f.a.reconcileGroupMembers(sessA, []control.TunnelSpec{tag("t_a", "grp_a")})
+	f.a.reconcileGroupMembers(sessB, []control.TunnelSpec{tag("t_b", "grp_a")})
+	if o := f.ordinalOf("grp_a", keyA); o != 1 {
+		t.Fatalf("first join ordinal = %d, want 1", o)
+	}
+	if o := f.ordinalOf("grp_a", keyB); o != 2 {
+		t.Fatalf("second join ordinal = %d, want 2", o)
+	}
+	// The sorted snapshot puts the lowest ordinal (the standby primary) first.
+	if got := f.snapOrder("grp_a"); len(got) != 2 || got[0] != keyA || got[1] != keyB {
+		t.Fatalf("snap order = %+v, want [A, B]", got)
+	}
+
+	// A benign re-sync must not re-stamp A's ordinal.
+	f.a.reconcileGroupMembers(sessA, []control.TunnelSpec{tag("t_a", "grp_a")})
+	if o := f.ordinalOf("grp_a", keyA); o != 1 {
+		t.Fatalf("re-sync changed A's ordinal to %d, want a stable 1", o)
+	}
+
+	// A leaves (disconnect) and rejoins with a fresh session: its new ordinal is the
+	// highest, so B (ordinal 2) is now the standby primary — no failback to A.
+	f.a.disconnected(sessA)
+	sessA2 := f.admit(t, "agt_a")
+	f.a.reconcileGroupMembers(sessA2, []control.TunnelSpec{tag("t_a", "grp_a")})
+	if o := f.ordinalOf("grp_a", keyA); o != 3 {
+		t.Fatalf("rejoin ordinal = %d, want a new higher 3 (no-failback)", o)
+	}
+	if got := f.snapOrder("grp_a"); len(got) != 2 || got[0] != keyB {
+		t.Fatalf("after rejoin, standby primary should be B (lowest ordinal), snap = %+v", got)
+	}
+}
+
+// TestGroupEvictionRemovesMemberFromSnap: evicting one member drops it from the
+// group snapshot while the shared socket stays up and the other members keep serving —
+// the group form of eviction isolation. (groups)
+func TestGroupEvictionRemovesMemberFromSnap(t *testing.T) {
+	f := newGroupFixture(t)
+	port := freePort(t)
+	if err := f.g.SetGroup(GroupSpec{ID: "grp_a", PublicPort: port, Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	sessA := f.admit(t, "agt_a")
+	sessB := f.admit(t, "agt_b")
+	f.a.reconcileGroupMembers(sessA, []control.TunnelSpec{tag("t_a", "grp_a")})
+	f.a.reconcileGroupMembers(sessB, []control.TunnelSpec{tag("t_b", "grp_a")})
+	if got := f.snapOrder("grp_a"); len(got) != 2 {
+		t.Fatalf("expected 2 members before eviction, got %+v", got)
+	}
+
+	f.a.disconnected(sessA) // evict A
+	got := f.snapOrder("grp_a")
+	if len(got) != 1 || got[0] != (agentTun{AgentID: "agt_b", TunnelID: "t_b"}) {
+		t.Fatalf("after evicting A, snap = %+v, want only B", got)
+	}
+	// The shared socket is untouched: still bound.
+	if portIsFree(port) {
+		t.Fatalf("group socket dropped when a member was evicted (port %d free)", port)
+	}
+}
+
+// TestGroupUntagReclaimsToSolo: an untagged tunnel leaves the group and reverts to a
+// solo listener on its own port (declared-port reclaim on untag). (groups)
+func TestGroupUntagReclaimsToSolo(t *testing.T) {
+	f := newGroupFixture(t)
+	if err := f.g.SetGroup(GroupSpec{ID: "grp_a", PublicPort: freePort(t), Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	sess := f.admit(t, "agt_a")
+	f.a.reconcileGroupMembers(sess, []control.TunnelSpec{tag("t_a", "grp_a")})
+	if got := f.snapOrder("grp_a"); len(got) != 1 {
+		t.Fatalf("expected the member to join, got %+v", got)
+	}
+	// Untag: an empty grouped set means the member left the group.
+	f.a.reconcileGroupMembers(sess, nil)
+	if got := f.snapOrder("grp_a"); len(got) != 0 {
+		t.Fatalf("after untag the group should be empty, got %+v", got)
 	}
 }

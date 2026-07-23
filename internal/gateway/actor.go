@@ -518,6 +518,9 @@ func (a *actor) evict(sess *agentSession, reason string) {
 		}
 		delete(a.listeners, sess.agentID) // don't leak an empty subtree
 	}
+	// Drop this agent's group memberships too — the shared group sockets are
+	// untouched (other members keep serving); only this session leaves the snapshots.
+	a.removeSessionFromGroups(sess)
 	sess.closeAll()
 	a.logger.Debug("session evicted", "agent", sess.agentID, "generation", sess.gen, "reason", reason)
 }
@@ -947,6 +950,81 @@ func (a *actor) acceptGroupClients(gl *groupListener, handle func(*groupListener
 			defer a.clientWG.Done()
 			handle(gl, conn)
 		}()
+	}
+}
+
+// reconcileGroupMembers makes this session's group membership equal the grouped
+// desired set, as one actor command: it joins each tunnel tagged into a bound group
+// (stamping a fresh, monotonic joinOrdinal) and leaves any membership no longer
+// wanted or whose group changed, rebuilding each affected group's snapshot
+// copy-on-write. A member already present keeps its ordinal — a benign re-sync must
+// not reset standby priority. Scope is enforced against the GROUP's port (the
+// tunnel's own declared port is ignored while tagged); a member the scope disallows
+// is simply not joined. A grouped spec whose group is not bound is skipped.
+func (a *actor) reconcileGroupMembers(sess *agentSession, grouped []control.TunnelSpec) {
+	a.do(func() {
+		if a.agents[sess.agentID] != sess || sess.evicted.Load() {
+			return
+		}
+		// want maps this session's desired member identities to their target group.
+		want := make(map[agentTun]string, len(grouped))
+		for _, spec := range grouped {
+			gl, ok := a.groupListeners[spec.GroupID]
+			if !ok {
+				continue // group not bound (never configured, or failed to bind)
+			}
+			if !sess.scope.AllowsPort(gl.spec.PublicPort) || !sess.scope.AllowsTunnel(spec.ID) {
+				sess.logger.Warn("group member dropped: scope does not allow the group's port",
+					"tunnel_id", spec.ID, "group", spec.GroupID, "group_port", gl.spec.PublicPort)
+				continue
+			}
+			want[agentTun{AgentID: sess.agentID, TunnelID: spec.ID}] = spec.GroupID
+		}
+		touched := map[string]*groupListener{}
+		// Leave: drop this session's members not wanted, or wanted in a different group.
+		for _, gl := range a.groupListeners {
+			for key, m := range gl.members {
+				if m.sess != sess {
+					continue
+				}
+				if g, ok := want[key]; !ok || g != gl.spec.ID {
+					delete(gl.members, key)
+					touched[gl.spec.ID] = gl
+				}
+			}
+		}
+		// Join: add wanted members not already present, keeping existing ordinals.
+		for key, groupID := range want {
+			gl := a.groupListeners[groupID]
+			if _, exists := gl.members[key]; exists {
+				continue
+			}
+			gl.nextOrdinal++
+			gl.members[key] = &groupMember{sess: sess, tunnelID: key.TunnelID, joinOrdinal: gl.nextOrdinal}
+			touched[groupID] = gl
+		}
+		for _, gl := range touched {
+			gl.rebuildSnap()
+		}
+	})
+}
+
+// removeSessionFromGroups drops every membership held by sess across all groups and
+// rebuilds the affected snapshots. Called from evict (already on the actor
+// goroutine): a rejoin later gets a new, higher ordinal, so a recovered ex-primary
+// never reclaims standby primary (no-failback, by construction).
+func (a *actor) removeSessionFromGroups(sess *agentSession) {
+	for _, gl := range a.groupListeners {
+		removed := false
+		for key, m := range gl.members {
+			if m.sess == sess {
+				delete(gl.members, key)
+				removed = true
+			}
+		}
+		if removed {
+			gl.rebuildSnap()
+		}
 	}
 }
 
