@@ -126,3 +126,70 @@ func (gl *groupListener) rebuildSnap() {
 	sort.Slice(out, func(i, j int) bool { return out[i].joinOrdinal < out[j].joinOrdinal })
 	gl.snap.Store(&out)
 }
+
+// eligible reports whether a member can take a new player right now: it has a live
+// session, neither side has paused its tunnel, and the agent has reported the local
+// backend UP. The positive-health requirement is a deliberate divergence from the
+// solo "unknown ⇒ up" rule: a group has alternatives, so routing to an unverified
+// member would let a dead-backend member that keeps reconnecting (liveConns 0, so the
+// argmin) become a thundering-herd target. The agent seeds current health on session
+// start, so a member is eligible within one probe of joining. Reads only per-member
+// atomics and sync.Maps — safe off the actor goroutine.
+func eligible(m *groupMember) bool {
+	if m.sess.session() == nil {
+		return false
+	}
+	if m.sess.pauseMine.Load().covers(m.tunnelID) || m.sess.pauseTheirs.Load().covers(m.tunnelID) {
+		return false
+	}
+	v, ok := m.sess.health.Load(m.tunnelID)
+	up, _ := v.(bool)
+	return ok && up
+}
+
+// pick selects the member a new player is routed to under the group's policy,
+// excluding any already tried this connection (bounded re-pick). It reads the
+// immutable, joinOrdinal-sorted snapshot and per-member atomics only — no lock, no
+// allocation beyond the small eligible slice — because it runs on the hot accept
+// path. Returns nil when no member is eligible.
+func pick(policy string, members []*groupMember, exclude map[*groupMember]bool, rr *atomic.Uint64) *groupMember {
+	cands := make([]*groupMember, 0, len(members))
+	for _, m := range members {
+		if exclude[m] || !eligible(m) {
+			continue
+		}
+		cands = append(cands, m)
+	}
+	return pickFrom(policy, cands, rr)
+}
+
+// pickFrom is the pure selection over an already-eligible, joinOrdinal-sorted
+// candidate slice — the unit-testable core, no sessions required.
+//   - standby: the lowest-ordinal candidate (first in the sorted slice). All players
+//     go to it; it changes only when it stops being eligible (failover, no failback).
+//   - spread: least live connections, ties broken round-robin over the sorted
+//     candidates (deterministic because the snapshot order is stable).
+func pickFrom(policy string, cands []*groupMember, rr *atomic.Uint64) *groupMember {
+	if len(cands) == 0 {
+		return nil
+	}
+	if policy == PolicyStandby {
+		return cands[0]
+	}
+	minConns := cands[0].liveConns.Load()
+	for _, m := range cands[1:] {
+		if c := m.liveConns.Load(); c < minConns {
+			minConns = c
+		}
+	}
+	var tied []*groupMember // preserves the sorted candidate order
+	for _, m := range cands {
+		if m.liveConns.Load() == minConns {
+			tied = append(tied, m)
+		}
+	}
+	if len(tied) == 1 {
+		return tied[0]
+	}
+	return tied[rr.Add(1)%uint64(len(tied))]
+}
