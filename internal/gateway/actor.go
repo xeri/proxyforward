@@ -290,7 +290,12 @@ type actor struct {
 	agents     map[string]*agentSession              // agentID → live session
 	generation uint64                                // global-monotonic supersede ordinal
 	listeners  map[string]map[string]*publicListener // agentID → tunnelID → listener
-	admitDamp  map[string]dampState                  // agentID → anti-flap state
+	// groupListeners is the additive group table, keyed by groupID, entirely
+	// separate from the per-agent listeners map above — the solo-tunnel path is
+	// untouched. One shared socket per configured group, bound for the group's
+	// config lifetime (SetGroup → DeleteGroup), not per-member.
+	groupListeners map[string]*groupListener
+	admitDamp      map[string]dampState // agentID → anti-flap state
 	// events is the ring of notable auto-fixes/conflicts (port reassign, suspected
 	// clone) the GUI event log polls. Written on this goroutine, read via do().
 	events *eventRing
@@ -321,13 +326,14 @@ const eventRingCap = 256
 
 func newActor(logger *slog.Logger) *actor {
 	return &actor{
-		logger:    logger,
-		cmds:      make(chan func()),
-		stopped:   make(chan struct{}),
-		agents:    make(map[string]*agentSession),
-		listeners: make(map[string]map[string]*publicListener),
-		admitDamp: make(map[string]dampState),
-		events:    newEventRing(eventRingCap),
+		logger:         logger,
+		cmds:           make(chan func()),
+		stopped:        make(chan struct{}),
+		agents:         make(map[string]*agentSession),
+		listeners:      make(map[string]map[string]*publicListener),
+		groupListeners: make(map[string]*groupListener),
+		admitDamp:      make(map[string]dampState),
+		events:         newEventRing(eventRingCap),
 	}
 }
 
