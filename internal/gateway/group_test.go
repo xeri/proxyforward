@@ -77,6 +77,28 @@ func (f *groupFixture) ordinalOf(groupID string, key agentTun) uint64 {
 	return ord
 }
 
+// bindSolo binds a plain solo listener for sess on port, as the pre-group state a
+// conflict/convert test starts from.
+func (f *groupFixture) bindSolo(t *testing.T, sess *agentSession, tunnelID string, port int) {
+	t.Helper()
+	spec := control.TunnelSpec{ID: tunnelID, Name: tunnelID, Type: config.TunnelTCP, PublicPort: port}
+	if _, err := f.a.bindTunnel(sess, spec, bindPolicy{bindAddr: "127.0.0.1"}, func(*publicListener, net.Conn) {}); err != nil {
+		t.Fatalf("bind solo %s: %v", tunnelID, err)
+	}
+}
+
+// soloHolder reports which (agentID, tunnelID) solo listener holds a TCP port, or
+// ("","") when none does. Read on the actor goroutine.
+func (f *groupFixture) soloHolder(port int) (string, string) {
+	var agentID, tunnelID string
+	f.a.do(func() {
+		if sess, tid := f.a.portHolder(port, config.TunnelTCP); sess != nil {
+			agentID, tunnelID = sess.agentID, tid
+		}
+	})
+	return agentID, tunnelID
+}
+
 // portIsFree reports whether a fresh listener can take the port right now.
 func portIsFree(port int) bool {
 	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
@@ -214,5 +236,71 @@ func TestGroupUntagReclaimsToSolo(t *testing.T) {
 	f.a.reconcileGroupMembers(sess, nil)
 	if got := f.snapOrder("grp_a"); len(got) != 0 {
 		t.Fatalf("after untag the group should be empty, got %+v", got)
+	}
+}
+
+// TestGroupPortConflictRejected: SetGroup onto a port held by a non-member listener
+// is rejected (no group created, the incumbent listener untouched — a live listener
+// is never stolen), while the convert-in-the-same-update flow — the port's holder is
+// a tunnel being moved into this very group — succeeds by tearing the solo listener
+// down as the group binds. (groups)
+func TestGroupPortConflictRejected(t *testing.T) {
+	// (a) Rejection: a non-member solo tunnel holds the port.
+	f := newGroupFixture(t)
+	port := freePort(t)
+	solo := f.admit(t, "agt_solo")
+	f.bindSolo(t, solo, "t_solo", port)
+
+	err := f.g.SetGroup(GroupSpec{ID: "grp_x", PublicPort: port, Proto: "tcp", Policy: PolicySpread})
+	if err == nil {
+		t.Fatal("SetGroup onto a port held by a non-member listener must be rejected")
+	}
+	if len(f.g.ListGroups()) != 0 {
+		t.Fatalf("a rejected SetGroup must not create the group (store rollback): %+v", f.g.ListGroups())
+	}
+	if a, tid := f.soloHolder(port); a != "agt_solo" || tid != "t_solo" {
+		t.Fatalf("the incumbent solo listener was disturbed: holder=(%q,%q)", a, tid)
+	}
+
+	// (b) Convert: the holder is a tunnel tagged into the group being created.
+	f2 := newGroupFixture(t)
+	port2 := freePort(t)
+	conv := f2.admit(t, "agt_conv")
+	// The member's stored config tags t_conv into grp_y, and it is currently bound solo
+	// on port2 — the state before the group exists, which makes it "movable into" grp_y.
+	seedAgent(f2.store, "agt_conv", control.TunnelSpec{ID: "t_conv", Name: "t_conv", Type: config.TunnelTCP, PublicPort: port2, GroupID: "grp_y"})
+	f2.bindSolo(t, conv, "t_conv", port2)
+
+	if err := f2.g.SetGroup(GroupSpec{ID: "grp_y", PublicPort: port2, Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("convert-in-same-update flow must succeed, got: %v", err)
+	}
+	if len(f2.g.ListGroups()) != 1 {
+		t.Fatalf("group should exist after a successful convert: %+v", f2.g.ListGroups())
+	}
+	// The solo listener was torn down as the group bound: no solo holder, group up.
+	if a, tid := f2.soloHolder(port2); a != "" || tid != "" {
+		t.Fatalf("the moved-in solo listener should be gone, still held by (%q,%q)", a, tid)
+	}
+	if portIsFree(port2) {
+		t.Fatalf("group socket not bound on the converted port %d", port2)
+	}
+}
+
+// TestGroupBindsConfiguredGroupsAtStartup: a group already in the store (from a prior
+// run) is bound by bindConfiguredGroups before any agent connects, so it claims its
+// fixed port ahead of the solo tunnels that reassign around it. (groups)
+func TestGroupBindsConfiguredGroupsAtStartup(t *testing.T) {
+	f := newGroupFixture(t)
+	port := freePort(t)
+	// Persist a group directly (as a prior run would have), without binding.
+	if err := f.store.SetGroup(GroupSpec{ID: "grp_boot", PublicPort: port, Proto: "tcp", Policy: PolicyStandby}); err != nil {
+		t.Fatalf("store.SetGroup: %v", err)
+	}
+	if !portIsFree(port) {
+		t.Fatalf("port %d should be free before startup bind", port)
+	}
+	f.g.bindConfiguredGroups()
+	if portIsFree(port) {
+		t.Fatalf("bindConfiguredGroups did not bind grp_boot on port %d", port)
 	}
 }
