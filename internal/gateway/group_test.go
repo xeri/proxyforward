@@ -2,13 +2,18 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"proxyforward/internal/config"
+	"proxyforward/internal/conntrack"
 	"proxyforward/internal/control"
+	"proxyforward/internal/relay"
 )
 
 // groupFixture is a gateway with a live actor and an enrollment store, the minimum
@@ -30,8 +35,9 @@ func newGroupFixture(t *testing.T) *groupFixture {
 	go a.run(ctx)
 	t.Cleanup(cancel)
 
-	g := &Gateway{cfg: config.Default(), logger: discardLogger()}
+	g := &Gateway{cfg: config.Default(), logger: discardLogger(), Conns: conntrack.NewRegistry()}
 	g.cfg.Gateway.BindAddr = "127.0.0.1" // never bind test listeners on every interface
+	g.gate = newConnGate(g.cfg.Gateway.MaxConnsGlobal, g.cfg.Gateway.MaxConnsPerIP)
 	g.agents = store
 	g.actor.Store(a)
 	return &groupFixture{g: g, a: a, store: store}
@@ -334,4 +340,106 @@ func TestGroupBindsConfiguredGroupsAtStartup(t *testing.T) {
 	if portIsFree(port) {
 		t.Fatalf("bindConfiguredGroups did not bind grp_boot on port %d", port)
 	}
+}
+
+// failDP is a data plane whose openFlow always fails, counting its calls — for
+// exercising the bounded re-pick without a live agent.
+type failDP struct{ calls *atomic.Int64 }
+
+func (d failDP) openFlow(*agentSession, string) (relay.Conn, func(), error) {
+	d.calls.Add(1)
+	return nil, nil, errNoDataLeg
+}
+
+// joinLiveMember admits a session, gives it a live (fake) transport + UP health and a
+// data plane, and joins it to the group — the minimum for handleGroupClient to select
+// and try it.
+func (f *groupFixture) joinLiveMember(t *testing.T, agentID, tunnelID, groupID string, dp dataPlane) *agentSession {
+	t.Helper()
+	s := f.admit(t, agentID)
+	s.setSession(liveSession{})
+	s.health.Store(tunnelID, true)
+	s.dp = dp
+	sctx, cancel := context.WithCancel(context.Background())
+	s.ctx, s.cancel = sctx, cancel
+	t.Cleanup(cancel)
+	f.a.reconcileGroupMembers(s, []control.TunnelSpec{tag(tunnelID, groupID)})
+	return s
+}
+
+// TestGroupRepickOnOpenFlowFailure: when a chosen member's data leg won't open, the
+// player is re-picked onto another member; when every eligible member fails, the group
+// falls to its offline responder. Here both members fail, so both are tried (bounded
+// re-pick) and then offline answers. (groups)
+func TestGroupRepickOnOpenFlowFailure(t *testing.T) {
+	f := newGroupFixture(t)
+	port := freePort(t)
+	if err := f.g.SetGroup(GroupSpec{ID: "grp_a", Name: "grp", PublicPort: port, Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	var calls atomic.Int64
+	f.joinLiveMember(t, "agt_a", "t_a", "grp_a", failDP{calls: &calls})
+	f.joinLiveMember(t, "agt_b", "t_b", "grp_a", failDP{calls: &calls})
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial group port: %v", err)
+	}
+	defer conn.Close()
+	// No OfflineMOTD, so handleGroupClient closes after both picks fail: the read
+	// returns EOF. Wait for that, then assert both members were tried.
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 1)
+	conn.Read(buf) // expected EOF/close
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && calls.Load() < 2 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("bounded re-pick should try both members exactly once each; openFlow calls = %d, want 2", got)
+	}
+}
+
+// TestGroupPickRaceUnderChurn: hammer join/leave against the accept goroutine's pick
+// to prove the snap copy-on-write is sound (meaningful under -race in CI). (groups)
+func TestGroupPickRaceUnderChurn(t *testing.T) {
+	f := newGroupFixture(t)
+	if err := f.g.SetGroup(GroupSpec{ID: "grp_a", PublicPort: freePort(t), Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	var gl *groupListener
+	f.a.do(func() { gl = f.a.groupListeners["grp_a"] })
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { // reader: pick over the live snapshot, as the accept path does
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = pick(PolicySpread, *gl.snap.Load(), nil, &gl.rr)
+		}
+	}()
+
+	// writer: churn membership on the actor.
+	var sessions []*agentSession
+	for i := 0; i < 60; i++ {
+		id := fmt.Sprintf("agt_%d", i)
+		tid := fmt.Sprintf("t%d", i)
+		s := f.admit(t, id)
+		s.setSession(liveSession{})
+		s.health.Store(tid, true)
+		f.a.reconcileGroupMembers(s, []control.TunnelSpec{tag(tid, "grp_a")})
+		sessions = append(sessions, s)
+		if i%3 == 0 && i > 0 {
+			f.a.disconnected(sessions[i-2]) // leave an earlier one
+		}
+	}
+	close(stop)
+	wg.Wait()
 }

@@ -782,6 +782,51 @@ func (g *Gateway) DeleteGroup(id string) bool {
 	return g.agents.DeleteGroup(id)
 }
 
+// GroupStatuses returns every configured group with its live members (eligibility,
+// primary, live-conn load) — the read surface the GUI group card polls. Nil before Start.
+func (g *Gateway) GroupStatuses() []GroupStatus {
+	a := g.act()
+	if a == nil {
+		return nil
+	}
+	return a.groupStatuses()
+}
+
+// SetTunnelGroup tags (groupID != "") or untags (groupID == "") one of an agent's
+// tunnels into a group, rewriting the agent's authoritative config and re-publishing
+// it — the same adopt → reconcile → push path a port reclaim uses, so the member
+// leaves its solo listener and joins (or leaves) the group's shared one. Arbitration:
+// the gateway decides membership and applies immediately. An offline agent's stored
+// config is rewritten to take effect on its next connect. Reports false when the
+// agent holds no such tunnel or the gateway is shutting down.
+func (g *Gateway) SetTunnelGroup(agentID, tunnelID, groupID string) (bool, error) {
+	if g.agents == nil {
+		return false, fmt.Errorf("gateway not started")
+	}
+	stored, _, ok := g.agents.DesiredConfig(agentID)
+	if !ok {
+		return false, nil
+	}
+	next := make([]control.TunnelSpec, 0, len(stored))
+	found := false
+	for _, s := range stored {
+		if s.ID == tunnelID {
+			s.GroupID = groupID
+			found = true
+		}
+		next = append(next, s)
+	}
+	if !found {
+		return false, nil
+	}
+	if sess := g.liveSession(agentID); sess != nil {
+		_, _, ok = g.adoptAndPush(sess, next)
+		return ok, nil
+	}
+	_, ok = g.agents.AdoptConfig(agentID, next)
+	return ok, nil
+}
+
 // groupByID looks up a stored group by ID (before-mutation snapshot for rollback).
 func (g *Gateway) groupByID(id string) (GroupSpec, bool) {
 	for _, gs := range g.agents.Groups() {
@@ -2248,13 +2293,94 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 }
 
 // handleGroupClient runs per accepted group connection: pick an eligible member and
-// splice the player through its session's existing data plane. Phase 4 fills in the
-// member pick, least-connections, bounded re-pick, and RTT/mcsniff plumbing; until
-// then a group answers its offline responder so the socket-lifecycle machinery can be
-// exercised without a live member.
+// splice the player through that member session's EXISTING data plane — after the
+// pick, the leg is a relay.Conn spliced exactly as a solo player's, so grouping adds
+// no data-path code. A bounded re-pick (2 tries) moves a player off a member whose
+// data leg won't open; when no member is eligible or both picks fail, the group's
+// offline responder answers.
 func (g *Gateway) handleGroupClient(gl *groupListener, clientConn net.Conn) {
 	defer clientConn.Close()
+	ip := remoteIP(clientConn)
+	// Abuse limits sit on the accept path ahead of the pick, exactly as for a solo
+	// listener — grouping does not widen what one source may open.
+	if !g.gate.admit(ip) {
+		g.logger.Debug("group conn rejected: connection cap reached", "client", clientConn.RemoteAddr().String(), "group", gl.spec.Name)
+		return
+	}
+	defer g.gate.release(ip)
+
+	tcp, ok := clientConn.(*net.TCPConn)
+	if !ok {
+		return // groups are TCP-only this iteration
+	}
+	connID := strconv.FormatUint(g.connSeq.Add(1), 10)
+	// Track this player leg for the group's lifetime so DeleteGroup can drain it
+	// (closing the player side unwinds the data leg under every transport).
+	gl.conns.Store(connID, clientConn)
+	defer gl.conns.Delete(connID)
+
+	members := *gl.snap.Load() // immutable, sorted by joinOrdinal
+	tried := map[*groupMember]bool{}
+	for attempt := 0; attempt < 2; attempt++ {
+		m := pick(gl.spec.Policy, members, tried, &gl.rr)
+		if m == nil {
+			break // no eligible member
+		}
+		if g.spliceThroughMember(gl, m, connID, tcp, clientConn) {
+			return // routed and spliced through this member
+		}
+		tried[m] = true // its data leg would not open; re-pick without it
+	}
 	g.serveOffline(clientConn, control.TunnelSpec{OfflineMOTD: gl.spec.OfflineMOTD})
+}
+
+// spliceThroughMember routes one player through member m: bump its live-connection
+// count, open its data leg through the member session's data plane, send the OpenConn
+// header, and splice. It returns false (without splicing) only when the leg could not
+// be opened, so handleGroupClient re-picks another member; true once the leg is
+// established — the splice then runs to completion under this call, and a mid-splice
+// failure drops the player rather than re-picking (its session is committed).
+func (g *Gateway) spliceThroughMember(gl *groupListener, m *groupMember, connID string, tcp *net.TCPConn, clientConn net.Conn) bool {
+	sess := m.sess
+	m.liveConns.Add(1)
+	defer m.liveConns.Add(-1)
+
+	stream, releaseFlow, err := sess.dp.openFlow(sess, connID)
+	if err != nil {
+		sess.logger.Debug("group: open data leg failed; re-picking", "group", gl.spec.Name, "err", err)
+		return false
+	}
+	defer releaseFlow()
+	defer stream.Close()
+
+	// The registry entry carries (agentID, tunnelID) and — from Phase 5 — the groupID,
+	// so the GUI can read conntrack for group display while pick keeps its own atomic.
+	entry, closeEntry := g.Conns.Open(sess.agentID, m.tunnelID, gl.spec.Name, clientConn.RemoteAddr().String(), connID, true)
+	defer closeEntry()
+
+	stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
+	if err := control.WriteMsg(stream, control.TypeOpenConn, control.OpenConn{
+		TunnelID:   m.tunnelID,
+		ClientAddr: clientConn.RemoteAddr().String(),
+		ConnID:     connID,
+	}); err != nil {
+		sess.logger.Debug("group: open_conn write failed", "err", err)
+		return true // the leg opened; a write failure drops this player, it is not a re-pick
+	}
+	stream.SetWriteDeadline(time.Time{})
+
+	// Track for RTT sampling over the connection's lifetime (kernel RTT via TCP_INFO).
+	sess.rttConns.Store(connID, &rttConn{tcp: tcp, entry: entry})
+	defer sess.rttConns.Delete(connID)
+
+	// Groups are Minecraft-aware by domain — a player holds one session to one
+	// backend — so sniff the login handshake to attribute the connection to a player.
+	// Read-only: the tap forwards bytes unchanged.
+	client := mcsniff.Tap(tcp, entry)
+	if err := relay.Splice(client, stream, entry.Counters, relay.SpliceOpts{Ctx: sess.ctx}); err != nil {
+		sess.logger.Debug("group splice ended with error", "client", clientConn.RemoteAddr().String(), "err", err)
+	}
+	return true
 }
 
 // backendDown reports whether the agent has told us this tunnel's local server

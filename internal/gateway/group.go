@@ -127,6 +127,53 @@ func (gl *groupListener) rebuildSnap() {
 	gl.snap.Store(&out)
 }
 
+// GroupMemberStatus is one member's live state for the GUI and tests: which tunnel
+// of which agent, whether it can take a player now, whether it is the standby primary
+// (lowest-ordinal eligible; always false under spread), and its live-connection load.
+type GroupMemberStatus struct {
+	AgentID   string `json:"agentId"`
+	TunnelID  string `json:"tunnelId"`
+	Eligible  bool   `json:"eligible"`
+	IsPrimary bool   `json:"isPrimary"`
+	LiveConns int64  `json:"liveConns"`
+}
+
+// GroupStatus is one group's live state: its spec plus its members in join order.
+type GroupStatus struct {
+	Spec    GroupSpec           `json:"spec"`
+	Members []GroupMemberStatus `json:"members"`
+}
+
+// groupStatuses snapshots every group's live state on the actor goroutine — reading
+// per-member eligibility and load without racing the pick (which reads the same
+// atomics off-actor). Sorted by group ID for a stable GUI list.
+func (a *actor) groupStatuses() []GroupStatus {
+	var out []GroupStatus
+	a.do(func() {
+		for _, gl := range a.groupListeners {
+			gs := GroupStatus{Spec: gl.spec}
+			primaryTaken := false
+			for _, m := range *gl.snap.Load() {
+				el := eligible(m)
+				isPrimary := gl.spec.Policy == PolicyStandby && el && !primaryTaken
+				if isPrimary {
+					primaryTaken = true
+				}
+				gs.Members = append(gs.Members, GroupMemberStatus{
+					AgentID:   m.sess.agentID,
+					TunnelID:  m.tunnelID,
+					Eligible:  el,
+					IsPrimary: isPrimary,
+					LiveConns: m.liveConns.Load(),
+				})
+			}
+			out = append(out, gs)
+		}
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].Spec.ID < out[j].Spec.ID })
+	return out
+}
+
 // eligible reports whether a member can take a new player right now: it has a live
 // session, neither side has paused its tunnel, and the agent has reported the local
 // backend UP. The positive-health requirement is a deliberate divergence from the
