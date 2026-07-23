@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 	"testing"
+	"time"
 
 	"proxyforward/internal/config"
 	"proxyforward/internal/control"
@@ -283,6 +284,36 @@ func TestGroupPortConflictRejected(t *testing.T) {
 	}
 	if portIsFree(port2) {
 		t.Fatalf("group socket not bound on the converted port %d", port2)
+	}
+}
+
+// TestGroupRemovalDrainsInFlightLegs: DeleteGroup closes the shared socket AND drains
+// the group's in-flight player legs (closing the tracked client conn unwinds the data
+// leg), so removal leaves nothing running against a group that no longer exists. Here
+// the tracked conn stands in for a live player leg (handleGroupClient populates it for
+// real in the routing phase). (groups)
+func TestGroupRemovalDrainsInFlightLegs(t *testing.T) {
+	f := newGroupFixture(t)
+	port := freePort(t)
+	if err := f.g.SetGroup(GroupSpec{ID: "grp_a", PublicPort: port, Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	player, gatewaySide := net.Pipe()
+	defer player.Close()
+	// Register the gateway-held player leg as in-flight on the group.
+	f.a.do(func() { f.a.groupListeners["grp_a"].conns.Store("conn1", gatewaySide) })
+
+	if !f.g.DeleteGroup("grp_a") {
+		t.Fatal("DeleteGroup should report the group was found")
+	}
+	// The socket is closed (port free) and the in-flight leg was drained (a write to
+	// the drained end fails).
+	if !portIsFree(port) {
+		t.Fatalf("group socket still bound after DeleteGroup on port %d", port)
+	}
+	gatewaySide.SetWriteDeadline(time.Now().Add(time.Second))
+	if _, err := gatewaySide.Write([]byte("x")); err == nil {
+		t.Fatal("in-flight player leg was not drained on DeleteGroup")
 	}
 }
 
