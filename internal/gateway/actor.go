@@ -214,6 +214,13 @@ type bindPolicy struct {
 // send an operator hunting for a process that does not exist.
 var errTooManyListeners = fmt.Errorf("this agent already holds the most public listeners one agent may have")
 
+// errGroupPortInUse is a group bind refusing a port held by a listener the group
+// is not allowed to displace — a non-member solo tunnel or another group. Port
+// conflict is resolved by rejection, never by stealing a live listener, so an
+// accepted group always has its socket up and no port is silently taken from its
+// owner. A sentinel so Gateway.SetGroup can roll back its store write on this alone.
+var errGroupPortInUse = fmt.Errorf("the group's public port is already in use by another listener")
+
 // pauseSet is one side's pause bits: the tunnels it paused, or everything.
 // Immutable once built; swapped whole behind atomics so off-actor readers
 // never see a partial update. nil means nothing paused.
@@ -342,10 +349,14 @@ func (a *actor) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			// Shutdown: evict every agent, then drain all splices. clientWG is
-			// global; it is waited only here, never inside a per-agent evict.
+			// Shutdown: evict every agent and close every group socket, then drain
+			// all splices. clientWG is global; it is waited only here, never inside a
+			// per-agent evict or a group unbind.
 			for _, sess := range snapshotSessions(a.agents) {
 				a.evict(sess, "gateway shutting down")
+			}
+			for _, id := range a.groupIDs() {
+				a.unbindGroup(id)
 			}
 			a.clientWG.Wait()
 			return
@@ -843,6 +854,98 @@ func (a *actor) acceptClients(pl *publicListener, handle func(*publicListener, n
 		go func() {
 			defer a.clientWG.Done()
 			handle(pl, conn)
+		}()
+	}
+}
+
+// bindGroup binds a group's shared public socket, or updates an already-bound
+// group's spec in place. Runs on the actor goroutine. The socket lives for the
+// group's config lifetime (SetGroup → DeleteGroup), not per-member, so an
+// empty-but-configured group and an empty-after-drain one behave identically (both
+// serve the offline responder). movable names the (agentID, tunnelID) solo listeners
+// this update is converting into the group — they may be torn down to free the port;
+// any OTHER holder means rejection (errGroupPortInUse), so no live listener is ever
+// stolen and no socket-less group is created. Groups are TCP-only this iteration.
+func (a *actor) bindGroup(spec GroupSpec, movable map[agentTun]struct{}, bindAddr string, handle func(*groupListener, net.Conn)) error {
+	if gl, ok := a.groupListeners[spec.ID]; ok && listenerPort(gl.ln) == spec.PublicPort {
+		gl.spec = spec // same port: keep the socket and members, refresh policy/name/motd
+		return nil
+	}
+	// The group needs spec.PublicPort. If a solo listener being moved into this group
+	// holds it, tear that one down first (the "convert my server into a group" flow);
+	// any other holder is a rejection, resolved before we touch the socket.
+	if holder, tunnelID := a.portHolder(spec.PublicPort, config.TunnelTCP); holder != nil {
+		if _, ok := movable[agentTun{AgentID: holder.agentID, TunnelID: tunnelID}]; !ok {
+			return errGroupPortInUse
+		}
+		a.unbindLocked(holder, tunnelID) // waits its accept loop: the port is free after
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(bindAddr, strconv.Itoa(spec.PublicPort)))
+	if err != nil {
+		// Another group or an outside process holds it (portHolder only sees solo
+		// listeners). Reject rather than leave a socket-less group.
+		return fmt.Errorf("%w: %v", errGroupPortInUse, err)
+	}
+	if gl, ok := a.groupListeners[spec.ID]; ok {
+		// A port change on an existing group: swap the socket but keep membership,
+		// ordinals, and the snapshot so live members are not disturbed by an edit.
+		gl.ln.Close()
+		<-gl.done
+		gl.ln = ln
+		gl.done = make(chan struct{})
+		gl.spec = spec
+		go a.acceptGroupClients(gl, handle)
+		return nil
+	}
+	gl := &groupListener{spec: spec, ln: ln, done: make(chan struct{}), members: make(map[agentTun]*groupMember)}
+	gl.rebuildSnap() // an empty snapshot, so the pick always has a slice to load
+	a.groupListeners[spec.ID] = gl
+	go a.acceptGroupClients(gl, handle)
+	return nil
+}
+
+// groupIDs snapshots the configured group IDs so a caller can unbind each without
+// mutating the map mid-range (unbindGroup deletes from it). Actor goroutine only.
+func (a *actor) groupIDs() []string {
+	out := make([]string, 0, len(a.groupListeners))
+	for id := range a.groupListeners {
+		out = append(out, id)
+	}
+	return out
+}
+
+// unbindGroup closes a group's socket (waiting its accept loop for the group
+// ghost-listener guarantee — a rebound group port is provably free) and drains its
+// in-flight player legs by closing each tracked client conn, which unwinds the data
+// leg under every transport. Runs on the actor goroutine.
+func (a *actor) unbindGroup(id string) {
+	gl, ok := a.groupListeners[id]
+	if !ok {
+		return
+	}
+	gl.ln.Close()
+	<-gl.done // the port is free before we move on
+	gl.conns.Range(func(_, v any) bool {
+		v.(net.Conn).Close()
+		return true
+	})
+	delete(a.groupListeners, id)
+}
+
+// acceptGroupClients is a group's single accept loop (not on the actor goroutine);
+// it closes done on exit — unbindGroup blocks on it. Mirrors acceptClients: only a
+// closed listener stops it, and every accepted conn rides clientWG.
+func (a *actor) acceptGroupClients(gl *groupListener, handle func(*groupListener, net.Conn)) {
+	defer close(gl.done)
+	for {
+		conn, err := gl.ln.Accept()
+		if err != nil {
+			return // listener closed (DeleteGroup, port change, or shutdown)
+		}
+		a.clientWG.Add(1)
+		go func() {
+			defer a.clientWG.Done()
+			handle(gl, conn)
 		}()
 	}
 }

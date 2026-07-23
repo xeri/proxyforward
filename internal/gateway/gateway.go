@@ -229,6 +229,9 @@ func (g *Gateway) Start(ctx context.Context) error {
 		defer g.wg.Done()
 		g.acceptControl(runCtx)
 	}()
+	// Bind the operator's configured groups before any agent connects, so each
+	// group claims its fixed port ahead of the solo tunnels that reassign around it.
+	g.bindConfiguredGroups()
 	if g.cfg.Gateway.QUICEnabled {
 		// A QUIC bind failure must never take the gateway down — TCP transports
 		// still serve every agent. Log and carry on with QUIC disabled.
@@ -722,6 +725,104 @@ func (g *Gateway) Tunnels() []TunnelSnapshot {
 		return nil // Start not called yet (status polled early)
 	}
 	return a.tunnels()
+}
+
+// ListGroups returns every configured group (nil before Start).
+func (g *Gateway) ListGroups() []GroupSpec {
+	if g.agents == nil {
+		return nil
+	}
+	return g.agents.Groups()
+}
+
+// SetGroup creates or updates a group and binds its shared public socket.
+// Arbitration, not consent: the gateway decides grouping and the shared port and
+// applies immediately, never a member veto (consistent with "the gateway decides
+// ports"). The store write comes first (so the bind sees the new membership rules),
+// then the actor binds; if the bind is rejected — the port is held by a listener the
+// group may not displace — the store write is rolled back to its prior state, so an
+// accepted group always has its socket up rather than a dead port with no explanation.
+func (g *Gateway) SetGroup(spec GroupSpec) error {
+	if g.agents == nil {
+		return fmt.Errorf("gateway not started")
+	}
+	a := g.act()
+	if a == nil {
+		return fmt.Errorf("gateway is still starting")
+	}
+	prev, existed := g.groupByID(spec.ID)
+	if err := g.agents.SetGroup(spec); err != nil {
+		return err
+	}
+	movable := g.movableInto(spec.ID)
+	var bindErr error
+	a.do(func() { bindErr = a.bindGroup(spec, movable, g.cfg.Gateway.BindAddr, g.handleGroupClient) })
+	if bindErr != nil {
+		if existed {
+			_ = g.agents.SetGroup(prev) // restore the working spec; the socket kept its old port
+		} else {
+			g.agents.DeleteGroup(spec.ID)
+		}
+		return bindErr
+	}
+	return nil
+}
+
+// DeleteGroup tears down a group: the actor closes the shared socket and drains its
+// in-flight player legs, then the store forgets the group. Members' tags survive in
+// their DesiredTunnels, so an untagged tunnel reverts to a solo listener on its next
+// reconcile. Reports whether the group existed.
+func (g *Gateway) DeleteGroup(id string) bool {
+	if g.agents == nil {
+		return false
+	}
+	if a := g.act(); a != nil {
+		a.do(func() { a.unbindGroup(id) })
+	}
+	return g.agents.DeleteGroup(id)
+}
+
+// groupByID looks up a stored group by ID (before-mutation snapshot for rollback).
+func (g *Gateway) groupByID(id string) (GroupSpec, bool) {
+	for _, gs := range g.agents.Groups() {
+		if gs.ID == id {
+			return gs, true
+		}
+	}
+	return GroupSpec{}, false
+}
+
+// movableInto returns the (agentID, tunnelID) tunnels currently tagged into groupID —
+// the solo listeners a bind may tear down to free the group's port (the "convert my
+// server into a group" flow). Any other holder of the port is a rejection.
+func (g *Gateway) movableInto(groupID string) map[agentTun]struct{} {
+	out := map[agentTun]struct{}{}
+	for _, r := range g.agents.List() {
+		for _, t := range r.DesiredTunnels {
+			if t.GroupID == groupID {
+				out[agentTun{AgentID: r.AgentID, TunnelID: t.ID}] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
+// bindConfiguredGroups binds every stored group's shared socket at startup, before
+// any agent connects — so a group claims its operator-intended fixed port first and
+// solo tunnels reassign around it (group priority at startup, no runtime stealing).
+func (g *Gateway) bindConfiguredGroups() {
+	a := g.act()
+	if a == nil {
+		return
+	}
+	for _, spec := range g.agents.Groups() {
+		movable := g.movableInto(spec.ID)
+		var err error
+		a.do(func() { err = a.bindGroup(spec, movable, g.cfg.Gateway.BindAddr, g.handleGroupClient) })
+		if err != nil {
+			g.logger.Error("group bind at startup failed", "group", spec.ID, "port", spec.PublicPort, "err", err)
+		}
+	}
 }
 
 // Events returns the notable auto-fixes/conflicts (port reassignment, suspected
@@ -2103,6 +2204,16 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	if err := relay.Splice(client, leg, entry.Counters, opts); err != nil {
 		sess.logger.Debug("splice ended with error", "client", clientConn.RemoteAddr().String(), "err", err)
 	}
+}
+
+// handleGroupClient runs per accepted group connection: pick an eligible member and
+// splice the player through its session's existing data plane. Phase 4 fills in the
+// member pick, least-connections, bounded re-pick, and RTT/mcsniff plumbing; until
+// then a group answers its offline responder so the socket-lifecycle machinery can be
+// exercised without a live member.
+func (g *Gateway) handleGroupClient(gl *groupListener, clientConn net.Conn) {
+	defer clientConn.Close()
+	g.serveOffline(clientConn, control.TunnelSpec{OfflineMOTD: gl.spec.OfflineMOTD})
 }
 
 // backendDown reports whether the agent has told us this tunnel's local server
