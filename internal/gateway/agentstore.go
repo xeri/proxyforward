@@ -41,6 +41,14 @@ var (
 	ErrAgentIDCollision = errors.New("this agent's derived id collides with an enrolled agent — regenerate its identity key and re-pair")
 )
 
+// Group-config validation failures, surfaced to the operator who created the group.
+var (
+	ErrBadGroupSpec           = errors.New("invalid group")
+	ErrGroupCapReached        = fmt.Errorf("too many groups (max %d)", MaxGroups)
+	ErrTooManyMembers         = fmt.Errorf("too many members in one group (max %d)", MaxMembersPerGroup)
+	ErrDuplicateTunnelInGroup = errors.New("an agent may tag only one tunnel into a group")
+)
+
 // Scope restricts which public ports and tunnel IDs an agent may bind. An empty
 // list means "any" — the permissive default that preserves pre-scope behavior.
 type Scope struct {
@@ -147,6 +155,7 @@ const inviteRetention = 7 * 24 * time.Hour
 type storeFile struct {
 	Agents []AgentRecord          `json:"agents"`
 	Nonces map[string]enrollNonce `json:"nonces"`
+	Groups []GroupSpec            `json:"groups,omitempty"`
 }
 
 // AgentStore is safe for concurrent use.
@@ -155,6 +164,10 @@ type AgentStore struct {
 	mu     sync.Mutex
 	agents map[string]AgentRecord // key: hex(pubkey) — the canonical identity
 	nonces map[string]enrollNonce // key: ticket nonce
+	// groups is the operator's group definitions. A slice, not a map, because the
+	// set is tiny (MaxGroups) and callers want a stable order; upsert/delete are by
+	// ID via groupIndex. Persisted whole alongside agents and nonces.
+	groups []GroupSpec
 }
 
 // LoadAgentStore reads the allowlist under dir, returning an empty store if none
@@ -182,12 +195,13 @@ func LoadAgentStore(dir string) (*AgentStore, error) {
 	if f.Nonces != nil {
 		s.nonces = f.Nonces
 	}
+	s.groups = f.Groups
 	return s, nil
 }
 
 // save persists the store atomically. The caller must hold s.mu.
 func (s *AgentStore) save() error {
-	f := storeFile{Nonces: s.nonces}
+	f := storeFile{Nonces: s.nonces, Groups: s.groups}
 	for _, r := range s.agents {
 		f.Agents = append(f.Agents, r)
 	}
@@ -415,6 +429,98 @@ func (s *AgentStore) List() []AgentRecord {
 		out = append(out, r)
 	}
 	return out
+}
+
+// Groups returns a snapshot of every configured group, in stored order.
+func (s *AgentStore) Groups() []GroupSpec {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]GroupSpec(nil), s.groups...)
+}
+
+// SetGroup upserts a group by ID after validating the spec, the group cap, and the
+// membership rules over the current tags. Persists atomically. Grouping is
+// arbitration — the gateway decides it — so this never consults a member; the
+// caller (Gateway.SetGroup) binds the shared socket and rolls this write back if the
+// bind is rejected, so an accepted group always has its port up.
+func (s *AgentStore) SetGroup(spec GroupSpec) error {
+	if spec.ID == "" || spec.PublicPort <= 0 || spec.PublicPort > 65535 {
+		return fmt.Errorf("%w: an id and a valid public port are required", ErrBadGroupSpec)
+	}
+	if spec.Proto != GroupProtoTCP {
+		return fmt.Errorf("%w: only tcp groups are supported this iteration", ErrBadGroupSpec)
+	}
+	if !validPolicy(spec.Policy) {
+		return fmt.Errorf("%w: policy must be %q or %q", ErrBadGroupSpec, PolicySpread, PolicyStandby)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// The cap counts groups after accounting for an in-place update of an existing
+	// ID, so re-saving a group at the cap is never refused.
+	if _, existing := s.groupIndex(spec.ID); !existing && len(s.groups) >= MaxGroups {
+		return ErrGroupCapReached
+	}
+	if err := s.validateMembershipLocked(spec.ID); err != nil {
+		return err
+	}
+	if i, ok := s.groupIndex(spec.ID); ok {
+		s.groups[i] = spec
+	} else {
+		s.groups = append(s.groups, spec)
+	}
+	return s.save()
+}
+
+// validateMembershipLocked enforces one-tunnel-per-agent-per-group and the
+// membership cap over the tunnels currently tagged into groupID. Member identity is
+// (agentID, tunnelID), so an agent may still contribute distinct tunnels to distinct
+// groups — only two tunnels of one agent into the *same* group is rejected. Caller
+// holds s.mu.
+func (s *AgentStore) validateMembershipLocked(groupID string) error {
+	seenAgent := make(map[string]struct{})
+	members := 0
+	for _, r := range s.agents {
+		for _, t := range r.DesiredTunnels {
+			if t.GroupID != groupID {
+				continue
+			}
+			if _, dup := seenAgent[r.AgentID]; dup {
+				return fmt.Errorf("%w: agent %s tags two tunnels into %s", ErrDuplicateTunnelInGroup, r.AgentID, groupID)
+			}
+			seenAgent[r.AgentID] = struct{}{}
+			members++
+		}
+	}
+	if members > MaxMembersPerGroup {
+		return ErrTooManyMembers
+	}
+	return nil
+}
+
+// DeleteGroup removes a group by ID, reporting whether it existed. Members' tags are
+// left in DesiredTunnels: an untagged tunnel reverts to a solo listener on the next
+// reconcile. The caller tears the shared socket down separately (lifecycle is the
+// actor's).
+func (s *AgentStore) DeleteGroup(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i, ok := s.groupIndex(id)
+	if !ok {
+		return false
+	}
+	s.groups = append(s.groups[:i], s.groups[i+1:]...)
+	_ = s.save()
+	return true
+}
+
+// groupIndex finds a group's slice index by ID. Caller holds s.mu.
+func (s *AgentStore) groupIndex(id string) (int, bool) {
+	for i := range s.groups {
+		if s.groups[i].ID == id {
+			return i, true
+		}
+	}
+	return -1, false
 }
 
 // atomicWriteFile writes data to path via a temp file + rename, retrying the rename

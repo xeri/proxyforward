@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -266,6 +267,118 @@ func TestInvitesListAndRevoke(t *testing.T) {
 	}
 	if _, ok := s.Lookup(pub(2)); !ok {
 		t.Fatal("revoking the invite must not touch the agent it enrolled")
+	}
+}
+
+// seedAgent white-box inserts an agent record with the given tagged tunnels, so
+// the group-validation tests can build membership without ticket ceremony.
+func seedAgent(s *AgentStore, agentID string, tunnels ...control.TunnelSpec) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agents[agentID] = AgentRecord{AgentID: agentID, DesiredTunnels: tunnels}
+}
+
+// TestSetGroupAndList: a group is stored, listed, and survives a reload. (groups)
+func TestSetGroupAndList(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := LoadAgentStore(dir)
+	if err := s.SetGroup(GroupSpec{ID: "grp_a", Name: "A", PublicPort: 25565, Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	if got := s.Groups(); len(got) != 1 || got[0].ID != "grp_a" || got[0].Policy != PolicySpread {
+		t.Fatalf("Groups() = %+v", got)
+	}
+	// Upsert by ID replaces in place rather than duplicating.
+	if err := s.SetGroup(GroupSpec{ID: "grp_a", Name: "A2", PublicPort: 25566, Proto: "tcp", Policy: PolicyStandby}); err != nil {
+		t.Fatalf("SetGroup upsert: %v", err)
+	}
+	if got := s.Groups(); len(got) != 1 || got[0].Name != "A2" || got[0].PublicPort != 25566 {
+		t.Fatalf("upsert did not replace in place: %+v", got)
+	}
+	// Persists across a reload.
+	s2, _ := LoadAgentStore(dir)
+	if got := s2.Groups(); len(got) != 1 || got[0].ID != "grp_a" {
+		t.Fatalf("group did not persist: %+v", got)
+	}
+	// DeleteGroup removes it and reports found/not-found.
+	if !s2.DeleteGroup("grp_a") {
+		t.Fatal("DeleteGroup should report the group was found")
+	}
+	if s2.DeleteGroup("grp_a") {
+		t.Fatal("deleting twice should report not-found")
+	}
+	if len(s2.Groups()) != 0 {
+		t.Fatalf("group not removed: %+v", s2.Groups())
+	}
+}
+
+// TestSetGroupRejectsBadSpec: a group needs an id, a valid port, tcp, and a known
+// policy. (groups)
+func TestSetGroupRejectsBadSpec(t *testing.T) {
+	s, _ := LoadAgentStore(t.TempDir())
+	bad := map[string]GroupSpec{
+		"no id":      {Name: "x", PublicPort: 25565, Proto: "tcp", Policy: PolicySpread},
+		"no port":    {ID: "grp_a", Proto: "tcp", Policy: PolicySpread},
+		"bad port":   {ID: "grp_a", PublicPort: 70000, Proto: "tcp", Policy: PolicySpread},
+		"bad proto":  {ID: "grp_a", PublicPort: 25565, Proto: "udp", Policy: PolicySpread},
+		"bad policy": {ID: "grp_a", PublicPort: 25565, Proto: "tcp", Policy: "random"},
+	}
+	for name, spec := range bad {
+		if err := s.SetGroup(spec); !errors.Is(err, ErrBadGroupSpec) {
+			t.Errorf("%s: want ErrBadGroupSpec, got %v", name, err)
+		}
+	}
+	if len(s.Groups()) != 0 {
+		t.Fatalf("a rejected spec must not be stored: %+v", s.Groups())
+	}
+}
+
+// TestGroupCapsEnforced: MaxGroups and MaxMembersPerGroup are rejected at
+// validation, where the operator creates the membership. (groups)
+func TestGroupCapsEnforced(t *testing.T) {
+	s, _ := LoadAgentStore(t.TempDir())
+	for i := 0; i < MaxGroups; i++ {
+		if err := s.SetGroup(GroupSpec{ID: fmt.Sprintf("grp_%d", i), PublicPort: 30000 + i, Proto: "tcp", Policy: PolicyStandby}); err != nil {
+			t.Fatalf("group %d: %v", i, err)
+		}
+	}
+	if err := s.SetGroup(GroupSpec{ID: "grp_over", PublicPort: 40000, Proto: "tcp", Policy: PolicyStandby}); !errors.Is(err, ErrGroupCapReached) {
+		t.Fatalf("want ErrGroupCapReached, got %v", err)
+	}
+	// Updating an existing group in place never trips the cap.
+	if err := s.SetGroup(GroupSpec{ID: "grp_0", PublicPort: 30000, Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("in-place update at the cap must succeed: %v", err)
+	}
+
+	// Membership cap: MaxMembersPerGroup+1 agents each contributing one tunnel.
+	s2, _ := LoadAgentStore(t.TempDir())
+	for i := 0; i <= MaxMembersPerGroup; i++ {
+		seedAgent(s2, fmt.Sprintf("agt_%d", i), control.TunnelSpec{ID: fmt.Sprintf("t%d", i), GroupID: "grp_big"})
+	}
+	if err := s2.SetGroup(GroupSpec{ID: "grp_big", PublicPort: 25565, Proto: "tcp", Policy: PolicySpread}); !errors.Is(err, ErrTooManyMembers) {
+		t.Fatalf("want ErrTooManyMembers, got %v", err)
+	}
+}
+
+// TestGroupDuplicateTunnelRejected: two of one agent's tunnels tagged into one
+// group is rejected — never a silent overwrite. Member identity is
+// (agentID, tunnelID), so an agent may still contribute to distinct groups. (groups)
+func TestGroupDuplicateTunnelRejected(t *testing.T) {
+	s, _ := LoadAgentStore(t.TempDir())
+	seedAgent(s, "agt_x",
+		control.TunnelSpec{ID: "t1", GroupID: "grp_a"},
+		control.TunnelSpec{ID: "t2", GroupID: "grp_a"},
+	)
+	if err := s.SetGroup(GroupSpec{ID: "grp_a", PublicPort: 25565, Proto: "tcp", Policy: PolicySpread}); !errors.Is(err, ErrDuplicateTunnelInGroup) {
+		t.Fatalf("want ErrDuplicateTunnelInGroup, got %v", err)
+	}
+	// One tunnel per group each is fine, even from the same agent into distinct groups.
+	seedAgent(s, "agt_y",
+		control.TunnelSpec{ID: "u1", GroupID: "grp_b"},
+		control.TunnelSpec{ID: "u2", GroupID: "grp_c"},
+	)
+	if err := s.SetGroup(GroupSpec{ID: "grp_b", PublicPort: 25566, Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("distinct-group membership must be allowed: %v", err)
 	}
 }
 
