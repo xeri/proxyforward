@@ -162,13 +162,33 @@ func TestTunnelSpecWireBackCompat(t *testing.T) {
 		}
 	}
 
-	// A legacy frame (no bandwidth fields) decodes with both zero.
+	// An untagged spec must not put the group key on the wire either — a solo
+	// tunnel's frame stays byte-identical to a legacy peer's.
+	if strings.Contains(string(b), "groupId") {
+		t.Errorf("untagged TunnelSpec.GroupID leaked onto the wire: %s", b)
+	}
+
+	// A legacy frame (no bandwidth or group fields) decodes with all zero.
 	var got control.TunnelSpec
 	if err := json.Unmarshal([]byte(`{"id":"t1","name":"web","type":"tcp","publicPort":25565}`), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.BandwidthLimitMbps != 0 || got.BandwidthLimitScope != "" {
-		t.Errorf("legacy frame produced non-zero bandwidth fields: %+v", got)
+	if got.BandwidthLimitMbps != 0 || got.BandwidthLimitScope != "" || got.GroupID != "" {
+		t.Errorf("legacy frame produced non-zero additive fields: %+v", got)
+	}
+
+	// A group tag round-trips and appears on the wire.
+	tagged := control.TunnelSpec{ID: "t1", Name: "web", Type: "tcp", GroupID: "grp_a"}
+	bt, _ := json.Marshal(tagged)
+	if !strings.Contains(string(bt), `"groupId":"grp_a"`) {
+		t.Errorf("set TunnelSpec.GroupID missing from the wire: %s", bt)
+	}
+	var gt control.TunnelSpec
+	if err := json.Unmarshal(bt, &gt); err != nil {
+		t.Fatal(err)
+	}
+	if gt.GroupID != "grp_a" {
+		t.Errorf("TunnelSpec.GroupID round-trip failed: %+v", gt)
 	}
 
 	// A set cap round-trips and appears on the wire.

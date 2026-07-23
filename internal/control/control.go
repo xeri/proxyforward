@@ -318,6 +318,11 @@ type TunnelSpec struct {
 	// BandwidthLimitScope selects what the cap applies to (combined | per-direction
 	// | per-connection); "" = combined, and a legacy peer sends nothing.
 	BandwidthLimitScope string `json:"bandwidthLimitScope,omitempty"`
+	// GroupID, when set, tags this tunnel into a gateway-side group: the gateway
+	// binds it behind the group's shared listener instead of its own PublicPort
+	// (which is ignored while tagged, reclaimed on untag). Operator-assigned on the
+	// gateway's DesiredTunnels; omitempty keeps frames to legacy peers byte-identical.
+	GroupID string `json:"groupId,omitempty"`
 }
 
 type Register struct {
