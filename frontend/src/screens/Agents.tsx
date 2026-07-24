@@ -5,6 +5,7 @@ import {
   RevokeAgent, RevokeInvite, SetAgentScope,
 } from '../../wailsjs/go/app/App'
 import {app, control, engine, gateway} from '../../wailsjs/go/models'
+import {GroupsPanel} from '../components/GroupsPanel'
 import {PauseControl, PausedBadge, pausedLabel} from '../components/PauseControl'
 import {proposalAge, ProposalDiff, specsOf} from '../consent'
 import {BandwidthPanel} from '../components/BandwidthChart'
@@ -383,6 +384,8 @@ export function Agents({status}: {status: UIStatus}) {
           )}
         </>
       )}
+
+      <GroupsPanel status={status} roster={roster ?? []} onChanged={refreshRoster} />
 
       <EventLog events={events} />
     </div>

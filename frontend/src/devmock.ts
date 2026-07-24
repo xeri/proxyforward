@@ -96,6 +96,7 @@ export function installDevMock() {
   const axisUnpaired = params.get('paired') === '0'
   const axisGeo = params.get('geo') || '' // off | empty | error | pending
   const axisFleet = params.get('fleet') || '' // '' (single agent) | multi | old
+  const axisGroups = params.get('groups') || '' // '' (none → empty state) | spread | standby | both
   const axisConflict = params.get('conflict') || '' // '' | port | clone | both
   const axisDeepLink = params.get('deeplink') === '1' // simulate a clicked pxf:// invite
   const axisPending = params.get('pending') || '' // '' | in | out | both
@@ -381,6 +382,39 @@ export function installDevMock() {
   ]
   const agentHealthOf = (jitter: number, loss: number): string =>
     loss > 5 || jitter > 100 ? 'bad' : loss > 1 || jitter > 30 ? 'warn' : 'good'
+
+  // ---- tunnel groups (ListGroups / SaveGroup / DeleteGroup / SetTunnelGroup) ----
+  // A group is {spec, members}; members reference the extraAgents by (agentId,
+  // tunnelId). The CRUD stubs mutate this array so create/edit/delete and tagging
+  // round-trip live against the next ListGroups poll — the real write-then-repoll
+  // loop. Seeded only when &groups asks, so the empty state renders by default.
+  type MockMember = {agentId: string; tunnelId: string; eligible: boolean; isPrimary: boolean; liveConns: number}
+  type MockGroup = {spec: {id: string; name: string; publicPort: number; proto: string; policy: string; offlineMotd: string}; members: MockMember[]}
+  const mockGroups: MockGroup[] = []
+  if (axisGroups === 'spread' || axisGroups === 'both') {
+    mockGroups.push({
+      spec: {id: 'grp_spread01', name: 'Survival cluster', publicPort: 25565, proto: 'tcp', policy: 'spread', offlineMotd: 'Back soon'},
+      members: [
+        {agentId: 'agt_7s9wv2rk4mq8x3dn', tunnelId: 'bb11223344556677889900aabbccddee', eligible: true, isPrimary: false, liveConns: 3},
+        {agentId: 'agt_ah3n7d5q9v2m8k4w', tunnelId: 'ab00cd11ef22ab33cd44ef5566778890', eligible: true, isPrimary: false, liveConns: 2},
+        {agentId: 'agt_cmp4t8vw2j6x9k3r', tunnelId: 'dd33445566778899001122aabbccdd00', eligible: false, isPrimary: false, liveConns: 0},
+      ],
+    })
+  }
+  if (axisGroups === 'standby' || axisGroups === 'both') {
+    mockGroups.push({
+      spec: {id: 'grp_standby1', name: 'Failover pool', publicPort: 25567, proto: 'tcp', policy: 'standby', offlineMotd: ''},
+      members: [
+        {agentId: 'agt_f6x2r9km5v7d3p8t', tunnelId: 'c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f', eligible: true, isPrimary: true, liveConns: 5},
+        {agentId: 'agt_7s9wv2rk4mq8x3dn', tunnelId: 'cc22334455667788990011aabbccddff', eligible: true, isPrimary: false, liveConns: 0},
+      ],
+    })
+  }
+  const reelectPrimary = (g: MockGroup) => {
+    if (g.spec.policy !== 'standby') { g.members.forEach(m => (m.isPrimary = false)); return }
+    let taken = false
+    for (const m of g.members) { m.isPrimary = m.eligible && !taken; if (m.isPrimary) taken = true }
+  }
 
   // ---- agent directory (roster: ListAgents / RenameAgent / SetAgentScope /
   //      RevokeAgent) ----
@@ -1210,6 +1244,43 @@ export function installDevMock() {
           return undefined
         })()
         : Promise.reject(new Error(`agent ${agentId} not found (it may have already disconnected or been removed)`))),
+    // ---- tunnel groups ----
+    // ListGroups is a read; the writes are gated and mutate mockGroups so the card
+    // updates on the next poll — the real write-then-repoll loop.
+    ListGroups: () => ok(state.role === 'gateway' && axisFleet !== 'old' ? mockGroups.map(g => ({spec: {...g.spec}, members: g.members.map(m => ({...m}))})) : []),
+    SaveGroup: (id: string, name: string, publicPort: number, policy: string, offlineMotd: string) => gated(() => {
+      if (id) {
+        const g = mockGroups.find(x => x.spec.id === id)
+        if (!g) throw new Error('that group no longer exists')
+        Object.assign(g.spec, {name, publicPort, policy, offlineMotd})
+        reelectPrimary(g)
+        return id
+      }
+      const newId = 'grp_' + Array.from({length: 8}, () => Math.floor(Math.random() * 16).toString(16)).join('')
+      mockGroups.push({spec: {id: newId, name, publicPort, proto: 'tcp', policy, offlineMotd}, members: []})
+      return newId
+    }),
+    DeleteGroup: (id: string) => gated(() => {
+      const i = mockGroups.findIndex(x => x.spec.id === id)
+      if (i < 0) throw new Error('that group is no longer in the roster — it may have already been removed')
+      mockGroups.splice(i, 1)
+      return undefined
+    }),
+    SetTunnelGroup: (agentId: string, tunnelId: string, groupId: string) => gated(() => {
+      // Untag: drop the member from whatever group holds it, then re-elect.
+      for (const g of mockGroups) {
+        const before = g.members.length
+        g.members = g.members.filter(m => !(m.agentId === agentId && m.tunnelId === tunnelId))
+        if (g.members.length !== before) reelectPrimary(g)
+      }
+      if (groupId) {
+        const g = mockGroups.find(x => x.spec.id === groupId)
+        if (!g) throw new Error('that group no longer exists')
+        g.members.push({agentId, tunnelId, eligible: true, isPrimary: false, liveConns: 0})
+        reelectPrimary(g)
+      }
+      return undefined
+    }),
     // The real app pulls this once on mount to open straight into pairing when
     // launched via a clicked pxf:// link. In browser dev &deeplink=1 simulates one.
     TakePendingDeepLink: () => ok(axisDeepLink
