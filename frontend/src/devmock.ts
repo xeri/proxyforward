@@ -27,6 +27,12 @@
 //                      connected/offline/revoked states render without any axis.
 //                      old: a pre-roster daemon (no agents array) → the Agents
 //                      screen's honest-unavailable state (ListAgents also [])
+//   &groups=spread|standby|both
+//                    — gateway only. Seeds the Agents screen's tunnel-group cards:
+//                      spread → a 3-member least-connections group with one
+//                      ineligible member; standby → a 2-member failover group with
+//                      a primary; both → both. No axis → the groups empty state.
+//                      Pair with &fleet=multi so member agent names resolve.
 //   &conflict=port|clone|both
 //                    — gateway only. Seeds GatewayEvents so the Agents screen's
 //                      conflict callout cards + event log have data: port →

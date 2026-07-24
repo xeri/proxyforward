@@ -71,7 +71,8 @@ export function GroupsPanel({status, roster, onChanged}: {
       </div>
 
       {groups === null ? (
-        <div className="grid grid-cols-1 gap-[var(--grid-gap)] @min-[52rem]:grid-cols-2">
+        <div className="grid grid-cols-1 gap-[var(--grid-gap)] @min-[52rem]:grid-cols-2 @min-[92rem]:grid-cols-3">
+          <Skeleton className="h-40 rounded-[var(--r-card)]" />
           <Skeleton className="h-40 rounded-[var(--r-card)]" />
           <Skeleton className="h-40 rounded-[var(--r-card)]" />
         </div>
@@ -134,7 +135,7 @@ function GroupCard({group, roster, status, onEdit, onChanged}: {
               {spec.name || 'Untitled group'}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <Badge tone="accent">{POLICY_LABEL[spec.policy] ?? spec.policy}</Badge>
+              <Badge>{POLICY_LABEL[spec.policy] ?? spec.policy}</Badge>
               <MonoChip>:{spec.publicPort}</MonoChip>
               <span className="text-caption text-[var(--text-3)]">
                 {eligible} of {members.length} live
