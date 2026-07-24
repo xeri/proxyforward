@@ -1267,7 +1267,7 @@ func (s *session) handleDataStream(st relay.Conn) {
 	// connection for control-link RTT reports; an old gateway sends "" and
 	// EntryByConnKey("") already guards. Passed into Open (never written
 	// post-hoc) because the control goroutine reads ConnKey concurrently.
-	entry, closeEntry := s.agent.Conns.Open(s.agent.cfg.Agent.AgentID, tun.ID, tun.Name, oc.ClientAddr, oc.ConnID, false)
+	entry, closeEntry := s.agent.Conns.Open(s.agent.cfg.Agent.AgentID, tun.ID, tun.Name, "", oc.ClientAddr, oc.ConnID, false)
 	defer closeEntry()
 	// Track the local leg so pause-with-disconnect can drop this tunnel's
 	// players by closing it (either leg closing unwinds the splice).
@@ -1316,7 +1316,7 @@ func (s *session) serveDatagramStream(st relay.Conn, tun *config.Tunnel, oc *con
 	s.agent.logger.Debug("client connected", "tunnel", tun.Name, "client", oc.ClientAddr)
 	// Splice(local, stream): AToB is local→client, so In (client→server) is the
 	// B→A side — inIsAToB=false, exactly as on the TCP path.
-	entry, closeEntry := s.agent.Conns.Open(s.agent.cfg.Agent.AgentID, tun.ID, tun.Name, oc.ClientAddr, oc.ConnID, false)
+	entry, closeEntry := s.agent.Conns.Open(s.agent.cfg.Agent.AgentID, tun.ID, tun.Name, "", oc.ClientAddr, oc.ConnID, false)
 	defer closeEntry()
 	// Track the local leg so pause-with-disconnect can drop this tunnel's
 	// players by closing it (either leg closing unwinds the splice).

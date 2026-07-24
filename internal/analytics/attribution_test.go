@@ -23,8 +23,8 @@ func TestRecorderAttributesSessionsToAgent(t *testing.T) {
 	)
 
 	// Both agents serve tunnel_id "web" — the collision that used to commingle.
-	_, closeA := reg.Open("agentA", "web", "mc", "203.0.113.1:1", "kA", true)
-	_, closeB := reg.Open("agentB", "web", "mc", "203.0.113.2:1", "kB", true)
+	_, closeA := reg.Open("agentA", "web", "mc", "", "203.0.113.1:1", "kA", true)
+	_, closeB := reg.Open("agentB", "web", "mc", "", "203.0.113.2:1", "kB", true)
 	defer closeA()
 	defer closeB()
 	d.Barrier() // flush the async writer

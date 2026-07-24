@@ -2226,7 +2226,7 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	// dial-back to this player, so it must be minted before the data leg.
 	connID := strconv.FormatUint(g.connSeq.Add(1), 10)
 	// Splice(client, stream): AToB is client→server, so inIsAToB=true.
-	entry, closeEntry := g.Conns.Open(sess.agentID, spec.ID, spec.Name, clientConn.RemoteAddr().String(), connID, true)
+	entry, closeEntry := g.Conns.Open(sess.agentID, spec.ID, spec.Name, "", clientConn.RemoteAddr().String(), connID, true)
 	defer closeEntry()
 
 	// Acquire the data leg through the session's data plane. Per-conn transport
@@ -2355,7 +2355,7 @@ func (g *Gateway) spliceThroughMember(gl *groupListener, m *groupMember, connID 
 
 	// The registry entry carries (agentID, tunnelID) and — from Phase 5 — the groupID,
 	// so the GUI can read conntrack for group display while pick keeps its own atomic.
-	entry, closeEntry := g.Conns.Open(sess.agentID, m.tunnelID, gl.spec.Name, clientConn.RemoteAddr().String(), connID, true)
+	entry, closeEntry := g.Conns.Open(sess.agentID, m.tunnelID, gl.spec.Name, gl.spec.ID, clientConn.RemoteAddr().String(), connID, true)
 	defer closeEntry()
 
 	stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))

@@ -5,13 +5,40 @@ import (
 	"testing"
 )
 
+// TestGroupIDPlumbedToSnapshot: a group-routed connection carries its groupID from
+// Open into the snapshot (immutable, read unlocked), so the group card can count real
+// connections per member; a solo connection carries none.
+func TestGroupIDPlumbedToSnapshot(t *testing.T) {
+	r := NewRegistry()
+	grouped, closeG := r.Open("agentA", "t1", "Tunnel", "grp_a", "1.2.3.4:1", "kg", true)
+	defer closeG()
+	solo, closeS := r.Open("agentA", "t2", "Tunnel", "", "1.2.3.4:2", "ks", true)
+	defer closeS()
+	if grouped.GroupID != "grp_a" {
+		t.Errorf("entry GroupID = %q, want grp_a", grouped.GroupID)
+	}
+	if solo.GroupID != "" {
+		t.Errorf("solo entry GroupID = %q, want empty", solo.GroupID)
+	}
+	byID := map[uint64]Snapshot{}
+	for _, s := range r.Snapshot() {
+		byID[s.ID] = s
+	}
+	if got := byID[grouped.ID].GroupID; got != "grp_a" {
+		t.Errorf("snapshot GroupID = %q, want grp_a", got)
+	}
+	if got := byID[solo.ID].GroupID; got != "" {
+		t.Errorf("solo snapshot GroupID = %q, want empty", got)
+	}
+}
+
 func TestOpenSnapshotClose(t *testing.T) {
 	r := NewRegistry()
 
 	// e1: splice's first arg is the client leg (inIsAToB=true).
-	e1, close1 := r.Open("agentA", "t1", "Tunnel", "1.2.3.4:1111", "k1", true)
+	e1, close1 := r.Open("agentA", "t1", "Tunnel", "", "1.2.3.4:1111", "k1", true)
 	// e2: reversed orientation (inIsAToB=false).
-	e2, close2 := r.Open("agentA", "t1", "Tunnel", "1.2.3.4:2222", "", false)
+	e2, close2 := r.Open("agentA", "t1", "Tunnel", "", "1.2.3.4:2222", "", false)
 
 	e1.Counters.AToB.Store(100) // in
 	e1.Counters.BToA.Store(10)  // out
@@ -75,7 +102,7 @@ func TestConnKeySetBeforeHooks(t *testing.T) {
 	var seen string
 	r.SetHooks(func(e *Entry) { seen = e.ConnKey }, nil, nil, nil)
 
-	e, closeEntry := r.Open("", "t1", "Tunnel", "1.2.3.4:1111", "key-42", true)
+	e, closeEntry := r.Open("", "t1", "Tunnel", "", "1.2.3.4:1111", "key-42", true)
 	defer closeEntry()
 	if seen != "key-42" {
 		t.Fatalf("onOpen saw ConnKey %q, want key-42", seen)
@@ -92,9 +119,9 @@ func TestConnKeySetBeforeHooks(t *testing.T) {
 // keyed by UUID or (for UUID-less handshakes) by name.
 func TestPlayerCountDedupes(t *testing.T) {
 	r := NewRegistry()
-	e1, c1 := r.Open("", "t", "T", "1.2.3.4:1", "", true)
-	e2, c2 := r.Open("", "t", "T", "1.2.3.4:2", "", true)
-	e3, c3 := r.Open("", "t", "T", "1.2.3.4:3", "", true)
+	e1, c1 := r.Open("", "t", "T", "", "1.2.3.4:1", "", true)
+	e2, c2 := r.Open("", "t", "T", "", "1.2.3.4:2", "", true)
+	e3, c3 := r.Open("", "t", "T", "", "1.2.3.4:3", "", true)
 	defer c1()
 	defer c2()
 	defer c3()
@@ -119,7 +146,7 @@ func TestTotalsMonotonicDuringClose(t *testing.T) {
 	const n = 500
 	closers := make([]func(), 0, n)
 	for i := 0; i < n; i++ {
-		e, c := r.Open("", "t", "T", "1.2.3.4:1", "", true)
+		e, c := r.Open("", "t", "T", "", "1.2.3.4:1", "", true)
 		e.Counters.AToB.Store(1000)
 		closers = append(closers, c)
 	}

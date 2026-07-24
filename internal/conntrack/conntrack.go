@@ -35,6 +35,11 @@ type Entry struct {
 	TunnelName string
 	ClientAddr string
 	StartedAt  time.Time
+	// GroupID names the tunnel group this connection was routed through, or "" for
+	// a solo tunnel. Member load in the pick is tracked by a per-member atomic on the
+	// hot path; the GUI reads conntrack instead, so an entry must carry its group to
+	// let the group card count real connections. Fixed at Open, read unlocked.
+	GroupID string
 
 	// ConnKey correlates this connection with per-connection reports that
 	// arrive over the control link (e.g. gateway-measured RTT); empty when
@@ -114,6 +119,7 @@ type Snapshot struct {
 	AgentID    string `json:"agentId,omitempty"`
 	TunnelID   string `json:"tunnelId"`
 	TunnelName string `json:"tunnelName"`
+	GroupID    string `json:"groupId,omitempty"`
 	ClientAddr string `json:"clientAddr"`
 	StartedAt  int64  `json:"startedAt"` // unix millis
 	BytesIn    int64  `json:"bytesIn"`
@@ -168,16 +174,18 @@ func (r *Registry) SetHooks(onOpen func(e *Entry), onClose func(e *Entry, bytesI
 
 // Open registers a connection and returns its entry plus a close func to
 // call when the splice ends. agentID is the owning agent ("" on the agent
-// side / single-agent legacy paths). connKey is the control-link correlation
-// id ("" when the transport assigns none) and is fixed here, before the entry
-// is published, so it is never written after another goroutine can see it.
-// inIsAToB declares counter orientation: true when the splice's first
-// argument is the client-facing leg.
-func (r *Registry) Open(agentID, tunnelID, tunnelName, clientAddr, connKey string, inIsAToB bool) (*Entry, func()) {
+// side / single-agent legacy paths). groupID names the tunnel group the
+// connection was routed through ("" for a solo tunnel). connKey is the
+// control-link correlation id ("" when the transport assigns none) and is fixed
+// here, before the entry is published, so it is never written after another
+// goroutine can see it. inIsAToB declares counter orientation: true when the
+// splice's first argument is the client-facing leg.
+func (r *Registry) Open(agentID, tunnelID, tunnelName, groupID, clientAddr, connKey string, inIsAToB bool) (*Entry, func()) {
 	e := &Entry{
 		AgentID:    agentID,
 		TunnelID:   tunnelID,
 		TunnelName: tunnelName,
+		GroupID:    groupID,
 		ClientAddr: clientAddr,
 		ConnKey:    connKey,
 		StartedAt:  time.Now(),
@@ -229,6 +237,7 @@ func (r *Registry) Snapshot() []Snapshot {
 			AgentID:    e.AgentID,
 			TunnelID:   e.TunnelID,
 			TunnelName: e.TunnelName,
+			GroupID:    e.GroupID,
 			ClientAddr: e.ClientAddr,
 			StartedAt:  e.StartedAt.UnixMilli(),
 			BytesIn:    e.bytesIn(),
