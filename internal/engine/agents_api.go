@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"proxyforward/internal/config"
 	"proxyforward/internal/control"
 	"proxyforward/internal/gateway"
 	"proxyforward/internal/link"
@@ -33,6 +34,13 @@ const (
 	OpApproveProposal    = "approve_agent_proposal"
 	OpRejectProposal     = "reject_agent_proposal"
 	OpProposeAgentConfig = "propose_agent_config"
+	// Tunnel-group ops (load-balancing / redundancy): list groups with live member
+	// state, upsert/remove a group, and tag/untag a member's tunnel. Grouping is
+	// arbitration, so a set/delete/tag applies immediately with no member consent.
+	OpListGroups     = "list_groups"
+	OpSetGroup       = "set_group"
+	OpDeleteGroup    = "delete_group"
+	OpSetTunnelGroup = "set_tunnel_group"
 )
 
 // isAgentAdminOp reports whether op is a gateway agent-administration op, so
@@ -41,7 +49,8 @@ func isAgentAdminOp(op string) bool {
 	switch op {
 	case OpListAgents, OpIssuePairing, OpRevokeAgent, OpRenameAgent, OpSetAgentScope, OpGatewayEvents,
 		OpAgentDesiredConfig, OpReclaimPort, OpApproveProposal, OpRejectProposal, OpProposeAgentConfig,
-		OpListInvites, OpRevokeInvite:
+		OpListInvites, OpRevokeInvite,
+		OpListGroups, OpSetGroup, OpDeleteGroup, OpSetTunnelGroup:
 		return true
 	}
 	return false
@@ -179,6 +188,50 @@ func (e *Engine) agentAdminOp(op string, body json.RawMessage) (json.RawMessage,
 			return nil, err
 		}
 		return encodeResult(okResult{true}, e.Gateway.ProposeAgentConfig(q.AgentID, q.Tunnels))
+	case OpListGroups:
+		return encodeResult(e.Gateway.GroupStatuses(), nil)
+	case OpSetGroup:
+		var q struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			PublicPort  int    `json:"publicPort"`
+			Proto       string `json:"proto"`
+			Policy      string `json:"policy"`
+			OfflineMOTD string `json:"offlineMotd"`
+		}
+		if err := decodeBody(body, &q); err != nil {
+			return nil, err
+		}
+		if q.ID == "" {
+			q.ID = "grp_" + config.NewID() // create: mint a fresh id
+		}
+		if q.Proto == "" {
+			q.Proto = gateway.GroupProtoTCP
+		}
+		spec := gateway.GroupSpec{ID: q.ID, Name: q.Name, PublicPort: q.PublicPort, Proto: q.Proto, Policy: q.Policy, OfflineMOTD: q.OfflineMOTD}
+		// Echo the (possibly minted) id so the GUI can select the group it just saved.
+		return encodeResult(struct {
+			ID string `json:"id"`
+		}{q.ID}, e.Gateway.SetGroup(spec))
+	case OpDeleteGroup:
+		var q struct {
+			ID string `json:"id"`
+		}
+		if err := decodeBody(body, &q); err != nil {
+			return nil, err
+		}
+		return encodeResult(okResult{e.Gateway.DeleteGroup(q.ID)}, nil)
+	case OpSetTunnelGroup:
+		var q struct {
+			AgentID  string `json:"agentId"`
+			TunnelID string `json:"tunnelId"`
+			GroupID  string `json:"groupId"`
+		}
+		if err := decodeBody(body, &q); err != nil {
+			return nil, err
+		}
+		ok, err := e.Gateway.SetTunnelGroup(q.AgentID, q.TunnelID, q.GroupID)
+		return encodeResult(okResult{ok}, err)
 	default:
 		return nil, fmt.Errorf("unknown agent admin op %q", op)
 	}

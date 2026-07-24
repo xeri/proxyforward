@@ -1143,6 +1143,7 @@ export namespace control {
 	    minecraftAware?: boolean;
 	    bandwidthLimitMbps?: number;
 	    bandwidthLimitScope?: string;
+	    groupId?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TunnelSpec(source);
@@ -1158,6 +1159,7 @@ export namespace control {
 	        this.minecraftAware = source["minecraftAware"];
 	        this.bandwidthLimitMbps = source["bandwidthLimitMbps"];
 	        this.bandwidthLimitScope = source["bandwidthLimitScope"];
+	        this.groupId = source["groupId"];
 	    }
 	}
 
@@ -1347,6 +1349,80 @@ export namespace gateway {
 	        this.requestedPort = source["requestedPort"];
 	        this.actualPort = source["actualPort"];
 	    }
+	}
+	export class GroupMemberStatus {
+	    agentId: string;
+	    tunnelId: string;
+	    eligible: boolean;
+	    isPrimary: boolean;
+	    liveConns: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new GroupMemberStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agentId = source["agentId"];
+	        this.tunnelId = source["tunnelId"];
+	        this.eligible = source["eligible"];
+	        this.isPrimary = source["isPrimary"];
+	        this.liveConns = source["liveConns"];
+	    }
+	}
+	export class GroupSpec {
+	    id: string;
+	    name: string;
+	    publicPort: number;
+	    proto: string;
+	    policy: string;
+	    offlineMotd?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GroupSpec(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.publicPort = source["publicPort"];
+	        this.proto = source["proto"];
+	        this.policy = source["policy"];
+	        this.offlineMotd = source["offlineMotd"];
+	    }
+	}
+	export class GroupStatus {
+	    spec: GroupSpec;
+	    members: GroupMemberStatus[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GroupStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.spec = this.convertValues(source["spec"], GroupSpec);
+	        this.members = this.convertValues(source["members"], GroupMemberStatus);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

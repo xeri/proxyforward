@@ -31,6 +31,8 @@ export function CreatorAvatar():Promise<string>;
 
 export function CreatorInfo():Promise<Record<string, string>>;
 
+export function DeleteGroup(arg1:string):Promise<void>;
+
 export function ExportDiagnostics():Promise<string>;
 
 export function ExportSetup(arg1:string):Promise<string>;
@@ -58,6 +60,8 @@ export function InstallService():Promise<void>;
 export function IssuePairingCode(arg1:boolean,arg2:number,arg3:Array<number>,arg4:Array<string>,arg5:string):Promise<string>;
 
 export function ListAgents():Promise<Array<gateway.AgentView>>;
+
+export function ListGroups():Promise<Array<gateway.GroupStatus>>;
 
 export function ListInvites():Promise<Array<engine.InviteView>>;
 
@@ -103,6 +107,8 @@ export function RevokeAgent(arg1:string):Promise<void>;
 
 export function RevokeInvite(arg1:string):Promise<void>;
 
+export function SaveGroup(arg1:string,arg2:string,arg3:number,arg4:string,arg5:string):Promise<string>;
+
 export function SaveSettings(arg1:config.Config):Promise<void>;
 
 export function SaveTunnels(arg1:Array<config.Tunnel>):Promise<void>;
@@ -120,6 +126,8 @@ export function SetMinimizeToTray(arg1:boolean):Promise<void>;
 export function SetPause(arg1:string,arg2:string,arg3:boolean,arg4:boolean):Promise<void>;
 
 export function SetTheme(arg1:string):Promise<void>;
+
+export function SetTunnelGroup(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function SetupAgent(arg1:string,arg2:string,arg3:number):Promise<void>;
 

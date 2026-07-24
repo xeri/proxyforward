@@ -42,6 +42,10 @@ export function CreatorInfo() {
   return window['go']['app']['App']['CreatorInfo']();
 }
 
+export function DeleteGroup(arg1) {
+  return window['go']['app']['App']['DeleteGroup'](arg1);
+}
+
 export function ExportDiagnostics() {
   return window['go']['app']['App']['ExportDiagnostics']();
 }
@@ -96,6 +100,10 @@ export function IssuePairingCode(arg1, arg2, arg3, arg4, arg5) {
 
 export function ListAgents() {
   return window['go']['app']['App']['ListAgents']();
+}
+
+export function ListGroups() {
+  return window['go']['app']['App']['ListGroups']();
 }
 
 export function ListInvites() {
@@ -186,6 +194,10 @@ export function RevokeInvite(arg1) {
   return window['go']['app']['App']['RevokeInvite'](arg1);
 }
 
+export function SaveGroup(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['SaveGroup'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function SaveSettings(arg1) {
   return window['go']['app']['App']['SaveSettings'](arg1);
 }
@@ -220,6 +232,10 @@ export function SetPause(arg1, arg2, arg3, arg4) {
 
 export function SetTheme(arg1) {
   return window['go']['app']['App']['SetTheme'](arg1);
+}
+
+export function SetTunnelGroup(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SetTunnelGroup'](arg1, arg2, arg3);
 }
 
 export function SetupAgent(arg1, arg2, arg3) {
