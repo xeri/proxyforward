@@ -395,12 +395,14 @@ function RoleCard({role, title, sub, onClick, onHover}: {
       onClick={() => { onHover(false); onClick() }}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
-      style={{['--hue' as string]: `var(--role-${role})`}}
-      // Hover adds the outer role glow only. It used to re-add the bevel pair as
-      // inset shadows on a .pf-signal surface whose rim ring already carries
-      // them — the exact anti-pattern glass.css warns about, and it specked the
-      // corners on hover at fractional DPI.
-      className="group pf-signal p-5 text-left transition-all duration-300 [transition-timing-function:var(--ease-out)] hover:-translate-y-1 hover:shadow-[0_16px_40px_-16px_color-mix(in_srgb,var(--hue)_40%,transparent)] active:translate-y-0 active:scale-[0.99]"
+      // Quiet trench glass, like every other card the pointer can pick up
+      // (Agents' roster, the player tiles). These were .pf-signal, which put two
+      // pointer-answering surfaces on one screen — DESIGN.md rules 1 and 2, and
+      // a role picker is not live network activity in the first place. The
+      // wizard now uses the bloom frame nowhere: its ceremony is scale and type
+      // (the lockup, "Handshake complete."), which is the sheet's other lever.
+      // The role still reads — the Emblem inside carries its hue.
+      className="group pf-card pf-lift pf-press p-5 text-left"
     >
       <div className="mb-3 inline-flex transition-transform duration-300 group-hover:scale-110">
         <Emblem role={role} fixed size={40} />
