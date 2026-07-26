@@ -18,7 +18,7 @@ func TestHelloWireBackCompat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"hostname", "localIps", "headless"} {
+	for _, f := range []string{"hostname", "localIps", "headless", "pooled", "poolSize"} {
 		if strings.Contains(string(b), f) {
 			t.Errorf("empty Hello.%s leaked onto the wire: %s", f, b)
 		}
@@ -44,6 +44,57 @@ func TestHelloWireBackCompat(t *testing.T) {
 	}
 	if g2.Hostname != "DESKTOP" || len(g2.LocalIPs) != 1 || g2.LocalIPs[0] != "192.168.1.5" || !g2.Headless {
 		t.Errorf("Hello identity round-trip failed: %+v", g2)
+	}
+}
+
+// The connection-pool fields must be invisible to a peer that does not know
+// them: absent from an unpooled frame on both sides, and a grant of 0 (what a
+// legacy gateway effectively says) must decode as "no pool" rather than as a
+// pool of unspecified size.
+func TestPoolFieldsAreInvisibleWithoutThem(t *testing.T) {
+	dataHello := control.Hello{ProtocolVersion: 1, Kind: control.KindData, ConnID: "7"}
+	b, err := json.Marshal(dataHello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "pooled") || strings.Contains(string(b), "poolSize") {
+		t.Errorf("an ordinary dial-back hello carries pool fields: %s", b)
+	}
+	ok, err := json.Marshal(control.HelloOK{ProtocolVersion: 1, SessionGeneration: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(ok), "poolSize") {
+		t.Errorf("a hello_ok without a grant carries poolSize: %s", ok)
+	}
+
+	// A legacy gateway's hello_ok: no grant key at all reads as no pool.
+	var legacy control.HelloOK
+	if err := json.Unmarshal([]byte(`{"protocolVersion":1,"generation":1}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.PoolSize != 0 {
+		t.Errorf("a legacy hello_ok granted a pool of %d", legacy.PoolSize)
+	}
+
+	// And the populated forms round-trip.
+	pooled := control.Hello{Kind: control.KindData, Pooled: true}
+	var gotPooled control.Hello
+	pb, _ := json.Marshal(pooled)
+	if err := json.Unmarshal(pb, &gotPooled); err != nil {
+		t.Fatal(err)
+	}
+	if !gotPooled.Pooled || gotPooled.ConnID != "" {
+		t.Errorf("pooled data hello round-trip: %+v", gotPooled)
+	}
+	req := control.Hello{Kind: control.KindControl, PoolSize: 4}
+	var gotReq control.Hello
+	rb, _ := json.Marshal(req)
+	if err := json.Unmarshal(rb, &gotReq); err != nil {
+		t.Fatal(err)
+	}
+	if gotReq.PoolSize != 4 {
+		t.Errorf("pool request round-trip: %+v", gotReq)
 	}
 }
 

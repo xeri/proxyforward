@@ -98,6 +98,19 @@ const (
 	// had to be withdrawn — the bug the SupportedCapabilities comment warns
 	// about. It is on that list again only because both ends now honor it.
 	CapTunnelUDP = "tunnel-udp"
+	// CapConnPool: the agent keeps a small pool of already-dialled, already-
+	// authenticated KindData connections parked at the gateway, so a joining
+	// player is served on a connection that exists instead of paying a control
+	// round trip plus a TCP and TLS handshake first (dataDialTimeout's whole
+	// budget). Meaningful only alongside CapPerConn — mux and QUIC open a stream
+	// for free, so there is nothing to pool.
+	//
+	// Negotiated by Hello.Pooled/PoolSize (agent's request) and HelloOK.PoolSize
+	// (the gateway's grant, min(request, gateway cap)). The grant is a ceiling by
+	// construction, so the gateway never has to close "extras" and no redial loop
+	// is possible. A peer without the capability keeps the dial-back path
+	// unchanged, and so does a pool that runs dry.
+	CapConnPool = "conn-pool"
 )
 
 // SupportedCapabilities is everything this build implements, both roles. A
@@ -256,6 +269,15 @@ type Hello struct {
 	// notice. Informational, acted on by presence like the identity fields —
 	// not a capability; omitempty keeps legacy frames byte-identical.
 	Headless bool `json:"headless,omitempty"`
+	// Pooled marks a KindData hello as one the agent is parking for later use
+	// rather than one dialled in answer to a specific open_data (CapConnPool).
+	// An explicit bool, not an empty ConnID: "no connection id" already means
+	// several things on this wire, and a pooled connection must be distinguished
+	// from a malformed one. On a KindControl hello, PoolSize is the agent's
+	// requested pool population; the gateway answers with its grant in HelloOK.
+	// Both omitempty — a legacy agent sends neither and gets today's behaviour.
+	Pooled   bool `json:"pooled,omitempty"`
+	PoolSize int  `json:"poolSize,omitempty"`
 }
 
 type HelloOK struct {
@@ -289,6 +311,14 @@ type HelloOK struct {
 	// Headless mirrors Hello.Headless for the gateway's side: no GUI may be
 	// watching for a consent proposal. Same rules — presence-driven, omitempty.
 	Headless bool `json:"headless,omitempty"`
+	// PoolSize is the gateway's grant for CapConnPool: how many parked data
+	// connections this agent may keep, min(Hello.PoolSize, the gateway's own
+	// cap). Because the grant can only shrink the request, the agent never
+	// parks more than the gateway will hold — so the gateway never closes an
+	// "extra" and the agent never loops redialling one. 0 (or an absent field)
+	// means no pooling, which is also what a legacy gateway says by saying
+	// nothing.
+	PoolSize int `json:"poolSize,omitempty"`
 }
 
 type HelloErr struct {
