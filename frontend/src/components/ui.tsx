@@ -288,6 +288,33 @@ export function IconButton({children, onClick, title, variant = 'ghost', disable
   )
 }
 
+/** Pager: the "x–y of z · Previous/Next" row beneath a paged list — the player
+ * wall and the connection history render the same one. The caller owns the
+ * offset (it is usually the query key too); Pager draws nothing when one page
+ * holds everything, so no consumer needs its own "can page" conditional unless
+ * it suppresses paging for another reason. */
+export function Pager({offset, pageSize, total, onOffset, className = ''}: {
+  offset: number
+  pageSize: number
+  total: number
+  onOffset: (next: number) => void
+  /** Padding, for a pager sitting inside a padless card. */
+  className?: string
+}) {
+  if (total <= pageSize) return null
+  return (
+    <div className={`flex items-center justify-between text-xs text-[var(--text-3)] ${className}`}>
+      <span className="tabular-nums">{offset + 1}–{Math.min(offset + pageSize, total)} of {total}</span>
+      <div className="flex gap-1.5">
+        <Button variant="ghost" size="sm" disabled={offset === 0}
+          onClick={() => onOffset(Math.max(0, offset - pageSize))}>Previous</Button>
+        <Button variant="ghost" size="sm" disabled={offset + pageSize >= total}
+          onClick={() => onOffset(offset + pageSize)}>Next</Button>
+      </div>
+    </div>
+  )
+}
+
 export function Field({label, hint, children}: {label: string; hint?: ReactNode; children: ReactNode}) {
   return (
     <label className="block">

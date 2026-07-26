@@ -9,7 +9,7 @@ import {GeoRank} from '../components/GeoRank'
 import {NumberTicker} from '../components/NumberTicker'
 import {IconActivity, IconClock, IconConnections, IconGlobe} from '../components/icons'
 import {
-  Badge, Button, Card, CopyIcon, EmptyState, LiveDot, Modal, PageHeader, PanelTitle, Pill, SegmentedControl, Skeleton, StatTile,
+  Badge, Card, CopyIcon, EmptyState, LiveDot, Modal, PageHeader, Pager, PanelTitle, Pill, SegmentedControl, Skeleton, StatTile,
 } from '../components/ui'
 import {
   CountryAgg, PEAK_WEEKS, RANGE_MS, Range, SESSIONS_PAGE_SIZE, SessionMeta, SessionsQuery,
@@ -578,17 +578,7 @@ function ConnectionHistory({tunnels, rangeMs, cc, onClearCc}: {
               hint: cc ? 'Clear the country filter to see every session.' : 'Connections recorded on Minecraft-aware tunnels appear here.',
             }}
           />
-          {total > SESSIONS_PAGE_SIZE && (
-            <div className="flex items-center justify-between px-4 py-2.5 text-xs text-[var(--text-3)]">
-              <span className="tabular-nums">{offset + 1}–{Math.min(offset + SESSIONS_PAGE_SIZE, total)} of {total}</span>
-              <div className="flex gap-1.5">
-                <Button variant="ghost" size="sm" disabled={offset === 0}
-                  onClick={() => setOffset(o => Math.max(0, o - SESSIONS_PAGE_SIZE))}>Previous</Button>
-                <Button variant="ghost" size="sm" disabled={offset + SESSIONS_PAGE_SIZE >= total}
-                  onClick={() => setOffset(o => o + SESSIONS_PAGE_SIZE)}>Next</Button>
-              </div>
-            </div>
-          )}
+          <Pager offset={offset} pageSize={SESSIONS_PAGE_SIZE} total={total} onOffset={setOffset} className="px-4 py-2.5" />
         </>
       )}
       {replay && <SessionReplay session={replay} onClose={() => setReplay(null)} />}

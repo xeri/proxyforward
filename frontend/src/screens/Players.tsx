@@ -6,7 +6,7 @@ import {Column, DataTable} from '../components/DataTable'
 import {GeoRank} from '../components/GeoRank'
 import {IconChevronRight, IconClose, IconPlayers, IconSearch} from '../components/icons'
 import {
-  Badge, Button, Card, CopyIcon, EmptyState, LiveDot, MonoChip, Overline, PageHeader, PanelTitle, Pill, PillGroup, SegmentedControl, Skeleton, TextInput,
+  Badge, Button, Card, CopyIcon, EmptyState, LiveDot, MonoChip, Overline, PageHeader, Pager, PanelTitle, Pill, PillGroup, SegmentedControl, Skeleton, TextInput,
 } from '../components/ui'
 import {useDebounced} from '../hooks'
 import {
@@ -191,17 +191,9 @@ function Wall({status, liveUUIDs, onOpen}: {
                 showData={sort === 'data'} onClick={() => onOpen(p.uuid)} />
             ))}
           </TileGrid>
-          {canPage && (
-            <div className="flex items-center justify-between text-xs text-[var(--text-3)]">
-              <span className="tabular-nums">{offset + 1}–{Math.min(offset + PLAYERS_PAGE_SIZE, total)} of {total}</span>
-              <div className="flex gap-1.5">
-                <Button variant="ghost" size="sm" disabled={offset === 0}
-                  onClick={() => setOffset(o => Math.max(0, o - PLAYERS_PAGE_SIZE))}>Previous</Button>
-                <Button variant="ghost" size="sm" disabled={offset + PLAYERS_PAGE_SIZE >= total}
-                  onClick={() => setOffset(o => o + PLAYERS_PAGE_SIZE)}>Next</Button>
-              </div>
-            </div>
-          )}
+          {/* canPage carries the extra condition Pager can't know: the "online"
+              chip filters client-side, so its page is the whole result. */}
+          {canPage && <Pager offset={offset} pageSize={PLAYERS_PAGE_SIZE} total={total} onOffset={setOffset} />}
         </>
       )}
 
