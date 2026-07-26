@@ -138,6 +138,13 @@ type agentSession struct {
 	// conn close (the ctx cancel unblocks only throttled WaitN and the pending
 	// dial-back wait). Empty under mux transport.
 	dataConns sync.Map
+
+	// pool holds the data connections this agent parked ahead of any player
+	// (control.CapConnPool); nil when pooling was not negotiated, which is what
+	// every legacy peer and every non-per-conn transport gets. Set at admission
+	// and immutable after — the pool has its own lock, and its grant is what the
+	// hello_ok promised.
+	pool *connPool
 }
 
 // setCtrl publishes (or clears, with nil) the control stream for writers.
@@ -179,11 +186,12 @@ func (a *agentSession) session() transport.Session {
 }
 
 // closeAll tears down the underlying conn (which kills the mux, its streams,
-// and every splice riding them) plus every per-conn data connection (whose
-// splices ride dedicated conns, not the mux). Together these drain exactly this
-// agent's connections and none of another's. Under QUIC transport conn is nil —
-// closing the session (a *quic.Conn) is itself the whole drain boundary (all its
-// streams die with it) and dataConns is empty.
+// and every splice riding them) plus every per-conn data connection — those in
+// use, whose splices ride dedicated conns rather than the mux, and those merely
+// parked, which no splice or player would ever close. Together these drain
+// exactly this agent's connections and none of another's. Under QUIC transport
+// conn is nil — closing the session (a *quic.Conn) is itself the whole drain
+// boundary (all its streams die with it), and dataConns and pool are empty.
 func (a *agentSession) closeAll() {
 	if s := a.session(); s != nil {
 		_ = s.Close()
@@ -195,6 +203,7 @@ func (a *agentSession) closeAll() {
 		v.(net.Conn).Close()
 		return true
 	})
+	a.pool.drain()
 }
 
 // bindPolicy is everything the gateway's configuration says about opening a

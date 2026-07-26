@@ -77,7 +77,17 @@ func (pc *pendingConn) take(ctx context.Context, timeout time.Duration) net.Conn
 // waiting for it and hands over the raw, byte-counted conn. Called from the
 // control accept path once the KindData hello authenticates; the conn's
 // pre-auth deadline is cleared here on a match.
+//
+// A hello that says Pooled instead of naming a connID is not answering any
+// player: it is a connection the agent is parking for the next one. It is
+// marked with an explicit flag rather than an absent connID because "no
+// connection id" already means several things on this wire, and a parked
+// connection must never be indistinguishable from a malformed one.
 func (g *Gateway) handleDataConn(conn net.Conn, hello *control.Hello, identity Identity) {
+	if hello.Pooled {
+		g.parkPooledConn(conn, identity)
+		return
+	}
 	if hello.ConnID == "" {
 		conn.Close()
 		return

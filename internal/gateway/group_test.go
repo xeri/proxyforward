@@ -360,7 +360,7 @@ func TestGroupBindsConfiguredGroupsAtStartup(t *testing.T) {
 // exercising the bounded re-pick without a live agent.
 type failDP struct{ calls *atomic.Int64 }
 
-func (d failDP) openFlow(*agentSession, string) (relay.Conn, func(), error) {
+func (d failDP) openFlow(*agentSession, control.OpenConn) (relay.Conn, func(), error) {
 	d.calls.Add(1)
 	return nil, nil, errNoDataLeg
 }
@@ -580,7 +580,7 @@ func legSource(t *testing.T, payloadSize int) (addr string, closeFn func()) {
 // dialDP is a data plane whose legs are plain TCP connections to addr.
 type dialDP struct{ addr string }
 
-func (d dialDP) openFlow(*agentSession, string) (relay.Conn, func(), error) {
+func (d dialDP) openFlow(*agentSession, control.OpenConn) (relay.Conn, func(), error) {
 	c, err := net.DialTimeout("tcp", d.addr, 5*time.Second)
 	if err != nil {
 		return nil, nil, err

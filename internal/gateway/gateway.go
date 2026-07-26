@@ -123,6 +123,10 @@ type Gateway struct {
 	// the actor so the data accept path matches in O(1) without a lifecycle
 	// round-trip.
 	pendingData sync.Map
+	// pooledLegs counts the players served on a connection the agent had already
+	// parked, rather than one dialled back for them. Nothing on the data path
+	// branches on it; it is what proves the pool is doing its job.
+	pooledLegs atomic.Int64
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -1490,6 +1494,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthD
 	okMsg.GatewayID = g.gatewayID
 	okMsg.ConfigSeedNeeded = g.needsConfigSeed(identity, negotiated)
 	okMsg.Headless = g.headless
+	okMsg.PoolSize = sess.pool.granted()
 	if err := control.WriteMsg(conn, control.TypeHelloOK, okMsg); err != nil {
 		logger.Debug("hello_ok write failed", "err", err)
 		conn.Close()
@@ -1578,6 +1583,12 @@ func (g *Gateway) buildAndAdmit(ctx context.Context, conn net.Conn, hello *contr
 	}
 	sess.agentConfigGen.Store(hello.ConfigGeneration)
 	sess.headless = hello.Headless
+	// The pool the agent asked for, clamped to what this gateway will hold. Nil
+	// unless pooling was negotiated, so every other session behaves exactly as
+	// before; the grant goes back in the hello_ok.
+	if grant := poolGrantFor(hello, caps, conn != nil); grant > 0 {
+		sess.pool = newConnPool(grant)
+	}
 	// Seed the gateway's own persisted pause bits before admission, so a
 	// listener bound during register/reconcile is born already paused.
 	if g.agents != nil {
@@ -2236,13 +2247,18 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	entry, closeEntry := g.Conns.Open(sess.agentID, spec.ID, spec.Name, "", clientConn.RemoteAddr().String(), connID, true)
 	defer closeEntry()
 
-	// Acquire the data leg through the session's data plane. Per-conn transport
-	// signals the agent to dial back a dedicated TCP+TLS connection for this
-	// player (no cross-player head-of-line blocking on the gateway↔agent hop);
-	// mux transport opens a stream on the shared session. Either way the leg is a
-	// relay.Conn spliced identically below, and an unavailable leg falls back to
-	// the offline responder.
-	stream, releaseFlow, err := sess.dp.openFlow(sess, connID)
+	// Acquire the data leg through the session's data plane, header and all.
+	// Per-conn transport takes a connection the agent parked in advance, or
+	// signals it to dial back a dedicated TCP+TLS one for this player (no
+	// cross-player head-of-line blocking on the gateway↔agent hop); mux transport
+	// opens a stream on the shared session. Either way the leg is a relay.Conn
+	// spliced identically below, and a leg that cannot be established — including
+	// one whose header will not write — falls back to the offline responder.
+	stream, releaseFlow, err := sess.dp.openFlow(sess, control.OpenConn{
+		TunnelID:   spec.ID,
+		ClientAddr: clientConn.RemoteAddr().String(),
+		ConnID:     connID,
+	})
 	if err != nil {
 		sess.logger.Debug("open data leg failed", "client", clientConn.RemoteAddr().String(), "err", err)
 		if !isUDP {
@@ -2252,17 +2268,6 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	}
 	defer releaseFlow()
 	defer stream.Close()
-
-	_ = stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
-	if err := control.WriteMsg(stream, control.TypeOpenConn, control.OpenConn{
-		TunnelID:   spec.ID,
-		ClientAddr: clientConn.RemoteAddr().String(),
-		ConnID:     connID,
-	}); err != nil {
-		sess.logger.Debug("open_conn write failed", "err", err)
-		return
-	}
-	_ = stream.SetWriteDeadline(time.Time{})
 
 	// Splice(client, leg): AToB is client→server (inbound), BToA is
 	// server→client (outbound). Parent on the session ctx so eviction cancels a
@@ -2342,17 +2347,23 @@ func (g *Gateway) handleGroupClient(gl *groupListener, clientConn net.Conn) {
 }
 
 // spliceThroughMember routes one player through member m: bump its live-connection
-// count, open its data leg through the member session's data plane, send the OpenConn
-// header, and splice. It returns false (without splicing) only when the leg could not
-// be opened, so handleGroupClient re-picks another member; true once the leg is
+// count, open its data leg (header included) through the member session's data
+// plane, and splice. It returns false (without splicing) only when the leg could not
+// be established, so handleGroupClient re-picks another member; true once the leg is
 // established — the splice then runs to completion under this call, and a mid-splice
-// failure drops the player rather than re-picking (its session is committed).
+// failure drops the player rather than re-picking (its session is committed). A
+// member whose header write fails is a member whose leg is broken, so it re-picks
+// too: no byte has reached the player yet, and the next member can still serve them.
 func (g *Gateway) spliceThroughMember(gl *groupListener, m *groupMember, connID string, tcp *net.TCPConn, clientConn net.Conn) bool {
 	sess := m.sess
 	m.liveConns.Add(1)
 	defer m.liveConns.Add(-1)
 
-	stream, releaseFlow, err := sess.dp.openFlow(sess, connID)
+	stream, releaseFlow, err := sess.dp.openFlow(sess, control.OpenConn{
+		TunnelID:   m.tunnelID,
+		ClientAddr: clientConn.RemoteAddr().String(),
+		ConnID:     connID,
+	})
 	if err != nil {
 		sess.logger.Debug("group: open data leg failed; re-picking", "group", gl.spec.Name, "err", err)
 		return false
@@ -2364,17 +2375,6 @@ func (g *Gateway) spliceThroughMember(gl *groupListener, m *groupMember, connID 
 	// can read conntrack for group display while pick keeps its own atomic.
 	entry, closeEntry := g.Conns.Open(sess.agentID, m.tunnelID, gl.spec.Name, gl.spec.ID, clientConn.RemoteAddr().String(), connID, true)
 	defer closeEntry()
-
-	_ = stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
-	if err := control.WriteMsg(stream, control.TypeOpenConn, control.OpenConn{
-		TunnelID:   m.tunnelID,
-		ClientAddr: clientConn.RemoteAddr().String(),
-		ConnID:     connID,
-	}); err != nil {
-		sess.logger.Debug("group: open_conn write failed", "err", err)
-		return true // the leg opened; a write failure drops this player, it is not a re-pick
-	}
-	_ = stream.SetWriteDeadline(time.Time{})
 
 	// Track for RTT sampling over the connection's lifetime (kernel RTT via TCP_INFO).
 	sess.rttConns.Store(connID, &rttConn{tcp: tcp, entry: entry})
