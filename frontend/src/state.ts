@@ -48,6 +48,17 @@ export function useTickStale(status: UIStatus | null): boolean {
   return stale && status !== null
 }
 
+// Durations come in two renderings, and which one a surface gets is decided by
+// what the reader is doing with it, not by the screen it sits on:
+//   fmtElapsed — a clock (`1:02:03`) for a stopwatch someone watches tick: a
+//     live connection's duration, where the seconds are the point.
+//   fmtUptime / fmtDuration — words (`1h 2m`) for a span someone reads: link
+//     uptimes and anything historical, where seconds are noise. fmtUptime is
+//     the one that can reach days (link and app lifetimes); fmtDuration stays
+//     hours-first for session lengths.
+// A live *link* uptime is still words: it is measured in hours and days, and a
+// clock reading "51:23:07" is a number nobody can parse at a glance.
+
 export function fmtUptime(ms: number): string {
   const s = Math.floor(ms / 1000)
   const d = Math.floor(s / 86400)
@@ -109,6 +120,15 @@ export const TRANSPORT_LABEL: Record<string, string> = {
   quic: 'QUIC',
   'per-conn': 'Per-connection',
   mux: 'Multiplexed',
+}
+
+/** fmtElapsed: the clock rendering — see the note above fmtUptime. */
+export function fmtElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  if (h > 0) return `${h}:${pad(m)}:${pad(sec)}`
+  return `${m}:${pad(sec)}`
 }
 
 export function fmtDuration(ms: number): string {

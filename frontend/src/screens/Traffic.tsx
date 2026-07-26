@@ -6,7 +6,7 @@ import {IconConnections, IconLink, IconUsers} from '../components/icons'
 import {usePeers} from '../history'
 import {NavId} from '../nav'
 import {openDossierOnMount} from '../players'
-import {fmtBytes, fmtRate, fmtRelative, fmtRtt, hasRtt, UIStatus} from '../state'
+import {fmtBytes, fmtElapsed, fmtRate, fmtRelative, fmtRtt, fmtUptime, hasRtt, UIStatus} from '../state'
 
 // Per-IP current-rate tracker: module-level so tab switches don't reset the
 // baselines. Rates come from diffing live-connection byte totals between
@@ -232,7 +232,7 @@ function LinkStrip({status}: {status: UIStatus}) {
       </div>
 
       <div className="grid min-w-0 shrink-0 grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
-        <StatTile label="Link uptime" value={status.linkUpSinceMs ? fmtElapsed(Date.now() - status.linkUpSinceMs) : '—'} />
+        <StatTile label="Link uptime" value={status.linkUpSinceMs ? fmtUptime(Date.now() - status.linkUpSinceMs) : '—'} />
         {isAgent
           ? <StatTile label="Round trip" value={up && hasRtt(status.rttMillis) ? fmtRtt(status.rttMillis) : '—'} />
           : <StatTile label="Sessions" value={String(status.linkSessions || 0)} />}
@@ -339,10 +339,3 @@ function LanTag({ip, selfIP}: {ip: string; selfIP: string}) {
   )
 }
 
-function fmtElapsed(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
-  const pad = (n: number) => String(n).padStart(2, '0')
-  if (h > 0) return `${h}:${pad(m)}:${pad(sec)}`
-  return `${m}:${pad(sec)}`
-}
