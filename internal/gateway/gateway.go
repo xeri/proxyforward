@@ -2247,6 +2247,19 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	entry, closeEntry := g.Conns.Open(sess.agentID, spec.ID, spec.Name, "", clientConn.RemoteAddr().String(), connID, true)
 	defer closeEntry()
 
+	// A udp flow may carry its payload on the session's QUIC datagrams instead of
+	// its stream. The flow id has to be decided here, before the header is
+	// written, because the header is what tells the agent which flow it is — and
+	// it stays 0 (stream only) unless every gate passes.
+	var flowMux *relay.FlowMux
+	var datagrams transport.DatagramSession
+	var flowID uint32
+	if isUDP {
+		if flowMux, datagrams = sess.datagramFlows(); flowMux != nil {
+			flowID = sess.nextFlowID()
+		}
+	}
+
 	// Acquire the data leg through the session's data plane, header and all.
 	// Per-conn transport takes a connection the agent parked in advance, or
 	// signals it to dial back a dedicated TCP+TLS one for this player (no
@@ -2258,6 +2271,7 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 		TunnelID:   spec.ID,
 		ClientAddr: clientConn.RemoteAddr().String(),
 		ConnID:     connID,
+		FlowID:     flowID,
 	})
 	if err != nil {
 		sess.logger.Debug("open data leg failed", "client", clientConn.RemoteAddr().String(), "err", err)
@@ -2281,6 +2295,18 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 		// reliable hop; the player leg already yields one datagram per Read.
 		// Nothing else changes — the same Splice, counters, and caps apply.
 		client, leg = udp, &relay.DatagramStream{Conn: stream}
+		if flowID != 0 {
+			// This flow's payload rides the connection's unreliable datagrams,
+			// with the stream kept for oversize ones and for the flow's
+			// lifecycle. Still a relay.Conn, still the same Splice.
+			fc := relay.NewFlowgramConn(flowMux, datagrams, flowID, stream)
+			// Runs once the splice has drained: unregisters the flow and joins
+			// its merge goroutine. The close error is the underlying socket's and
+			// is no more actionable here than any other teardown close — the last
+			// bytes were carried by CloseWrite, during the splice.
+			defer func() { _ = fc.Close() }()
+			leg = fc
+		}
 		// A datagram flow has no FIN, so the idle reaper is the only thing that
 		// can ever retire this session; it runs on a much shorter clock than the
 		// TCP default for that reason (udpIdleTimeout).

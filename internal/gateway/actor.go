@@ -16,6 +16,7 @@ import (
 	"proxyforward/internal/control"
 	"proxyforward/internal/linkquality"
 	"proxyforward/internal/portowner"
+	"proxyforward/internal/relay"
 	"proxyforward/internal/stats"
 	"proxyforward/internal/transport"
 )
@@ -139,6 +140,15 @@ type agentSession struct {
 	// dial-back wait). Empty under mux transport.
 	dataConns sync.Map
 
+	// flowMux demultiplexes this session's QUIC datagrams to the udp flows riding
+	// it (control.CapUDPDatagram); nil until the first flow that can use one, and
+	// on every session whose transport cannot carry datagrams at all. flowSeq
+	// issues the flow ids — per session, because the datagrams are. flowMu guards
+	// only the lazy construction.
+	flowMu  sync.Mutex
+	flowMux *relay.FlowMux
+	flowSeq atomic.Uint32
+
 	// pool holds the data connections this agent parked ahead of any player
 	// (control.CapConnPool); nil when pooling was not negotiated, which is what
 	// every legacy peer and every non-per-conn transport gets. Set at admission
@@ -204,6 +214,50 @@ func (a *agentSession) closeAll() {
 		return true
 	})
 	a.pool.drain()
+	// The demux goroutine ends with the session ctx (cancelled just above, in
+	// evict); joining it here makes that deterministic rather than eventual.
+	a.flowMu.Lock()
+	mux := a.flowMux
+	a.flowMu.Unlock()
+	if mux != nil {
+		mux.Close()
+	}
+}
+
+// datagramFlows returns the session's demultiplexer and datagram sender when a
+// udp flow on it may ride QUIC datagrams, and nil when it may not. Three gates,
+// all required: the capability was negotiated, the session's transport can carry
+// datagrams at all (only QUIC can), and the peer's QUIC advertised them. Any one
+// failing leaves the flow on its stream, exactly as before this existed.
+func (a *agentSession) datagramFlows() (*relay.FlowMux, transport.DatagramSession) {
+	if !a.Has(control.CapUDPDatagram) {
+		return nil, nil
+	}
+	ds, ok := a.session().(transport.DatagramSession)
+	if !ok || !ds.SupportsDatagrams() {
+		return nil, nil
+	}
+	a.flowMu.Lock()
+	defer a.flowMu.Unlock()
+	if a.flowMux == nil {
+		// Parented on the session ctx, so it dies with the session even if
+		// closeAll never runs. Lazy: a session that never carries a udp flow
+		// never starts the goroutine.
+		a.flowMux = relay.NewFlowMux(a.ctx, ds)
+	}
+	return a.flowMux, ds
+}
+
+// nextFlowID issues the next flow id for this session. Ids are per session
+// because the datagrams are, and 0 is reserved for "this flow rides its stream",
+// so the sequence starts at 1. It wraps after four billion flows on one session;
+// with flows reaped after two idle minutes, a wrapped id cannot still be live,
+// and Register would replace it if it somehow were.
+func (a *agentSession) nextFlowID() uint32 {
+	if id := a.flowSeq.Add(1); id != 0 {
+		return id
+	}
+	return a.flowSeq.Add(1)
 }
 
 // bindPolicy is everything the gateway's configuration says about opening a
