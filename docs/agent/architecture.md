@@ -90,6 +90,8 @@ persisted to config.
 | Frame caps | 64 KiB post-auth / 4 KiB pre-auth | `control.go MaxFrame PreAuthMaxFrame` |
 | Pre-auth prologue deadline | 10 s | `gateway.go preAuthTimeout` |
 | Per-conn dial-back wait | 12 s (> data-conn pre-auth, so its failure surfaces first) | `perconn.go dataDialTimeout` |
+| Connection pool | agent asks for 2 (0 = off, ceiling 8), gateway grants min(request, 8) per session — the grant can only shrink, so no "extra" is ever closed | `config.go PoolSizeDefault MaxPoolSize`, `gateway/connpool.go maxPooledPerSession` |
+| Parked-conn keepalive / refusal floor | 30 s idle and interval, 3 probes (a parked conn is silent for hours; nobody reads it, so keepalive is its only liveness) / a park dropped inside 1 s paces the agent's next dial through its backoff | `link/keepalive.go PoolKeepAlivePeriod`, `agent/connpool.go poolRedialFloor` |
 | Heartbeat / idle deadline / ctrl write | 5 s / 15 s / 10 s | `agent.go pingInterval controlIdleTimeout controlWriteTimeout`, `gateway.go pingInterval` |
 | yamux window / conn-write timeout | 1 MiB / 30 s | `transport/yamux.go` |
 | QUIC keepalive / idle / handshake | off / 30 s / 5 s (dial aborts at 2×) | `transport/quicconfig.go quicConfig` |
@@ -210,6 +212,27 @@ TCP). Data conns resume the control conn's TLS session (`dialGateway` shares an 
 `ClientSessionCache`) and are drained on eviction alongside the mux (`agentSession`
 `dataConns`, `closeAll`). The gateway advertises the capability only because it serves
 the accept path end-to-end; a mux/legacy agent never offers it and rides `OpenStream`.
+
+Connection pooling (cap `conn-pool`, offered on the per-conn rung only — mux and QUIC
+open a stream for free): the agent keeps `agent.pool_size` already-dialled,
+already-authenticated `KindData` connections parked at the gateway, so a joining player
+costs a header write rather than a control round trip plus a TCP and a TLS handshake.
+`Hello.Pooled` marks one (an explicit bool, never an absent connId); `HelloOK.PoolSize`
+is the gateway's grant, min(request, `maxPooledPerSession`) — a ceiling by construction,
+so the gateway never closes an "extra" and no redial loop is possible, and the agent
+takes the smaller of grant and its own config regardless. Parked connections live in
+`agentSession.pool` (`gateway/connpool.go`), filed under the identity the connection
+proved — agent B cannot leave one where agent A's players would be served on it — and
+`closeAll` drains them, since a parked connection has no player and no splice to close
+it. `openFlow` takes one and writes the `open_conn` header on it; that write is also the
+take-time liveness probe, because nobody reads a parked connection. One that fails is
+dropped and the next tried, and an empty pool falls back to the `open_data` dial-back
+unchanged — pooling can never refuse a player, only fail to accelerate one. The agent's
+maintainer (`agent/connpool.go maintainPool`) needs no wire messages: a parked connection
+reports that it has been taken by receiving its `open_conn`, and reports it *before*
+serving, so the refill overlaps the player rather than waiting for them to leave.
+`link.KeepParkedAlive` holds the NAT mapping open on a connection that may sit silent
+for hours.
 
 QUIC data plane (agent config `transport = "quic"`; gateway `Gateway.QUICEnabled`, on by
 default): a separate wire, not a capability. The gateway binds a UDP QUIC listener on the

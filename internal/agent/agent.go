@@ -329,10 +329,13 @@ func (a *Agent) SetCapabilityOffer(caps []string) { a.offerCaps = caps }
 // deliberately NOT control.SupportedCapabilities, which would offer per-conn
 // regardless and force it on every agent. QUIC and mux offer no per-conn-data (QUIC
 // rides the mux data plane; the auto ladder computes this per rung).
+//
+// Connection pooling rides the same rung, and only that one: mux and QUIC open a
+// stream for free, so there is nothing a parked connection would save them.
 func offerFor(transport string) []string {
 	caps := []string{control.CapTunnelSync, control.CapConnStats, control.CapGatewayConfig, control.CapConfigConsent, control.CapPause, control.CapTunnelUDP}
 	if transport == config.TransportPerConn {
-		caps = append(caps, control.CapPerConn)
+		caps = append(caps, control.CapPerConn, control.CapConnPool)
 	}
 	return caps
 }

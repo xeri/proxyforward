@@ -128,6 +128,9 @@ type harnessOpts struct {
 	// tweakTunnel, if set, adjusts the default tunnel after the harness has
 	// built it — for options with no dedicated field here.
 	tweakTunnel func(*config.Tunnel)
+	// tweakAgent, if set, adjusts the agent's whole config just before it starts
+	// (after the tunnel and the pairing ticket are in place).
+	tweakAgent func(*config.Config)
 }
 
 func newHarness(t *testing.T, localAddr string) *harness {
@@ -209,6 +212,9 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 
 	if opts.tweakTunnel != nil {
 		opts.tweakTunnel(&agentCfg.Agent.Tunnels[0])
+	}
+	if opts.tweakAgent != nil {
+		opts.tweakAgent(agentCfg)
 	}
 
 	h := &harness{t: t, gw: gw, gwCancel: gwCancel, agentCfg: agentCfg, agentDir: t.TempDir(), tunnelID: tunnelID, offerCaps: opts.offerCaps}

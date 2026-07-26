@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net"
 	"sync/atomic"
@@ -11,17 +13,27 @@ import (
 	"proxyforward/internal/relay"
 )
 
-// pooledFake is a relay.Conn stand-in that only records Close; the pool touches
-// nothing else. The remaining methods promote from the nil embedded interface
-// and would panic if called — they never are here.
+// pooledFake is a relay.Conn stand-in for the pool tests: it records Close and,
+// with writeErr set, stands in for a parked connection whose peer has gone away
+// — the failure the take-time header write exists to surface. The remaining
+// methods promote from the nil embedded interface and would panic if called —
+// they never are here.
 type pooledFake struct {
 	net.Conn
-	id     int
-	closed atomic.Bool
+	id       int
+	writeErr error
+	closed   atomic.Bool
 }
 
 func (c *pooledFake) Close() error      { c.closed.Store(true); return nil }
 func (c *pooledFake) CloseWrite() error { return nil }
+func (c *pooledFake) Write(p []byte) (int, error) {
+	if c.writeErr != nil {
+		return 0, c.writeErr
+	}
+	return len(p), nil
+}
+func (c *pooledFake) SetWriteDeadline(time.Time) error { return nil }
 
 // TestConnPoolParkTakeDrain covers the whole ownership contract: a parked
 // connection is handed out oldest-first and still open (the splice owns it from
@@ -145,6 +157,111 @@ func tcpPair(t *testing.T) (near, far net.Conn) {
 	}
 	t.Cleanup(func() { a.c.Close(); far.Close() })
 	return a.c, far
+}
+
+// poolFlowSession builds the least session openFlow needs: a control stream
+// whose frames a test can read back, a per-conn data plane, and a pool. Its ctx
+// is already cancelled, so the dial-back's wait for the agent ends at once —
+// these tests are about which path is taken, not how long it waits.
+func poolFlowSession(t *testing.T, g *Gateway, pool *connPool) (*agentSession, *captureStream) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ctrl := &captureStream{}
+	s := &agentSession{agentID: "agt_a", logger: discardLogger(), ctx: ctx, cancel: cancel, pool: pool}
+	s.setCtrl(ctrl)
+	s.dp = perConnDataPlane{g: g}
+	return s, ctrl
+}
+
+// openDataConnIDs returns the connIDs of every open_data frame the gateway sent
+// — i.e. every time it asked the agent to dial a connection back.
+func openDataConnIDs(t *testing.T, c *captureStream) []string {
+	t.Helper()
+	var out []string
+	for _, env := range c.envelopes(t) {
+		if env.Type != control.TypeOpenData {
+			continue
+		}
+		od, err := control.Decode[control.OpenData](env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, od.ConnID)
+	}
+	return out
+}
+
+// TestConnPoolExhaustedFallsBackToOpenData: an empty pool is not an error, it
+// is just the state the gateway was in before pooling existed — the player is
+// served by asking the agent to dial back, exactly as before. A pool that runs
+// dry under a join burst must degrade to the old path, never refuse a player.
+// (conn-pool)
+func TestConnPoolExhaustedFallsBackToOpenData(t *testing.T) {
+	g := &Gateway{logger: discardLogger()}
+	sess, ctrl := poolFlowSession(t, g, newConnPool(2)) // granted, but empty
+
+	leg, cleanup, err := sess.dp.openFlow(sess, control.OpenConn{TunnelID: "t_a", ConnID: "7"})
+	if err == nil {
+		cleanup()
+		leg.Close()
+		t.Fatal("openFlow produced a leg with no pool and no agent to dial back")
+	}
+	if ids := openDataConnIDs(t, ctrl); len(ids) != 1 || ids[0] != "7" {
+		t.Errorf("open_data frames %v, want exactly one for conn 7 — an empty pool must fall back to the dial-back path", ids)
+	}
+	if hits := g.PooledLegs(); hits != 0 {
+		t.Errorf("%d pooled legs counted with an empty pool", hits)
+	}
+}
+
+// TestConnPoolDeadParkedConnFallsBack: nobody reads a parked connection, so the
+// header write at take time is the only thing that can discover its peer went
+// away. One that fails it is dropped and the next parked connection is tried —
+// and only when none is left does the gateway pay for a dial-back. A dead
+// parked connection must never cost the player more than not pooling would.
+// (conn-pool)
+func TestConnPoolDeadParkedConnFallsBack(t *testing.T) {
+	g := &Gateway{logger: discardLogger()}
+	pool := newConnPool(2)
+	dead := &pooledFake{id: 1, writeErr: errors.New("parked peer went away")}
+	livePeer, live := tcpPair(t)
+	if !pool.park(dead) || !pool.park(live.(relay.Conn)) {
+		t.Fatal("parking two connections into a pool of two was refused")
+	}
+	sess, ctrl := poolFlowSession(t, g, pool)
+
+	leg, cleanup, err := sess.dp.openFlow(sess, control.OpenConn{TunnelID: "t_a", ConnID: "7"})
+	if err != nil {
+		t.Fatalf("openFlow gave up with a live connection still parked: %v", err)
+	}
+	defer cleanup()
+	if leg != live {
+		t.Errorf("openFlow returned %v, want the live parked connection", leg)
+	}
+	if !dead.closed.Load() {
+		t.Error("the dead parked connection was dropped without being closed")
+	}
+	if ids := openDataConnIDs(t, ctrl); len(ids) != 0 {
+		t.Errorf("gateway sent open_data %v with a live connection still parked", ids)
+	}
+	if hits := g.PooledLegs(); hits != 1 {
+		t.Errorf("%d pooled legs, want 1", hits)
+	}
+
+	// The header went to the connection that survived, and names this player.
+	_ = livePeer.SetReadDeadline(time.Now().Add(5 * time.Second))
+	env, err := control.ReadMsg(livePeer, control.MaxFrame)
+	if err != nil {
+		t.Fatalf("read the header off the taken connection: %v", err)
+	}
+	oc, err := control.Decode[control.OpenConn](env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Type != control.TypeOpenConn || oc.ConnID != "7" {
+		t.Errorf("taken connection carried %s %+v, want open_conn for conn 7", env.Type, oc)
+	}
 }
 
 // TestHandleDataConnRejectsPooledFromWrongAgent: a parked connection is filed
