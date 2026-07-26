@@ -876,6 +876,13 @@ type session struct {
 	// the data conns the GUI's link card would under-report per-conn payload.
 	linkCounters *stats.LinkCounters
 
+	// flowMux demultiplexes this session's QUIC datagrams to the udp flows riding
+	// it (control.CapUDPDatagram); nil until the first flow the gateway names a
+	// flow id for, and on every session whose transport cannot carry datagrams.
+	// flowMu guards only the lazy construction.
+	flowMu  sync.Mutex
+	flowMux *relay.FlowMux
+
 	// parked holds the data connections this session has left at the gateway
 	// waiting for a player (control.CapConnPool), keyed by parkSeq. A parked
 	// connection has no player and no splice to end it and its reader carries no
@@ -1014,6 +1021,7 @@ func (s *session) serve(ctx context.Context) error {
 	defer func() {
 		cancel()
 		<-poolDone
+		s.closeFlowMux()
 	}()
 	errCh := make(chan error, 3)
 
@@ -1358,6 +1366,36 @@ func (s *session) serveOpenConn(st relay.Conn, oc *control.OpenConn) {
 	s.agent.logger.Debug("client disconnected", "tunnel", tun.Name, "client", oc.ClientAddr)
 }
 
+// datagramFlows returns this session's demultiplexer and datagram sender when a
+// udp flow may ride QUIC datagrams, and nil when it may not: the transport must
+// be able to carry datagrams at all (only QUIC can) and the peer's QUIC must
+// advertise them. The third gate — the capability — was already applied by the
+// gateway, which is what naming a non-zero flow id means. The mux is built on
+// first use, so a session with no udp flow never starts the goroutine.
+func (s *session) datagramFlows() (*relay.FlowMux, relay.FlowSender) {
+	ds, ok := s.mux.(transport.DatagramSession)
+	if !ok || !ds.SupportsDatagrams() {
+		return nil, nil
+	}
+	s.flowMu.Lock()
+	defer s.flowMu.Unlock()
+	if s.flowMux == nil {
+		s.flowMux = relay.NewFlowMux(s.ctx, ds)
+	}
+	return s.flowMux, ds
+}
+
+// closeFlowMux joins the demux goroutine at session teardown. The session ctx
+// would end it anyway; doing it here makes that deterministic.
+func (s *session) closeFlowMux() {
+	s.flowMu.Lock()
+	mux := s.flowMux
+	s.flowMu.Unlock()
+	if mux != nil {
+		mux.Close()
+	}
+}
+
 // serveDatagramStream is handleDataStream's UDP half: dial the local server as
 // a connected UDP socket and splice datagrams to it, with the tunnel leg framed
 // so message boundaries survive the reliable hop.
@@ -1396,7 +1434,26 @@ func (s *session) serveDatagramStream(st relay.Conn, tun *config.Tunnel, oc *con
 		// player it belongs to, since UDP offers no close to observe.
 		IdleTimeout: relay.DatagramIdleTimeout,
 	}
-	if err := relay.Splice(relay.DatagramConn{Conn: local}, &relay.DatagramStream{Conn: st}, entry.Counters, opts); err != nil {
+	// A non-zero flow id is the gateway saying this flow's payload rides the
+	// connection's unreliable datagrams, with the stream kept for the oversize
+	// ones and for the flow's lifecycle. Still a relay.Conn, still the same
+	// Splice.
+	var leg relay.Conn = &relay.DatagramStream{Conn: st}
+	if oc.FlowID != 0 {
+		if mux, sender := s.datagramFlows(); mux != nil {
+			fc := relay.NewFlowgramConn(mux, sender, oc.FlowID, st)
+			defer func() { _ = fc.Close() }()
+			leg = fc
+		} else {
+			// Unreachable: the gateway allocates a flow id only for a session that
+			// reported datagram support, and support is a property of the one
+			// connection both ends share. If it ever happens, serving on the
+			// stream loses the gateway's datagram sends rather than the player —
+			// survivable on a udp tunnel, and loud enough to find.
+			s.agent.logger.Warn("gateway named a datagram flow this session cannot carry", "tunnel", tun.Name, "flow_id", oc.FlowID)
+		}
+	}
+	if err := relay.Splice(relay.DatagramConn{Conn: local}, leg, entry.Counters, opts); err != nil {
 		s.agent.logger.Debug("splice ended with error", "client", oc.ClientAddr, "err", err)
 	}
 	s.agent.logger.Debug("client disconnected", "tunnel", tun.Name, "client", oc.ClientAddr)
