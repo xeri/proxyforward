@@ -181,8 +181,18 @@ func TestPauseSurvivesReconnect(t *testing.T) {
 
 	// Restart the agent: the listener rebinds, and both bits must still hold
 	// (the agent re-asserts its set; the gateway seeds its own at admission).
+	//
+	// Both waits are load-bearing, and neither is a stand-in for the other. The
+	// old listener stays bound and paused until the gateway notices the agent is
+	// gone, and "accepts but does not echo" — what waitRefused looks for — is
+	// already true of it. Without waiting for the port to be released first, that
+	// check is answered by the session that just died and returns during the
+	// window where the old listener is closed and the new one does not exist yet;
+	// the assertions below then dial a port nothing is listening on.
 	h.stopAgent()
+	h.waitTunnelUnbound()
 	h.startAgent()
+	h.waitTunnelRebound()
 	waitRefused(t, pinned)
 
 	// The agent resumes its own bit — the gateway's still stands: each side

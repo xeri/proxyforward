@@ -266,6 +266,42 @@ func (h *harness) waitPublicPort() string {
 	return ""
 }
 
+// waitTunnelUnbound blocks until the GATEWAY has released this tunnel's public
+// port — it noticed the agent was gone, evicted the session and closed the
+// listener. A restart test must wait for this before starting the replacement
+// agent: until it lands, the old listener is still bound and still answering,
+// so any later check that merely dials the port can be satisfied by the session
+// that has already died, and return before the new one has bound anything.
+func (h *harness) waitTunnelUnbound() {
+	h.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := h.gw.TunnelPort(h.tunnelID); !ok {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	h.t.Fatal("the gateway never released the tunnel's port after the agent stopped")
+}
+
+// waitTunnelRebound blocks until the gateway holds a listener for this tunnel
+// again. Paired with waitTunnelUnbound it is unambiguous: the old listener is
+// provably gone, so this one belongs to the new session. Between the two there
+// is a real window with nothing bound at all, and that window is what an
+// assertion racing the restart hits.
+func (h *harness) waitTunnelRebound() int {
+	h.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if port, ok := h.gw.TunnelPort(h.tunnelID); ok {
+			return port
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	h.t.Fatal("the restarted agent's tunnel never rebound")
+	return 0
+}
+
 func roundTrip(t *testing.T, addr string, payload []byte) {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
