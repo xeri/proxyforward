@@ -4,7 +4,7 @@ import {AvatarImg} from '../components/AvatarImg'
 import {LineChart, LineSeries} from '../components/charts/LineChart'
 import {Column, DataTable} from '../components/DataTable'
 import {GeoRank} from '../components/GeoRank'
-import {IconChevronRight, IconClose, IconPlayers, IconSearch} from '../components/icons'
+import {IconAnalytics, IconChevronRight, IconClose, IconPlayers, IconSearch} from '../components/icons'
 import {
   Badge, Button, Card, CopyIcon, EmptyState, LiveDot, MonoChip, Overline, PageHeader, Pager, PanelTitle, Pill, PillGroup, SegmentedControl, Skeleton, TextInput,
 } from '../components/ui'
@@ -49,11 +49,12 @@ export function Players({status}: {status: UIStatus}) {
 }
 
 /** AnalyticsUnavailable: the shared explanation for a daemon without the
- * analytics store (Analytics.tsx renders the same). */
+ * analytics store (Analytics.tsx renders the same). The icon names the store,
+ * not either screen — it lives here but is read on both. */
 export function AnalyticsUnavailable() {
   return (
     <EmptyState
-      icon={<IconPlayers size={28} />}
+      icon={<IconAnalytics size={28} />}
       title="Analytics isn't available"
       hint="The connected daemon is an older build without the analytics store, or the analytics database failed to open (see logs)."
     />
