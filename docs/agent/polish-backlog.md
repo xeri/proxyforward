@@ -1,9 +1,11 @@
 <!-- Companion to /CLAUDE.md ("Current phase"). Seeded from the full-repo audit of
      2026-07-13; last coherence pass 2026-07-26, which removed the consistency
      cluster (one rttTone, one relative-time helper, one Pager, one direction
-     vocabulary, one activity ramp) and the small judgment calls as they were
-     fixed. Line cites drift between passes — verify before acting. Remove items
-     when fixed; add new ones with the same file:line discipline. -->
+     vocabulary, one activity ramp), the small judgment calls, and the doc/backend
+     truth items as they were fixed. What is left needs a human's scope call, an
+     overhaul, or was deferred on purpose. Line cites drift between passes —
+     verify before acting. Remove items when fixed; add new ones with the same
+     file:line discipline. -->
 
 # Polish backlog — concrete, file-cited
 
@@ -21,13 +23,6 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
      nothing; the honesty pass removed its toggle, so today the promise is absence.
    - Fix: implement it (registry Run key or startup-folder shortcut), or delete the
      config field. Decide with the human (scope call — escalation trigger).
-
-3. **README ↔ app copy drift**: README says "Settings → Windows integration → Add
-   rule" (`README.md:53-54`); the section is titled "System" (`Settings.tsx:489`).
-   README also claims "115 tests, including 5 fuzz targets" (actual: 214 test funcs,
-   8 fuzz targets) and "enforced in CI" (a workflow now exists at
-   `.github/workflows/ci.yml` but has never run — verify green on first push).
-   Fix the README.
 
 ## Small judgment calls
 
@@ -68,18 +63,6 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
     comfortably on loopback, but quic-go's GSO/GRO/ECN fast paths are largely Linux; a
     Windows perf pass (and, if quic-go ever exposes a pluggable CC, BBR for lossy
     residential links) is future work.
-
-## Backend polish adjacent to UX
-
-19. **Gateway jitter/loss comment drift** — `ipc.go:101-103` says "the gateway
-    reports -1/unknown" but the gateway has measured its own jitter/loss since the
-    bidirectional heartbeat landed (`gateway.go pingLoop`, `engine.go:391-395`).
-    Fix the comment before it misleads someone.
-
-20. **stats.redacted.json in diagnostics is pre-migration only** — after
-    `ImportLegacyStats` renames `stats.json` away, bundles carry no stats snapshot
-    (`app/tools.go:90`, `analytics/importjson.go`). Either export a redacted snapshot
-    from SQLite or drop the stale zip entry.
 
 ## CI debt
 
