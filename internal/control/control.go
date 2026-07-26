@@ -302,7 +302,7 @@ type HelloErr struct {
 type TunnelSpec struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-	Type string `json:"type"` // tcp | udp; udp not yet implemented (gateway rejects it)
+	Type string `json:"type"` // tcp | udp (udp rides CapTunnelUDP)
 	// PublicPort 0 asks the gateway to pick an ephemeral port.
 	PublicPort int `json:"publicPort"`
 	// OfflineMOTD, when set, keeps the public port answering Minecraft status

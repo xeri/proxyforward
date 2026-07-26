@@ -106,7 +106,7 @@ func TestStatsLifecycle(t *testing.T) {
 		t.Error("no persisted-tier buckets landed at shutdown")
 	}
 
-	// Phase 8: the analytics summary op must answer over the freshly-closed
+	// The analytics summary op must answer over the freshly-closed
 	// store, and the run must have bracketed itself with engine up/down events.
 	if _, err := db.Summary(0, time.Now().UnixMilli()); err != nil {
 		t.Errorf("Summary after shutdown: %v", err)

@@ -1143,7 +1143,7 @@ func (g *Gateway) act() *actor { return g.actor.Load() }
 // session returns the sole connected agent session, or nil when there are zero
 // or several. The coarse single-agent status accessors funnel through it, so
 // with several agents they read their "unknown" sentinels rather than name an
-// arbitrary agent — honest until Phase 3's Status.Agents carries per-agent
+// arbitrary agent — honest until Status.Agents carries per-agent
 // fidelity. Nil-safe before Start.
 func (g *Gateway) session() *agentSession {
 	a := g.act()
@@ -2360,8 +2360,8 @@ func (g *Gateway) spliceThroughMember(gl *groupListener, m *groupMember, connID 
 	defer releaseFlow()
 	defer stream.Close()
 
-	// The registry entry carries (agentID, tunnelID) and — from Phase 5 — the groupID,
-	// so the GUI can read conntrack for group display while pick keeps its own atomic.
+	// The registry entry carries (agentID, tunnelID) and the groupID, so the GUI
+	// can read conntrack for group display while pick keeps its own atomic.
 	entry, closeEntry := g.Conns.Open(sess.agentID, m.tunnelID, gl.spec.Name, gl.spec.ID, clientConn.RemoteAddr().String(), connID, true)
 	defer closeEntry()
 

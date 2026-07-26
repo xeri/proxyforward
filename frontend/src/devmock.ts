@@ -1023,7 +1023,7 @@ export function installDevMock() {
       .sort((x, y) => y.sessions - x.sessions)
   }
 
-  // ---- dashboard aggregates (analytics Phase 8) ----
+  // ---- dashboard aggregates (analytics) ----
   // Summary integrates the same rate/gauge model the chart serves, so the
   // tiles agree with the bandwidth history for any range.
   const summary = (rangeMs: number) => {
@@ -1168,7 +1168,7 @@ export function installDevMock() {
     // field + status badge can be exercised.
     BrowseMMDB: (title: string) => ok(/asn/i.test(title) ? 'C:\\maxmind\\GeoLite2-ASN.mmdb' : 'C:\\maxmind\\GeoLite2-City.mmdb'),
     GetConfig: () => ok(config),
-    // Phase 8 agent management: the roster (ListAgents) + the gateway event ring
+    // Agent management: the roster (ListAgents) + the gateway event ring
     // (GatewayEvents) are reads (ok); the write bindings are gated and mutate the
     // mock world (agentOverrides) so the UI updates on the next poll, mirroring
     // the real write-then-repoll loop.

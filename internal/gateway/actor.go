@@ -1160,7 +1160,7 @@ func (a *actor) tunnels() []TunnelSnapshot {
 
 // tunnelPort reports the bound port for a tunnel ID, scanning every agent. Bare
 // tunnelIDs are globally-unique UUIDs in practice, so the first match is the
-// one; the multi-agent status surfaces (Phase 3) key by (agentID, tunnelID).
+// one; the multi-agent status surfaces key by (agentID, tunnelID).
 func (a *actor) tunnelPort(tunnelID string) (int, bool) {
 	var (
 		port  int

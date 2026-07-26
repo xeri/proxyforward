@@ -91,7 +91,7 @@ func (r *Recorder) SessionOpened(e *conntrack.Entry) {
 
 // PlayerSeen records the sniffed name and protocol on the session. The
 // authoritative UUID and player-table upsert are the identity service's job
-// (Phase 3); here we persist what the login handshake directly told us.
+// later; here we persist what the login handshake directly told us.
 func (r *Recorder) PlayerSeen(e *conntrack.Entry) {
 	if r == nil {
 		return

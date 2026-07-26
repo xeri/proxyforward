@@ -44,8 +44,9 @@ const (
 
 const (
 	TunnelTCP = "tcp"
-	// TunnelUDP relays datagrams for Bedrock/Geyser (RakNet). Not yet
-	// implemented — config accepts it but the gateway rejects type:"udp".
+	// TunnelUDP relays datagrams for Bedrock/Geyser (RakNet) and voice-chat
+	// mods. TCP and UDP hold a port number independently, so a udp tunnel may
+	// reuse the number a java tunnel already has.
 	TunnelUDP = "udp"
 )
 

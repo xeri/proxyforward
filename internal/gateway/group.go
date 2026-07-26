@@ -29,7 +29,7 @@ type GroupSpec struct {
 	ID          string `json:"id"`         // "grp_" + id
 	Name        string `json:"name"`       // display
 	PublicPort  int    `json:"publicPort"` // the one shared public port
-	Proto       string `json:"proto"`      // "tcp" only this iteration (§11)
+	Proto       string `json:"proto"`      // "tcp" only (see GroupProtoTCP)
 	Policy      string `json:"policy"`     // spread | standby
 	OfflineMOTD string `json:"offlineMotd,omitempty"`
 }

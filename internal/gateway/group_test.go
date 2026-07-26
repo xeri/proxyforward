@@ -47,7 +47,7 @@ func newGroupFixture(t *testing.T) *groupFixture {
 
 // admit builds and admits a bare agent session (unrestricted scope), the minimum a
 // membership test needs — reconcileGroupMembers keys off admission, not a live
-// transport (that matters only for the pick, Phase 4).
+// transport (that matters only for the pick).
 func (f *groupFixture) admit(t *testing.T, id string) *agentSession {
 	t.Helper()
 	s := &agentSession{agentID: id, scope: Scope{}, logger: discardLogger()}
