@@ -109,8 +109,11 @@ type Status struct {
 	// show what the auto ladder actually connected over.
 	Transport string `json:"transport,omitempty"`
 
-	// Link quality (agent-side; the gateway reports -1/unknown). Jitter and
-	// packet loss drive the tunnel health badge alongside RTT and uptime.
+	// Link quality, reported by both roles: each runs its own heartbeat toward
+	// the other, so the gateway measures these too (`Engine.Status` reads
+	// `Gateway.JitterMillis`/`PacketLossPct`). -1 means unknown — no link,
+	// or not enough samples yet. Jitter and packet loss drive the tunnel health
+	// badge alongside RTT and uptime.
 	JitterMillis  float64 `json:"jitterMillis"`
 	PacketLossPct float64 `json:"packetLossPct"`
 	// HealthScore is the green/yellow/red rollup: good|warn|bad|unknown.
