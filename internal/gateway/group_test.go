@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"proxyforward/internal/bwcap"
 	"proxyforward/internal/config"
 	"proxyforward/internal/conntrack"
 	"proxyforward/internal/control"
@@ -82,6 +84,18 @@ func (f *groupFixture) ordinalOf(groupID string, key agentTun) uint64 {
 		}
 	})
 	return ord
+}
+
+// memberOf returns a group's live member for key (nil if absent), read on the actor
+// goroutine so it never races a membership change.
+func (f *groupFixture) memberOf(groupID string, key agentTun) *groupMember {
+	var m *groupMember
+	f.a.do(func() {
+		if gl := f.a.groupListeners[groupID]; gl != nil {
+			m = gl.members[key]
+		}
+	})
+	return m
 }
 
 // bindSolo binds a plain solo listener for sess on port, as the pre-group state a
@@ -442,4 +456,209 @@ func TestGroupPickRaceUnderChurn(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// capped returns a group-tagged spec carrying a bandwidth cap.
+func cappedTag(tunnelID, groupID string, mbps int, scope string) control.TunnelSpec {
+	s := tag(tunnelID, groupID)
+	s.BandwidthLimitMbps = mbps
+	s.BandwidthLimitScope = scope
+	return s
+}
+
+// TestGroupMemberLimitersFollowSpec: a group member carries its OWN tunnel's
+// bandwidth cap, stamped at join and hot-applied on re-sync exactly as a solo
+// listener's is — a rate-only change updates the live set in place (in-flight
+// players pick it up), a scope change or a capped/uncapped flip swaps the pointer,
+// and uncapped resolves to the relay fast path. (groups)
+func TestGroupMemberLimitersFollowSpec(t *testing.T) {
+	f := newGroupFixture(t)
+	if err := f.g.SetGroup(GroupSpec{ID: "grp_a", PublicPort: freePort(t), Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	sess := f.admit(t, "agt_a")
+	key := agentTun{AgentID: "agt_a", TunnelID: "t_a"}
+
+	// Join stamps the cap.
+	f.a.reconcileGroupMembers(sess, []control.TunnelSpec{cappedTag("t_a", "grp_a", 10, string(bwcap.ScopeCombined))})
+	m := f.memberOf("grp_a", key)
+	if m == nil {
+		t.Fatal("member did not join")
+	}
+	set := m.limiters.Load()
+	if set == nil || set.Rate() != 10 {
+		t.Fatalf("join limiters = %v, want a set at 10 Mbps", set)
+	}
+	if in, out := bwcap.Resolve(m.limiters.Load()); in == nil || out == nil {
+		t.Fatal("a capped member must resolve to real limiters")
+	}
+
+	// Rate-only change: applied in place, so in-flight splices holding the old
+	// pointer are throttled at the new rate.
+	f.a.reconcileGroupMembers(sess, []control.TunnelSpec{cappedTag("t_a", "grp_a", 20, string(bwcap.ScopeCombined))})
+	if got := m.limiters.Load(); got != set {
+		t.Fatalf("rate-only change swapped the limiter set (%p → %p); it must apply in place", set, got)
+	}
+	if got := set.Rate(); got != 20 {
+		t.Fatalf("rate after in-place change = %d, want 20", got)
+	}
+
+	// Scope change: a fresh set (an old holder keeps a consistent snapshot).
+	f.a.reconcileGroupMembers(sess, []control.TunnelSpec{cappedTag("t_a", "grp_a", 20, string(bwcap.ScopePerDirection))})
+	swapped := m.limiters.Load()
+	if swapped == set {
+		t.Fatal("scope change must build a fresh limiter set")
+	}
+	if got := swapped.Rate(); got != 20 {
+		t.Fatalf("rate after scope swap = %d, want 20", got)
+	}
+
+	// Uncapped: the relay fast path, nil limiters.
+	f.a.reconcileGroupMembers(sess, []control.TunnelSpec{tag("t_a", "grp_a")})
+	if in, out := bwcap.Resolve(m.limiters.Load()); in != nil || out != nil {
+		t.Fatalf("uncapped member resolved to (%v, %v), want the nil fast path", in, out)
+	}
+
+	// A member that leaves and rejoins is stamped fresh from its current spec.
+	f.a.reconcileGroupMembers(sess, nil)
+	if f.memberOf("grp_a", key) != nil {
+		t.Fatal("member should have left")
+	}
+	f.a.reconcileGroupMembers(sess, []control.TunnelSpec{cappedTag("t_a", "grp_a", 5, string(bwcap.ScopeCombined))})
+	if got := f.memberOf("grp_a", key).limiters.Load(); got == nil || got.Rate() != 5 {
+		t.Fatalf("rejoin limiters = %v, want a set at 5 Mbps", got)
+	}
+}
+
+// Bandwidth-cap tests for grouped tunnels. These run against a FAKE agent leg (a
+// plain TCP source), so the gateway's limiter is the only one in the path — an
+// agent-side cap cannot mask a missing gateway-side one, which is exactly the bug
+// these pin. The unit semantics of the cap itself are proven in internal/bwcap;
+// end to end, internal/e2e TestGroupBandwidthCapThrottles.
+const (
+	groupCapMbps    = 40      // 5 MB/s — a small fraction of loopback, so the cap is the bottleneck
+	groupCapPayload = 4 << 20 // ~0.8s at the cap; the 128 KiB burst is ~3% of it
+)
+
+// legSource is the agent half of a member's data leg, without an agent: it accepts
+// the gateway's dial, discards the open_conn header written to it, and streams
+// payloadSize bytes back.
+func legSource(t *testing.T, payloadSize int) (addr string, closeFn func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			wg.Add(1)
+			go func(c net.Conn) {
+				defer wg.Done()
+				defer c.Close()
+				go io.Copy(io.Discard, c) // drain the open_conn header and player bytes
+				buf := make([]byte, 128*1024)
+				for sent := 0; sent < payloadSize; {
+					n := min(len(buf), payloadSize-sent)
+					if _, err := c.Write(buf[:n]); err != nil {
+						return
+					}
+					sent += n
+				}
+			}(c)
+		}
+	}()
+	return ln.Addr().String(), func() { ln.Close(); wg.Wait() }
+}
+
+// dialDP is a data plane whose legs are plain TCP connections to addr.
+type dialDP struct{ addr string }
+
+func (d dialDP) openFlow(*agentSession, string) (relay.Conn, func(), error) {
+	c, err := net.DialTimeout("tcp", d.addr, 5*time.Second)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c.(*net.TCPConn), func() {}, nil
+}
+
+// joinCappedMember is joinLiveMember for a member carrying its own bandwidth cap.
+func (f *groupFixture) joinCappedMember(t *testing.T, agentID, tunnelID, groupID string, dp dataPlane, mbps int, scope string) {
+	t.Helper()
+	s := f.admit(t, agentID)
+	s.setSession(liveSession{})
+	s.health.Store(tunnelID, true)
+	s.dp = dp
+	sctx, cancel := context.WithCancel(context.Background())
+	s.ctx, s.cancel = sctx, cancel
+	t.Cleanup(cancel)
+	f.a.reconcileGroupMembers(s, []control.TunnelSpec{cappedTag(tunnelID, groupID, mbps, scope)})
+}
+
+// groupDownloadMbps drains want bytes from a group's public port and reports the
+// observed decimal Mbps.
+func groupDownloadMbps(t *testing.T, port, want int) float64 {
+	t.Helper()
+	c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial group port: %v", err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(30 * time.Second))
+	start := time.Now()
+	got, err := io.CopyN(io.Discard, c, int64(want))
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("read %d/%d bytes through the group: %v", got, want, err)
+	}
+	return float64(got) * 8 / 1e6 / elapsed.Seconds()
+}
+
+// TestGroupMemberCapThrottlesAtGateway: a player routed through a capped member is
+// throttled by the GATEWAY, not only by the agent — a group shares a public port,
+// never a bandwidth budget. Regression: grouped splices once ran with bare
+// SpliceOpts, so the gateway-side belt was missing for every grouped tunnel. (groups)
+func TestGroupMemberCapThrottlesAtGateway(t *testing.T) {
+	f := newGroupFixture(t)
+	port := freePort(t)
+	if err := f.g.SetGroup(GroupSpec{ID: "grp_a", Name: "grp", PublicPort: port, Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	src, closeSrc := legSource(t, groupCapPayload)
+	defer closeSrc()
+	f.joinCappedMember(t, "agt_a", "t_a", "grp_a", dialDP{addr: src}, groupCapMbps, string(bwcap.ScopeCombined))
+
+	mbps := groupDownloadMbps(t, port, groupCapPayload)
+	t.Logf("capped group member: %.1f Mbps (cap %d)", mbps, groupCapMbps)
+	if mbps > groupCapMbps*1.4 {
+		t.Errorf("player ran at %.1f Mbps through a %d Mbps member: the gateway is not enforcing the cap", mbps, groupCapMbps)
+	}
+	if mbps < groupCapMbps*0.6 {
+		t.Errorf("player throttled to %.1f Mbps, well under the %d Mbps cap: bucket shared or misresolved?", mbps, groupCapMbps)
+	}
+}
+
+// TestGroupUncappedMemberFastPath: an uncapped member resolves to nil limiters, so
+// its players take the relay fast path and are not throttled at all. (groups)
+func TestGroupUncappedMemberFastPath(t *testing.T) {
+	f := newGroupFixture(t)
+	port := freePort(t)
+	if err := f.g.SetGroup(GroupSpec{ID: "grp_a", Name: "grp", PublicPort: port, Proto: "tcp", Policy: PolicySpread}); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	src, closeSrc := legSource(t, groupCapPayload)
+	defer closeSrc()
+	f.joinLiveMember(t, "agt_a", "t_a", "grp_a", dialDP{addr: src})
+
+	mbps := groupDownloadMbps(t, port, groupCapPayload)
+	t.Logf("uncapped group member: %.1f Mbps", mbps)
+	if mbps < groupCapMbps*2 {
+		t.Errorf("uncapped member ran at %.1f Mbps over loopback — a cap leaked onto the fast path", mbps)
+	}
 }

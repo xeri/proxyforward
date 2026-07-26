@@ -323,3 +323,28 @@ func TestGroupOfflineWhenNoEligibleMember(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// TestGroupBandwidthCapThrottles: a member's bandwidth cap follows it into a group —
+// a player routed through the shared group port is throttled to the cap of the
+// member they landed on. A group shares a public port, never a budget. (Which leg
+// enforces is pinned in internal/gateway TestGroupMemberCapThrottlesAtGateway; here
+// the whole tag → join → route → cap path runs against real agents.)
+func TestGroupBandwidthCapThrottles(t *testing.T) {
+	srcAddr, closeSrc := sourceServer(t, capPayload)
+	defer closeSrc()
+	h := newHarnessWith(t, srcAddr, harnessOpts{bandwidthMbps: capMbps, bandwidthScope: config.BandwidthScopeCombined})
+	h.waitPublicPort()
+
+	groupPort := freeGroupPort(t)
+	if err := h.gw.SetGroup(gateway.GroupSpec{ID: "grp_a", Name: "grp", PublicPort: groupPort, Proto: "tcp", Policy: gateway.PolicySpread}); err != nil {
+		t.Fatalf("SetGroup: %v", err)
+	}
+	tagMember(t, h, h.tunnelID, "grp_a")
+	waitGroupEligible(t, h, "grp_a", 1)
+
+	mbps, err := downloadMbps(fmt.Sprintf("127.0.0.1:%d", groupPort), capPayload)
+	if err != nil {
+		t.Fatalf("download through the group port: %v", err)
+	}
+	checkCapped(t, "grouped member", mbps)
+}

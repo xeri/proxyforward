@@ -343,6 +343,25 @@ schema field yet — there are no config migrations and the local config dir is 
 in the wild). Several agent-management surfaces are backend-complete but not yet fully exposed in
 the GUI — tracked in `docs/agent/polish-backlog.md`.
 
+## Tunnel groups (`internal/gateway/group.go`)
+
+N interchangeable member backends behind one shared public port. Grouping is
+orchestration over the *existing* data plane: `pick` chooses which member session a
+player is routed to, and `spliceThroughMember` then runs the same `relay.Splice` a
+solo player gets. Members share world state — that precondition is the operator's.
+
+- **A group shares a port, never a budget.** The bandwidth cap that applies to a
+  player is the *member tunnel's own*, keyed `(agentID, tunnelID)` exactly as a solo
+  listener's is — `groupMember.limiters`, stamped at join and hot-applied on
+  re-sync by `reconcileGroupMembers` (rate in place, scope or capped/uncapped flip
+  by pointer swap). Uncapped members resolve to nil and keep the relay fast path.
+- **Membership is arbitration, not consent**: the gateway decides the port and the
+  roster and pushes immediately (`SetTunnelGroup`).
+- **Eligibility demands positive health**, unlike the solo "unknown ⇒ up" rule — a
+  group has alternatives, so an unverified member is not a routing target.
+- **Ordinals never fall back**: a rejoining member gets a new, higher `joinOrdinal`,
+  so a recovered ex-primary does not reclaim standby primary.
+
 ## UDP tunnels (`internal/gateway/udp.go`, `internal/relay/datagram.go`)
 
 A UDP port has no `accept()`, so `udpListener` manufactures one and thereby satisfies

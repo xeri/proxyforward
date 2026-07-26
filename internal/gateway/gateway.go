@@ -2377,7 +2377,11 @@ func (g *Gateway) spliceThroughMember(gl *groupListener, m *groupMember, connID 
 	// backend — so sniff the login handshake to attribute the connection to a player.
 	// Read-only: the tap forwards bytes unchanged.
 	client := mcsniff.Tap(tcp, entry)
-	if err := relay.Splice(client, stream, entry.Counters, relay.SpliceOpts{Ctx: sess.ctx}); err != nil {
+	// The cap that applies is the MEMBER tunnel's own — a group shares a public
+	// port, never a bandwidth budget, so a player is throttled by the backend they
+	// were routed to. Uncapped members resolve to nil and take the relay fast path.
+	inbound, outbound := bwcap.Resolve(m.limiters.Load())
+	if err := relay.Splice(client, stream, entry.Counters, relay.SpliceOpts{Ctx: sess.ctx, LimitAToB: inbound, LimitBToA: outbound}); err != nil {
 		sess.logger.Debug("group splice ended with error", "client", clientConn.RemoteAddr().String(), "err", err)
 	}
 	return true

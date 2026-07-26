@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+
+	"proxyforward/internal/bwcap"
 )
 
 // Tunnel groups: N interchangeable member backends behind one shared public port,
@@ -85,6 +87,12 @@ type groupMember struct {
 	// it's a ping before routing). Hot path: incremented before openFlow, decremented
 	// when the splice ends.
 	liveConns atomic.Int64
+	// limiters holds THIS member tunnel's own bandwidth cap, keyed (agentID,
+	// tunnelID) exactly as a solo listener's is — a group shares a port, never a
+	// budget, so a player routed here is capped by the backend they land on. Written
+	// by reconcileGroupMembers on the actor, read off-actor by spliceThroughMember
+	// (hence atomic). nil pointer / uncapped set = the relay fast path.
+	limiters atomic.Pointer[bwcap.LimiterSet]
 }
 
 // groupListener is one bound shared public port serving a group. Concurrency: the

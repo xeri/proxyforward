@@ -966,8 +966,9 @@ func (a *actor) reconcileGroupMembers(sess *agentSession, grouped []control.Tunn
 		if a.agents[sess.agentID] != sess || sess.evicted.Load() {
 			return
 		}
-		// want maps this session's desired member identities to their target group.
-		want := make(map[agentTun]string, len(grouped))
+		// want maps this session's desired member identities to their spec (which
+		// carries both the target group and the member's own bandwidth cap).
+		want := make(map[agentTun]control.TunnelSpec, len(grouped))
 		for _, spec := range grouped {
 			gl, ok := a.groupListeners[spec.GroupID]
 			if !ok {
@@ -978,7 +979,7 @@ func (a *actor) reconcileGroupMembers(sess *agentSession, grouped []control.Tunn
 					"tunnel_id", spec.ID, "group", spec.GroupID, "group_port", gl.spec.PublicPort)
 				continue
 			}
-			want[agentTun{AgentID: sess.agentID, TunnelID: spec.ID}] = spec.GroupID
+			want[agentTun{AgentID: sess.agentID, TunnelID: spec.ID}] = spec
 		}
 		touched := map[string]*groupListener{}
 		// Leave: drop this session's members not wanted, or wanted in a different group.
@@ -987,21 +988,29 @@ func (a *actor) reconcileGroupMembers(sess *agentSession, grouped []control.Tunn
 				if m.sess != sess {
 					continue
 				}
-				if g, ok := want[key]; !ok || g != gl.spec.ID {
+				if spec, ok := want[key]; !ok || spec.GroupID != gl.spec.ID {
 					delete(gl.members, key)
 					touched[gl.spec.ID] = gl
 				}
 			}
 		}
-		// Join: add wanted members not already present, keeping existing ordinals.
-		for key, groupID := range want {
-			gl := a.groupListeners[groupID]
-			if _, exists := gl.members[key]; exists {
+		// Join: add wanted members not already present, keeping existing ordinals. A
+		// member that stays keeps its live limiter set, hot-applying a cap change the
+		// same way a solo listener does (rate in place, scope/flip by pointer swap) —
+		// both config paths reach this call, so hot-apply falls out of the reconcile.
+		for key, spec := range want {
+			gl := a.groupListeners[spec.GroupID]
+			if m, exists := gl.members[key]; exists {
+				if set, swapped := bwcap.Reconcile(m.limiters.Load(), spec.BandwidthLimitMbps, spec.BandwidthLimitScope); swapped {
+					m.limiters.Store(set)
+				}
 				continue
 			}
 			gl.nextOrdinal++
-			gl.members[key] = &groupMember{sess: sess, tunnelID: key.TunnelID, joinOrdinal: gl.nextOrdinal}
-			touched[groupID] = gl
+			m := &groupMember{sess: sess, tunnelID: key.TunnelID, joinOrdinal: gl.nextOrdinal}
+			m.limiters.Store(bwcap.BuildSet(spec.BandwidthLimitMbps, spec.BandwidthLimitScope))
+			gl.members[key] = m
+			touched[spec.GroupID] = gl
 		}
 		for _, gl := range touched {
 			gl.rebuildSnap()
