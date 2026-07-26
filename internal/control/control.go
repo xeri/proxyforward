@@ -111,6 +111,20 @@ const (
 	// is possible. A peer without the capability keeps the dial-back path
 	// unchanged, and so does a pool that runs dry.
 	CapConnPool = "conn-pool"
+	// CapUDPDatagram: a udp tunnel's payload may ride QUIC's unreliable datagram
+	// extension (RFC 9221) instead of its stream, when the session can carry
+	// datagrams at all. A QUIC stream is reliable and ordered, so a lost packet
+	// carrying one datagram stalls the next until the retransmit lands — latency
+	// added to recover data that RakNet or a voice mod would rather have dropped.
+	//
+	// Offered unconditionally by the agent: on a TCP transport nothing can
+	// satisfy the other two gates (the session must implement the datagram seam,
+	// and the peer's QUIC must advertise datagrams), so the offer is inert rather
+	// than wrong. Every udp flow still opens a stream and still carries its
+	// OpenConn there — the datagram path is an optimization on the payload, never
+	// on the lifecycle, so teardown, eviction and the idle reaper are unchanged.
+	// The flow is named by OpenConn.FlowID; 0 means stream-only.
+	CapUDPDatagram = "udp-datagram"
 )
 
 // SupportedCapabilities is everything this build implements, both roles. A
@@ -432,6 +446,14 @@ type OpenConn struct {
 	// and always set otherwise so the agent can correlate later TypeConnStats
 	// RTT reports (stored as the entry's ConnKey).
 	ConnID string `json:"connId,omitempty"`
+	// FlowID names this flow in the session's QUIC datagrams (CapUDPDatagram),
+	// which are per-connection rather than per-stream and so must say which flow
+	// they belong to. Gateway-allocated, non-zero only when every gate passed:
+	// the capability negotiated, the session able to carry datagrams, and the
+	// peer's QUIC advertising them. 0 — the value a legacy peer sends, and the
+	// one every tcp tunnel sends — means this flow's payload rides the stream, as
+	// it always has.
+	FlowID uint32 `json:"flowId,omitempty"`
 }
 
 // OpenData asks the agent to dial back a fresh KindData TCP+TLS connection

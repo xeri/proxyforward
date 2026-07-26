@@ -98,6 +98,44 @@ func TestPoolFieldsAreInvisibleWithoutThem(t *testing.T) {
 	}
 }
 
+// OpenConn is the first frame on every data leg, so its back-compat matters as
+// much as the hello's: a flow that rides its stream — every tcp tunnel, every
+// udp tunnel on a transport that cannot carry datagrams, and every flow to a
+// peer that never learned the capability — must send the frame a legacy peer
+// sends, down to the byte. A flowId of 0 is that same "stream only" statement
+// read from the other side.
+func TestOpenConnFlowIDIsInvisibleWithoutIt(t *testing.T) {
+	stream := control.OpenConn{TunnelID: "tnl_a", ClientAddr: "203.0.113.7:51234", ConnID: "9"}
+	b, err := json.Marshal(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "flowId") {
+		t.Errorf("a stream-only open_conn carries a flow id: %s", b)
+	}
+
+	// A legacy frame decodes as flow 0, never as an unspecified flow.
+	var legacy control.OpenConn
+	if err := json.Unmarshal([]byte(`{"tunnelId":"tnl_a","clientAddr":"203.0.113.7:51234","connId":"9"}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.FlowID != 0 {
+		t.Errorf("a legacy open_conn named flow %d", legacy.FlowID)
+	}
+
+	// And an allocated flow round-trips, including a value past int32 — flow ids
+	// are a full uint32 space.
+	fast := control.OpenConn{TunnelID: "tnl_a", ConnID: "9", FlowID: 4294967295}
+	fb, _ := json.Marshal(fast)
+	var gotFast control.OpenConn
+	if err := json.Unmarshal(fb, &gotFast); err != nil {
+		t.Fatal(err)
+	}
+	if gotFast.FlowID != 4294967295 {
+		t.Errorf("flow id round-trip: %+v", gotFast)
+	}
+}
+
 // PauseState is a complete-set message: an empty one must marshal to {} (no
 // keys — a legacy peer that somehow receives one sees nothing surprising), and
 // a populated one round-trips.
