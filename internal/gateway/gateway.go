@@ -232,6 +232,13 @@ func (g *Gateway) Start(ctx context.Context) error {
 	// Bind the operator's configured groups before any agent connects, so each
 	// group claims its fixed port ahead of the solo tunnels that reassign around it.
 	g.bindConfiguredGroups()
+	// Anything that lost a port race above — a group socket here, a tunnel later —
+	// is retried on a ticker rather than left down until the agent reconnects.
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		g.runRebindRetry(runCtx)
+	}()
 	if g.cfg.Gateway.QUICEnabled {
 		// A QUIC bind failure must never take the gateway down — TCP transports
 		// still serve every agent. Log and carry on with QUIC disabled.

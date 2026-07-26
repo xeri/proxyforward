@@ -112,6 +112,16 @@ type agentSession struct {
 	// probe holds an in-flight on-demand latency measurement; nil otherwise.
 	probe atomic.Pointer[linkquality.ProbeCollector]
 
+	// lastDesired is the tunnel set most recently handed to reconcile, and
+	// bindFailed whether any of it failed to bind. Together they are what the
+	// periodic rebind retry (gateway.go retryFailedBinds) works from: a bind can
+	// fail for a reason that later goes away (an outside process holding the
+	// port), and without a retry the tunnel stays down until the agent happens to
+	// reconnect. lastDesired matters for legacy tunnel-sync agents, which have no
+	// stored config; a gateway-config session prefers the authoritative store.
+	lastDesired atomic.Pointer[[]control.TunnelSpec]
+	bindFailed  atomic.Bool
+
 	// health maps tunnelID → the agent's last reported local-backend state;
 	// the offline responder consults it.
 	health sync.Map
@@ -841,6 +851,18 @@ func (a *actor) reconcile(sess *agentSession, desired []control.TunnelSpec, pol 
 			outcomes = append(outcomes, reconcileOutcome{ID: spec.ID, Port: port, Err: err})
 		}
 	})
+	if ran {
+		// Record what was asked for and whether all of it landed, so the periodic
+		// rebind retry can find this session again. Set here rather than at each
+		// call site: every path into reconcile needs it, and a path that forgot
+		// would leave its tunnels down until the agent reconnected.
+		sess.lastDesired.Store(&desired)
+		failed := false
+		for _, o := range outcomes {
+			failed = failed || o.Err != nil
+		}
+		sess.bindFailed.Store(failed)
+	}
 	return outcomes, ran
 }
 
@@ -905,6 +927,27 @@ func (a *actor) bindGroup(spec GroupSpec, movable map[agentTun]struct{}, bindAdd
 	a.groupListeners[spec.ID] = gl
 	go a.acceptGroupClients(gl, handle)
 	return nil
+}
+
+// groupIsBound reports whether a group currently has a live shared socket. Off-actor
+// entry point (it takes the actor itself), for the rebind retry's "configured but
+// unbound" query.
+func (a *actor) groupIsBound(groupID string) bool {
+	var bound bool
+	a.do(func() { _, bound = a.groupListeners[groupID] })
+	return bound
+}
+
+// boundPorts snapshots one agent's live listeners as tunnelID → bound port. The
+// rebind retry diffs it across a reconcile to tell a recovery from a no-op.
+func (a *actor) boundPorts(agentID string) map[string]int {
+	out := map[string]int{}
+	a.do(func() {
+		for id, pl := range a.listeners[agentID] {
+			out[id] = listenerPort(pl.ln)
+		}
+	})
+	return out
 }
 
 // groupIDs snapshots the configured group IDs so a caller can unbind each without

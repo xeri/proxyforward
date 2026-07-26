@@ -110,6 +110,7 @@ persisted to config.
 | Auth-failure table cap | 4096 networks, LRU-evicted (hard cap, not a cleanup trigger) | `limits.go authFailNets` |
 | Pre-auth gate | `MaxConnsGlobal + 256` concurrent unauthenticated conns; slot freed at auth | `limits.go preAuthGate`, `preAuthHeadroom` |
 | Accept retry backoff | 5 ms doubling → 1 s; only a closed listener stops the loop | `gateway.go retryAccept` |
+| Rebind retry | 30 s ticker re-attempts every configured-but-unbound group socket and tunnel listener | `gateway/rebind.go rebindRetryInterval` |
 | Loss window / ping-loss timeout | 32 heartbeats / 2×interval | `agent.go lossWindow lossTimeout`, `linkquality.go` |
 | Gateway per-conn RTT sample | every 5 s, ≤200 entries per frame | `gateway.go rttSampleInterval`, `control.go MaxConnStatsPerFrame` |
 | GUI tick | 500 ms; log poll 250 ms; UI re-render tick 1 s | `app.go tickInterval`, `Activity.tsx pull`, `Overview.tsx` |
@@ -362,6 +363,29 @@ solo player gets. Members share world state — that precondition is the operato
   group has alternatives, so an unverified member is not a routing target.
 - **Ordinals never fall back**: a rejoining member gets a new, higher `joinOrdinal`,
   so a recovered ex-primary does not reclaim standby primary.
+
+## Rebind retry (`internal/gateway/rebind.go`)
+
+A bind can fail for a reason that later goes away — an outside process holding the
+port, a service that starts late in boot. Nothing retried, so the tunnel stayed
+down until the agent happened to reconnect, and a group whose **startup** bind
+failed left every member dark until the gateway restarted (runtime `SetGroup`
+rolls back on failure, so startup is the only way into that state).
+
+One ticker on the run context calls `RetryFailedBinds`, which re-runs the
+*existing* reconcile head rather than reimplementing "bind this" — recovery
+therefore obeys scope, the allowlist, reassignment and the per-agent tunnel cap
+exactly as a first bind does. Three properties make it safe to run forever:
+
+- **Groups first.** A member cannot join a group with no socket, so a group that
+  comes up this tick forces every session's membership to be re-reconciled.
+- **Healthy is free and silent.** Bound listeners compare equal (`sameListener`),
+  so they are left in place — a live player is never disturbed — and a session with
+  `bindFailed` clear is skipped entirely.
+- **Recovery is announced, and pushed only if it moved.** `EventTunnelRecovered` /
+  `EventGroupRecovered` land in the event ring; a gateway-config session whose
+  resolved ports actually changed goes through `adoptAndPush`, guarded by a
+  `HashTunnels` compare so an identical recovery bumps no generation.
 
 ## UDP tunnels (`internal/gateway/udp.go`, `internal/relay/datagram.go`)
 

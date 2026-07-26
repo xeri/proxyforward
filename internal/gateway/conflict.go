@@ -40,6 +40,12 @@ const (
 	// consent (pause edits no tunnel definition). Message names who acted.
 	EventTunnelPaused  = "tunnel-paused"
 	EventTunnelResumed = "tunnel-resumed"
+	// EventTunnelRecovered / EventGroupRecovered: a bind that had failed succeeded
+	// on a later retry — the port's outside holder went away. Completed outcomes
+	// like port-reclaimed: event log only, never a resolvable card, because the
+	// gateway already fixed it.
+	EventTunnelRecovered = "tunnel-recovered"
+	EventGroupRecovered  = "group-recovered"
 )
 
 // GatewayEvent is one notable, user-facing thing the gateway did or noticed —

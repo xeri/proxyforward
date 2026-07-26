@@ -348,3 +348,48 @@ func TestGroupBandwidthCapThrottles(t *testing.T) {
 	}
 	checkCapped(t, "grouped member", mbps)
 }
+
+// TestFailedBindRecoversWithoutReconnect: a tunnel whose public port was held by
+// another process at bind time comes back on its own once that process exits —
+// the agent stays connected throughout and simply learns the new port from the
+// push. Before the rebind retry the tunnel stayed dark until the agent happened
+// to reconnect, which on a healthy link could be hours.
+func TestFailedBindRecoversWithoutReconnect(t *testing.T) {
+	// One allowed port and nothing to reassign to, so a squatted port is a hard
+	// bind failure rather than a silent move to an alternative.
+	port := freeGroupPort(t)
+	squatter, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatalf("squat port %d: %v", port, err)
+	}
+	defer squatter.Close()
+
+	echoAddr, closeEcho := echoServer(t)
+	defer closeEcho()
+	h := newHarnessWith(t, echoAddr, harnessOpts{tweakGateway: func(c *config.Config) {
+		c.Gateway.PortAllowlist = []int{port}
+	}})
+
+	// The agent is connected, but its one tunnel has no listener.
+	deadline := time.Now().Add(10 * time.Second)
+	for !h.gw.AgentConnected() && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !h.gw.AgentConnected() {
+		t.Fatal("agent never connected")
+	}
+	if p, ok := h.gw.TunnelPort(h.tunnelID); ok {
+		t.Fatalf("tunnel bound on port %d despite its only allowed port being held", p)
+	}
+
+	squatter.Close()
+	h.gw.RetryFailedBinds()
+
+	addr := h.waitPublicPort()
+	if addr != fmt.Sprintf("127.0.0.1:%d", port) {
+		t.Fatalf("recovered tunnel is at %s, want the freed port %d", addr, port)
+	}
+	// The proof that matters: a player gets through, on a link the agent never
+	// reconnected.
+	roundTrip(t, addr, []byte("recovered"))
+}
