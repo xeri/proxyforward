@@ -7,15 +7,16 @@
 import {useMemo} from 'react'
 import type {CountryAgg} from '../../analytics'
 import {flagEmoji, fmtBytes, fmtRtt, hasRtt} from '../../state'
+import {ACTIVITY_LEGEND, activityTint} from './util'
 import {WORLD, WORLD_VIEWBOX, WorldCountry} from './worldgeo'
 
 export type GeoMetric = 'activity' | 'latency'
 
-/** activityFill: accent tint on a sqrt scale, floored so the quietest country
- * still reads as "present". Mirrors the peak-hours heatmap's accent ramp. */
+/** activityFill: the shared activity ramp on a sqrt scale, so a few busy
+ * countries don't wash the rest out. */
 function activityFill(sessions: number, max: number): string {
   const t = max > 0 ? Math.sqrt(Math.max(0, sessions)) / Math.sqrt(max) : 0
-  return `color-mix(in srgb, var(--accent) ${Math.round(14 + 78 * t)}%, transparent)`
+  return activityTint(t)
 }
 
 /** latencyFill: green→amber→red ramp. rttAvg 0 means located but never
@@ -200,8 +201,8 @@ function Legend({metric}: {metric: GeoMetric}) {
       <div className="mt-2.5 flex items-center justify-end gap-2 text-micro text-[var(--text-3)]">
         <span>quiet</span>
         <div className="flex gap-[3px]">
-          {[16, 38, 58, 76, 92].map(p => (
-            <span key={p} className="h-3 w-5 rounded-[2px]" style={{background: `color-mix(in srgb, var(--accent) ${p}%, transparent)`}} />
+          {ACTIVITY_LEGEND.map((fill, i) => (
+            <span key={i} className="h-3 w-5 rounded-[2px]" style={{background: fill}} />
           ))}
         </div>
         <span>busy</span>

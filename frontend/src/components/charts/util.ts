@@ -8,6 +8,22 @@ import {prefersReduced} from '../../motion'
 /** The engineering data face: every chart numeral is mono + tabular. */
 export const MONO = "'Spline Sans Mono Variable', ui-monospace, 'Cascadia Mono', Consolas, monospace"
 
+/** The activity ramp — one accent tint for every "how busy is this" surface
+ * (the world choropleth, the peak-hours heatmap). They ran separate constants
+ * and drifted: 14 %+78 %·t against 7 %+85 %·t, with legends sampling neither.
+ * The floor is what keeps the quietest *present* cell visible — a cell with no
+ * data is drawn in another material, never at 0 % of this ramp — and the top
+ * stops short of solid so a busy cell still reads as tint over the trench.
+ * ACTIVITY_LEGEND runs the same function, so a legend cannot drift from the
+ * fill it explains again. */
+const ACTIVITY_FLOOR = 12
+const ACTIVITY_SPAN = 80
+export function activityTint(t: number): string {
+  const p = Math.round(ACTIVITY_FLOOR + ACTIVITY_SPAN * Math.max(0, Math.min(1, t)))
+  return `color-mix(in srgb, var(--accent) ${p}%, transparent)`
+}
+export const ACTIVITY_LEGEND = [0, 0.25, 0.5, 0.75, 1].map(activityTint)
+
 /** niceScale rounds the axis max up to 4 divisions of a clean binary step, so
  * labels land on values like 64 KiB/s · 128 KiB/s · 192 KiB/s · 256 KiB/s. */
 export function niceScale(max: number): {max: number; ticks: number[]} {

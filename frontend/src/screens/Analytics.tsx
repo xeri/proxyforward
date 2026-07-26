@@ -2,7 +2,7 @@ import {Fragment, ReactNode, useEffect, useMemo, useRef, useState} from 'react'
 import {AvatarImg} from '../components/AvatarImg'
 import {prefersReduced} from '../motion'
 import {LineChart, LineSeries} from '../components/charts/LineChart'
-import {fmtTickTime} from '../components/charts/util'
+import {ACTIVITY_LEGEND, activityTint, fmtTickTime} from '../components/charts/util'
 import {GeoMetric, WorldMap} from '../components/charts/WorldMap'
 import {Column, DataTable} from '../components/DataTable'
 import {GeoRank} from '../components/GeoRank'
@@ -334,9 +334,7 @@ function PeakHours() {
                       : `${DAY_LABELS[ri]} ${String(h).padStart(2, '0')}:00 — no data`}
                     className="h-4 rounded-[2px] transition-colors"
                     style={{
-                      background: known
-                        ? `color-mix(in srgb, var(--accent) ${Math.round(7 + 85 * ratio)}%, transparent)`
-                        : 'var(--panel-2)',
+                      background: known ? activityTint(ratio) : 'var(--panel-2)',
                     }}
                   />
                 )
@@ -352,8 +350,8 @@ function PeakHours() {
         <div className="mt-3 flex items-center justify-end gap-2 text-micro text-[var(--text-3)]">
           <span>quiet</span>
           <div className="flex gap-[3px]">
-            {[10, 30, 55, 80, 100].map(p => (
-              <span key={p} className="h-3 w-4 rounded-[2px]" style={{background: `color-mix(in srgb, var(--accent) ${p}%, transparent)`}} />
+            {ACTIVITY_LEGEND.map((fill, i) => (
+              <span key={i} className="h-3 w-4 rounded-[2px]" style={{background: fill}} />
             ))}
           </div>
           <span>busy</span>
