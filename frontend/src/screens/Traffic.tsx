@@ -6,7 +6,7 @@ import {IconConnections, IconLink, IconUsers} from '../components/icons'
 import {usePeers} from '../history'
 import {NavId} from '../nav'
 import {openDossierOnMount} from '../players'
-import {fmtBytes, fmtRate, fmtRtt, hasRtt, UIStatus} from '../state'
+import {fmtBytes, fmtRate, fmtRelative, fmtRtt, hasRtt, UIStatus} from '../state'
 
 // Per-IP current-rate tracker: module-level so tab switches don't reset the
 // baselines. Rates come from diffing live-connection byte totals between
@@ -345,14 +345,4 @@ function fmtElapsed(ms: number): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   if (h > 0) return `${h}:${pad(m)}:${pad(sec)}`
   return `${m}:${pad(sec)}`
-}
-
-function fmtRelative(t: number): string {
-  if (!t) return '—'
-  const s = Math.max(0, Math.floor((Date.now() - t) / 1000))
-  if (s < 45) return 'just now'
-  if (s < 3600) return `${Math.round(s / 60)}m ago`
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`
-  if (s < 7 * 86400) return `${Math.round(s / 86400)}d ago`
-  return `${Math.round(s / (7 * 86400))}w ago`
 }

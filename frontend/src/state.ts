@@ -121,6 +121,21 @@ export function fmtDuration(ms: number): string {
   return `${sec}s`
 }
 
+/** fmtRelative: the one "how long ago" rendering — "just now", then m/h/d/w.
+ * The cutoff is 60 s so the first step out of "just now" is always "1m ago";
+ * the two copies this replaces disagreed (45 s in the Traffic client table,
+ * 90 s in the player wall — and the 90 s one skipped "1m ago" entirely, since
+ * 90 s rounds to two minutes). A missing timestamp is the "—" sentinel. */
+export function fmtRelative(t: number): string {
+  if (!t) return '—'
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000))
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.round(s / 60)}m ago`
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`
+  if (s < 7 * 86400) return `${Math.round(s / 86400)}d ago`
+  return `${Math.round(s / (7 * 86400))}w ago`
+}
+
 /** hasRtt: the one RTT-known predicate. Backends use both -1 and 0 as "no
  * sample" sentinels, so anything ≤ 0 renders as unknown. */
 export function hasRtt(ms: number): boolean {

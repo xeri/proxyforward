@@ -6,6 +6,7 @@
 import {PlayerDetail, PlayerHistory, PlayerLatency, Players} from '../wailsjs/go/app/App'
 import {analytics} from '../wailsjs/go/models'
 import {usePolled} from './hooks'
+import {fmtRelative} from './state'
 
 export type PlayerCard = analytics.PlayerCard
 export type PlayersPage = analytics.PlayersPage
@@ -72,16 +73,10 @@ export function usePlayerLatency(uuid: string | null, windowMs: number, pollMs =
 
 // ---- shared formatting ------------------------------------------------------
 
-/** fmtLastSeen: relative "when" for wall tiles and history spans. */
+/** fmtLastSeen: relative "when" for wall tiles and history spans — fmtRelative
+ * plus the one case it has no opinion on, a player who is here right now. */
 export function fmtLastSeen(t: number, online?: boolean): string {
-  if (online) return 'online now'
-  if (!t) return '—'
-  const s = Math.max(0, Math.floor((Date.now() - t) / 1000))
-  if (s < 90) return 'just now'
-  if (s < 3600) return `${Math.round(s / 60)}m ago`
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`
-  if (s < 7 * 86400) return `${Math.round(s / 86400)}d ago`
-  return `${Math.round(s / (7 * 86400))}w ago`
+  return online ? 'online now' : fmtRelative(t)
 }
 
 /** fmtPlaytime: compact hours-first duration for stat tiles. */
