@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -203,5 +204,30 @@ func FuzzServeOffline(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		conn := &fuzzConn{r: bytes.NewReader(data)}
 		ServeOffline(conn, OfflineInfo{MOTD: "offline", VersionName: "v"})
+	})
+}
+
+// FuzzStatusPingResponse fuzzes the one parser here that reads bytes a *server*
+// sent us. The peer is whatever is listening on the operator-typed local address,
+// so its response is untrusted input like any other.
+func FuzzStatusPingResponse(f *testing.F) {
+	f.Add(`{"version":{"name":"1.21","protocol":769},"players":{"max":20,"online":1},"description":"hi"}`)
+	f.Add(`{"description":{"text":"a","extra":[{"text":"b"}]}}`)
+	f.Add(`{"description":{"extra":[{"extra":[{"text":"deep"}]}]}}`)
+	f.Add(`{"description":"§ccolour§r"}`)
+	f.Add(`{"players":null}`)
+	f.Add(``)
+	f.Fuzz(func(t *testing.T, doc string) {
+		info, err := parseStatusDoc(doc)
+		if err != nil {
+			return
+		}
+		// Unknown must stay the sentinel, never a fabricated count.
+		if info.PlayersOnline < -1 && info.PlayersMax < -1 {
+			t.Fatalf("players below the unknown sentinel: %d/%d", info.PlayersOnline, info.PlayersMax)
+		}
+		if strings.ContainsRune(info.MOTD, '§') {
+			t.Fatalf("MOTD kept a formatting code: %q", info.MOTD)
+		}
 	})
 }
