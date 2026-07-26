@@ -58,7 +58,7 @@ func (d *DB) prune(now time.Time) {
 	}
 	for _, s := range steps {
 		if _, err := tx.Exec(s.q, s.args...); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			d.logger.Warn("analytics: prune failed", "table", s.name, "err", err)
 			return
 		}

@@ -145,9 +145,9 @@ func (l *udpListener) Close() error {
 		l.mu.Unlock()
 
 		close(l.closed)
-		l.pc.Close()
+		_ = l.pc.Close()
 		for _, s := range live {
-			s.Close()
+			_ = s.Close()
 		}
 		<-l.done
 	})
@@ -224,7 +224,7 @@ func (l *udpListener) deliver(addr *net.UDPAddr, payload []byte) {
 		// The accept backlog is full: the gateway is not taking new players fast
 		// enough. Drop this one rather than queue without bound; the client will
 		// retry, exactly as it would against a full TCP accept queue.
-		s.Close()
+		_ = s.Close()
 	}
 }
 

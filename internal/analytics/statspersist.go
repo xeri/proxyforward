@@ -87,7 +87,7 @@ func (d *DB) SaveStats(snap *stats.SnapshotData) error {
 	if err != nil {
 		return fmt.Errorf("stats save: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(`INSERT OR REPLACE INTO lifetime
 			(id, bytes_in, bytes_out, link_bytes_in, link_bytes_out, uptime_ms, link_sessions, first_run_ms)

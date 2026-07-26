@@ -33,7 +33,7 @@ func (w *rotatingWriter) open() error {
 	}
 	info, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	w.f = f
@@ -66,7 +66,7 @@ func (w *rotatingWriter) rotate() error {
 	w.f = nil
 	os.Remove(fmt.Sprintf("%s.%d", w.path, w.keep))
 	for i := w.keep - 1; i >= 1; i-- {
-		os.Rename(fmt.Sprintf("%s.%d", w.path, i), fmt.Sprintf("%s.%d", w.path, i+1))
+		_ = os.Rename(fmt.Sprintf("%s.%d", w.path, i), fmt.Sprintf("%s.%d", w.path, i+1))
 	}
 	if err := os.Rename(w.path, w.path+".1"); err != nil && !os.IsNotExist(err) {
 		// Fall through to reopen either way; a failed rename means we keep

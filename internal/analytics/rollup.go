@@ -56,7 +56,7 @@ func (d *DB) runRollup(now time.Time) {
 		d.logger.Warn("analytics: rollup begin failed", "err", err)
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	steps := []struct {
 		name string

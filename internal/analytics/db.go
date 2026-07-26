@@ -83,7 +83,7 @@ func Open(dir string, opts Options, logger *slog.Logger) (*DB, error) {
 	h, err := openSQLite(path)
 	if err != nil {
 		logger.Warn("analytics: database unreadable — starting fresh", "path", path, "err", err)
-		os.Rename(path, path+".bad")
+		_ = os.Rename(path, path+".bad")
 		// Stale WAL sidecars would resurrect the bad state; drop them.
 		os.Remove(path + "-wal")
 		os.Remove(path + "-shm")
@@ -123,7 +123,7 @@ func openReadPool(path string, logger *slog.Logger) *sql.DB {
 	// Force one real connection now so a broken pool fails here, not on the
 	// first dashboard query.
 	if _, err := h.Exec("SELECT 1"); err != nil {
-		h.Close()
+		_ = h.Close()
 		logger.Warn("analytics: read pool unavailable — reads share the writer connection", "err", err)
 		return nil
 	}
@@ -148,11 +148,11 @@ func openSQLite(path string) (*sql.DB, error) {
 	// auto_vacuum must be declared before the first table exists; on an
 	// already-populated database this is a no-op, which is fine.
 	if _, err := h.Exec("PRAGMA auto_vacuum = INCREMENTAL"); err != nil {
-		h.Close()
+		_ = h.Close()
 		return nil, err
 	}
 	if err := migrate(h); err != nil {
-		h.Close()
+		_ = h.Close()
 		return nil, err
 	}
 	return h, nil
@@ -174,11 +174,11 @@ func migrate(h *sql.DB) error {
 			return err
 		}
 		if _, err := tx.Exec(migrations[v]); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("migrate to schema %d: %w", v+1, err)
 		}
 		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", v+1)); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("stamp schema %d: %w", v+1, err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -340,7 +340,7 @@ func (d *DB) runBatch(ops []op) {
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		d.logger.Warn("analytics: commit batch failed", "ops", len(ops), "err", err)
 	}
 }
@@ -353,7 +353,7 @@ func (d *DB) Close() error {
 	// Read pool first: an open reader would keep WAL frames pinned and defeat
 	// the TRUNCATE checkpoint below.
 	if d.read != d.sql {
-		d.read.Close()
+		_ = d.read.Close()
 	}
 	// Checkpointing on close keeps the config dir copy-friendly (one file,
 	// no -wal/-shm sidecars to forget).

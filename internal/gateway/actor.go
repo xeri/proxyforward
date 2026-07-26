@@ -145,8 +145,8 @@ func (s *agentSession) writeControl(msgType string, payload any) error {
 	if s.ctrl == nil {
 		return errNoControlStream
 	}
-	s.ctrl.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
-	defer s.ctrl.SetWriteDeadline(time.Time{})
+	_ = s.ctrl.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
+	defer func() { _ = s.ctrl.SetWriteDeadline(time.Time{}) }()
 	return control.WriteMsg(s.ctrl, msgType, payload)
 }
 
@@ -176,7 +176,7 @@ func (a *agentSession) session() transport.Session {
 // streams die with it) and dataConns is empty.
 func (a *agentSession) closeAll() {
 	if s := a.session(); s != nil {
-		s.Close()
+		_ = s.Close()
 	}
 	if a.conn != nil {
 		a.conn.Close()

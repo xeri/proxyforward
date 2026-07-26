@@ -42,7 +42,7 @@ func AddFirewallRule() error {
 		return fmt.Errorf("locate own executable: %w", err)
 	}
 	// Best-effort delete keeps re-runs from stacking duplicate rules.
-	netsh("advfirewall", "firewall", "delete", "rule", "name="+FirewallRuleName)
+	_, _, _ = netsh("advfirewall", "firewall", "delete", "rule", "name="+FirewallRuleName)
 	out, code, err := netsh("advfirewall", "firewall", "add", "rule",
 		"name="+FirewallRuleName,
 		"dir=in", "action=allow", "enable=yes",

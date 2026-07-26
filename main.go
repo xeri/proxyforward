@@ -80,7 +80,7 @@ func installCrashLog() *os.File {
 		return nil
 	}
 	if err := debug.SetCrashOutput(f, debug.CrashOptions{}); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil
 	}
 	return f
@@ -249,7 +249,7 @@ func newRoleCmd(role config.Role, short string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer closeLogs()
+			defer func() { _ = closeLogs() }()
 
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -340,7 +340,7 @@ func runServiceEngine(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer closeLogs()
+	defer func() { _ = closeLogs() }()
 	logger.Info("service starting", "role", cfg.Role, "version", version.String(), "config", configPath)
 	return runEngineWithIPC(ctx, cfg, configDir, configPath, logger)
 }
@@ -459,7 +459,7 @@ func runGUI(deepLink string) error {
 	if lerr != nil {
 		return lerr
 	}
-	defer closeLogs()
+	defer func() { _ = closeLogs() }()
 	if err != nil {
 		logger.Error("config failed to load; using defaults", "err", err)
 	}
@@ -476,7 +476,7 @@ func runGUI(deepLink string) error {
 			app.AdoptClient(a, c)
 			attached = true
 		} else {
-			c.Close()
+			_ = c.Close()
 		}
 	}
 	if !attached {

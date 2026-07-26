@@ -43,8 +43,8 @@ func (c *Client) Close() error { return c.conn.Close() }
 
 // roundTrip sends one request and decodes the expected response type.
 func roundTrip[T any](c *Client, reqType string, req any, respType string) (*T, error) {
-	c.conn.SetDeadline(time.Now().Add(requestTimeout))
-	defer c.conn.SetDeadline(time.Time{})
+	_ = c.conn.SetDeadline(time.Now().Add(requestTimeout))
+	defer func() { _ = c.conn.SetDeadline(time.Time{}) }()
 	if err := control.WriteMsg(c.conn, reqType, req); err != nil {
 		return nil, fmt.Errorf("ipc: send %s: %w", reqType, err)
 	}

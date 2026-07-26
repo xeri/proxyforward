@@ -64,7 +64,7 @@ func (p *program) Start(s service.Service) error {
 			// A fatal engine error (bad config, unrecoverable) must reach the
 			// SCM so OnFailure=restart applies; exiting is the sanctioned way.
 			if logger, lerr := p.svc.Logger(nil); lerr == nil {
-				logger.Errorf("engine failed: %v", err)
+				_ = logger.Errorf("engine failed: %v", err)
 			}
 			os.Exit(1)
 		}
@@ -134,7 +134,7 @@ func UninstallService() error {
 	if err != nil {
 		return err
 	}
-	s.Stop() // best effort; uninstall of a running service would fail
+	_ = s.Stop() // best effort; uninstall of a running service would fail
 	if err := s.Uninstall(); err != nil {
 		return fmt.Errorf("uninstall service: %w", err)
 	}

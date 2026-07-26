@@ -97,7 +97,7 @@ func (g *Gateway) handleDataConn(conn net.Conn, hello *control.Hello, identity I
 		conn.Close()
 		return
 	}
-	conn.SetDeadline(time.Time{})
+	_ = conn.SetDeadline(time.Time{})
 	// Count this data conn's bytes into the same process + session link totals
 	// as the control conn, so the GUI's link card reflects per-conn payload.
 	dataConn := stats.NewCountingConn(conn, &g.linkTotals, pc.link)

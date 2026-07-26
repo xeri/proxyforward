@@ -191,7 +191,7 @@ func (s *splice) copyHalf(dst, src Conn, count *atomic.Int64, ctx context.Contex
 	// direction never trips it (its Reads return long first) and a quiet one
 	// trips it at most once per idle window and re-arms in stillLive. That keeps
 	// the read loop free of per-iteration deadline churn on the hot path.
-	src.SetReadDeadline(time.Now().Add(s.idle))
+	_ = src.SetReadDeadline(time.Now().Add(s.idle))
 
 	for {
 		n, rerr := src.Read(buf)
@@ -205,7 +205,7 @@ func (s *splice) copyHalf(dst, src Conn, count *atomic.Int64, ctx context.Contex
 					return werr
 				}
 			}
-			dst.SetWriteDeadline(time.Now().Add(WriteStallTimeout))
+			_ = dst.SetWriteDeadline(time.Now().Add(WriteStallTimeout))
 			wn, werr := dst.Write(buf[:n])
 			if count != nil && wn > 0 {
 				count.Add(int64(wn))
@@ -223,18 +223,18 @@ func (s *splice) copyHalf(dst, src Conn, count *atomic.Int64, ctx context.Contex
 		}
 		if rerr != nil {
 			if rerr == io.EOF {
-				dst.SetWriteDeadline(time.Time{})
+				_ = dst.SetWriteDeadline(time.Time{})
 				return dst.CloseWrite()
 			}
 			if live, rearmed := s.stillLive(src, rerr); rearmed {
 				continue // quiet in this direction only; the splice is working
 			} else if !live {
-				dst.CloseWrite()
+				_ = dst.CloseWrite()
 				return ErrIdle
 			}
 			// Read error: tear down the write side of dst too — there is
 			// nothing more to forward and the conn is likely dead.
-			dst.CloseWrite()
+			_ = dst.CloseWrite()
 			return rerr
 		}
 	}
@@ -267,7 +267,7 @@ func (s *splice) stillLive(src Conn, rerr error) (live, rearmed bool) {
 	if time.Since(last) >= s.idle {
 		return false, false
 	}
-	src.SetReadDeadline(last.Add(s.idle))
+	_ = src.SetReadDeadline(last.Add(s.idle))
 	return true, true
 }
 

@@ -203,7 +203,7 @@ func serveAvatar(w http.ResponseWriter, b []byte, longLived bool) {
 		// no-cache keeps the browser re-asking so the swap happens.
 		w.Header().Set("Cache-Control", "no-cache")
 	}
-	w.Write(b)
+	_, _ = w.Write(b)
 }
 
 func clampAvatarSize(q string) int {
@@ -374,7 +374,7 @@ func (c *avatarCache) get(ctx context.Context, u string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, maxAvatarBody))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxAvatarBody))
 		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, maxAvatarBody))

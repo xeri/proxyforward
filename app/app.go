@@ -213,7 +213,7 @@ func (a *App) Shutdown(ctx context.Context) {
 	defer a.mu.Unlock()
 	a.closeAnalyticsConnLocked()
 	if a.client != nil {
-		a.client.Close()
+		_ = a.client.Close()
 		a.client = nil
 	}
 }
@@ -224,7 +224,7 @@ func (a *App) Shutdown(ctx context.Context) {
 // before touching the latch.
 func (a *App) closeAnalyticsConnLocked() {
 	if a.anClient != nil {
-		a.anClient.Close()
+		_ = a.anClient.Close()
 		a.anClient = nil
 	}
 	a.analyticsUnsupported = false
@@ -591,7 +591,7 @@ func (a *App) statusLocked() UIStatus {
 				// Daemon went away: fall back to running our own engine (or
 				// the wizard) on the next tick.
 				a.logger.Warn("daemon connection lost", "err", err)
-				a.client.Close()
+				_ = a.client.Close()
 				a.client = nil
 				a.closeAnalyticsConnLocked()
 				if a.cfg.Role != config.RoleUnset && a.cfg.Validate() == nil {

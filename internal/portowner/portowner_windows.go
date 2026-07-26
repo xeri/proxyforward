@@ -127,7 +127,7 @@ func ownerFromPID(pid uint32) Owner {
 	if err != nil {
 		return o // access denied (system process) — PID alone still helps
 	}
-	defer windows.CloseHandle(h)
+	defer func() { _ = windows.CloseHandle(h) }()
 	var buf [windows.MAX_PATH]uint16
 	size := uint32(len(buf))
 	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &size); err == nil {

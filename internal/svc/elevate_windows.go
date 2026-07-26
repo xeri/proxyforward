@@ -81,7 +81,7 @@ func RunElevatedTask(task string, args ...string) error {
 	if info.hProcess == 0 {
 		return fmt.Errorf("elevated helper started but returned no process handle")
 	}
-	defer windows.CloseHandle(info.hProcess)
+	defer func() { _ = windows.CloseHandle(info.hProcess) }()
 
 	s, err := windows.WaitForSingleObject(info.hProcess, uint32(elevatedTaskDeadline.Milliseconds()))
 	if err != nil {

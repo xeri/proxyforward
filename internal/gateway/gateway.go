@@ -258,7 +258,7 @@ func (g *Gateway) startQUIC(ctx context.Context, cert tls.Certificate) error {
 	}
 	ln, err := transport.ListenQUIC(pc, link.GatewayTLSConfig(cert), &g.linkTotals)
 	if err != nil {
-		pc.Close()
+		_ = pc.Close()
 		return err
 	}
 	g.quicLn = ln
@@ -279,7 +279,7 @@ func (g *Gateway) Shutdown() {
 	if g.quicLn != nil {
 		// Joins quic-go's transport goroutines and releases the UDP socket; the
 		// cancel above already unblocked acceptQUIC and every serving ctx.
-		g.quicLn.Close()
+		_ = g.quicLn.Close()
 	}
 	g.wg.Wait()
 }
@@ -455,7 +455,7 @@ func kickConns(sess *agentSession, tunnelID string) {
 	sess.rttConns.Range(func(_, v any) bool {
 		rc := v.(*rttConn)
 		if tunnelID == "" || rc.entry.TunnelID == tunnelID {
-			rc.tcp.Close()
+			_ = rc.tcp.Close()
 		}
 		return true
 	})
@@ -1235,7 +1235,7 @@ func (g *Gateway) acceptQUIC(ctx context.Context) {
 		backoff = 0
 		if !g.preAuth.admit() {
 			g.logger.Warn("pre-auth gate full; refusing quic session", "remote", sess.RemoteAddr().String())
-			sess.Close()
+			_ = sess.Close()
 			continue
 		}
 		g.wg.Add(1)
@@ -1263,7 +1263,7 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 	// --- Pre-auth boundary: rate limit before spending a stream on an unauth peer. ---
 	if !g.authLim.allow(ip) {
 		logger.Debug("pre-auth: rate limited after repeated failures")
-		sess.Close()
+		_ = sess.Close()
 		return
 	}
 	// The agent opens the control stream first; the hello is its first frame.
@@ -1271,7 +1271,7 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 	if err != nil {
 		logger.Debug("pre-auth: no control stream", "err", err)
 		g.authLim.fail(ip)
-		sess.Close()
+		_ = sess.Close()
 		return
 	}
 	// Both directions, like the TCP path's conn.SetDeadline — the prologue's
@@ -1282,33 +1282,33 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 	// gateway in WriteMsg forever, so sess.Close() below is never reached and the
 	// pre-auth slot never comes back. That is the pre-auth gate defeated with a
 	// handful of cheap connections, using its own accounting to do it.
-	ctrl.SetDeadline(time.Now().Add(preAuthTimeout))
+	_ = ctrl.SetDeadline(time.Now().Add(preAuthTimeout))
 	env, err := control.ReadMsg(ctrl, control.PreAuthMaxFrame)
 	if err != nil {
 		logger.Debug("pre-auth read failed", "err", err)
 		g.authLim.fail(ip)
-		sess.Close()
+		_ = sess.Close()
 		return
 	}
 	if env.Type != control.TypeHello {
 		logger.Debug("pre-auth: first frame was not hello", "type", env.Type)
 		g.authLim.fail(ip)
-		sess.Close()
+		_ = sess.Close()
 		return
 	}
 	hello, err := control.Decode[control.Hello](env)
 	if err != nil {
 		logger.Debug("pre-auth: bad hello", "err", err)
 		g.authLim.fail(ip)
-		sess.Close()
+		_ = sess.Close()
 		return
 	}
 	if hello.ProtocolVersion != control.ProtocolVersion {
-		control.WriteMsg(ctrl, control.TypeHelloErr, control.HelloErr{
+		_ = control.WriteMsg(ctrl, control.TypeHelloErr, control.HelloErr{
 			Code:    control.ErrCodeVersion,
 			Message: fmt.Sprintf("gateway speaks protocol %d, agent sent %d — update the older side", control.ProtocolVersion, hello.ProtocolVersion),
 		})
-		sess.Close()
+		_ = sess.Close()
 		return
 	}
 	identity, err := g.validator.Validate(hello, g.fingerprint)
@@ -1316,8 +1316,8 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 		code, msg := authErrorReply(err)
 		g.authLim.fail(ip)
 		logger.Warn("agent rejected", "code", code)
-		control.WriteMsg(ctrl, control.TypeHelloErr, control.HelloErr{Code: code, Message: msg})
-		sess.Close()
+		_ = control.WriteMsg(ctrl, control.TypeHelloErr, control.HelloErr{Code: code, Message: msg})
+		_ = sess.Close()
 		return
 	}
 	// Authenticated: give the handshake slot back before this becomes a session
@@ -1327,11 +1327,11 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 	// QUIC has no per-conn dial-back — data streams ride this same connection, so
 	// only a control kind is valid; a data hello would have nothing to match.
 	if hello.Kind != control.KindControl {
-		control.WriteMsg(ctrl, control.TypeHelloErr, control.HelloErr{
+		_ = control.WriteMsg(ctrl, control.TypeHelloErr, control.HelloErr{
 			Code:    control.ErrCodeVersion,
 			Message: fmt.Sprintf("connection kind %q not supported over quic", hello.Kind),
 		})
-		sess.Close()
+		_ = sess.Close()
 		return
 	}
 
@@ -1339,12 +1339,12 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 	// Close is the whole drain boundary). ---
 	admitted, negotiated, err := g.buildAndAdmit(ctx, nil, hello, identity, ip, logger)
 	if err != nil {
-		sess.Close()
+		_ = sess.Close()
 		return
 	}
 	defer g.act().disconnected(admitted)
 	admitted.setSession(sess)
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	gwHost, _ := os.Hostname()
 	okMsg := control.HelloOK{
@@ -1364,7 +1364,7 @@ func (g *Gateway) handleQUICSession(ctx context.Context, sess transport.Session,
 		logger.Debug("hello_ok write failed", "err", err)
 		return
 	}
-	ctrl.SetDeadline(time.Time{}) // pre-auth over; liveness moves to the control stream
+	_ = ctrl.SetDeadline(time.Time{}) // pre-auth over; liveness moves to the control stream
 
 	g.serveAdmitted(ctx, admitted, ctrl, hello, negotiated)
 }
@@ -1401,7 +1401,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthD
 		conn.Close()
 		return
 	}
-	conn.SetDeadline(time.Now().Add(preAuthTimeout))
+	_ = conn.SetDeadline(time.Now().Add(preAuthTimeout))
 	env, err := control.ReadMsg(conn, control.PreAuthMaxFrame)
 	if err != nil {
 		logger.Debug("pre-auth read failed", "err", err)
@@ -1423,7 +1423,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthD
 		return
 	}
 	if hello.ProtocolVersion != control.ProtocolVersion {
-		control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
+		_ = control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
 			Code:    control.ErrCodeVersion,
 			Message: fmt.Sprintf("gateway speaks protocol %d, agent sent %d — update the older side", control.ProtocolVersion, hello.ProtocolVersion),
 		})
@@ -1435,7 +1435,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthD
 		code, msg := authErrorReply(err)
 		g.authLim.fail(ip)
 		logger.Warn("agent rejected", "code", code)
-		control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{Code: code, Message: msg})
+		_ = control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{Code: code, Message: msg})
 		conn.Close()
 		return
 	}
@@ -1453,7 +1453,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthD
 		g.handleDataConn(conn, hello, identity)
 		return
 	default:
-		control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
+		_ = control.WriteMsg(conn, control.TypeHelloErr, control.HelloErr{
 			Code:    control.ErrCodeVersion,
 			Message: fmt.Sprintf("connection kind %q not supported", hello.Kind),
 		})
@@ -1488,7 +1488,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthD
 		conn.Close()
 		return
 	}
-	conn.SetDeadline(time.Time{}) // pre-auth over; liveness moves to the control stream
+	_ = conn.SetDeadline(time.Time{}) // pre-auth over; liveness moves to the control stream
 
 	// Count every post-auth byte on the link (yamux framing included) — the
 	// "agent ↔ gateway" hop the GUI shows.
@@ -1499,7 +1499,7 @@ func (g *Gateway) handleControlConn(ctx context.Context, conn net.Conn, preAuthD
 		return
 	}
 	sess.setSession(mux)
-	defer mux.Close()
+	defer func() { _ = mux.Close() }()
 
 	// The agent opens the control stream first; bound the wait so a stalled
 	// peer can't hold a half-admitted session open.
@@ -1624,7 +1624,7 @@ func acceptStreamTimeout(sess transport.Session, d time.Duration) (transport.Str
 	case r := <-ch:
 		return r.st, r.err
 	case <-time.After(d):
-		sess.Close() // unblocks the goroutine above
+		_ = sess.Close() // unblocks the goroutine above
 		r := <-ch
 		if r.err == nil {
 			r.st.Close()
@@ -1660,7 +1660,7 @@ func (g *Gateway) serveControl(ctx context.Context, sess *agentSession, ctrl tra
 		if ctx.Err() != nil {
 			return
 		}
-		ctrl.SetReadDeadline(time.Now().Add(controlIdleTimeout))
+		_ = ctrl.SetReadDeadline(time.Now().Add(controlIdleTimeout))
 		env, err := control.ReadMsg(ctrl, control.MaxFrame)
 		if err != nil {
 			if ctx.Err() == nil {
@@ -2246,7 +2246,7 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	defer releaseFlow()
 	defer stream.Close()
 
-	stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
+	_ = stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
 	if err := control.WriteMsg(stream, control.TypeOpenConn, control.OpenConn{
 		TunnelID:   spec.ID,
 		ClientAddr: clientConn.RemoteAddr().String(),
@@ -2255,7 +2255,7 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 		sess.logger.Debug("open_conn write failed", "err", err)
 		return
 	}
-	stream.SetWriteDeadline(time.Time{})
+	_ = stream.SetWriteDeadline(time.Time{})
 
 	// Splice(client, leg): AToB is client→server (inbound), BToA is
 	// server→client (outbound). Parent on the session ctx so eviction cancels a
@@ -2358,7 +2358,7 @@ func (g *Gateway) spliceThroughMember(gl *groupListener, m *groupMember, connID 
 	entry, closeEntry := g.Conns.Open(sess.agentID, m.tunnelID, gl.spec.Name, gl.spec.ID, clientConn.RemoteAddr().String(), connID, true)
 	defer closeEntry()
 
-	stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
+	_ = stream.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
 	if err := control.WriteMsg(stream, control.TypeOpenConn, control.OpenConn{
 		TunnelID:   m.tunnelID,
 		ClientAddr: clientConn.RemoteAddr().String(),
@@ -2367,7 +2367,7 @@ func (g *Gateway) spliceThroughMember(gl *groupListener, m *groupMember, connID 
 		sess.logger.Debug("group: open_conn write failed", "err", err)
 		return true // the leg opened; a write failure drops this player, it is not a re-pick
 	}
-	stream.SetWriteDeadline(time.Time{})
+	_ = stream.SetWriteDeadline(time.Time{})
 
 	// Track for RTT sampling over the connection's lifetime (kernel RTT via TCP_INFO).
 	sess.rttConns.Store(connID, &rttConn{tcp: tcp, entry: entry})
@@ -2408,7 +2408,7 @@ func (g *Gateway) serveOffline(conn net.Conn, spec control.TunnelSpec) {
 	if spec.OfflineMOTD == "" {
 		return
 	}
-	conn.SetDeadline(time.Now().Add(offlineServeTimeout))
+	_ = conn.SetDeadline(time.Now().Add(offlineServeTimeout))
 	if err := mc.ServeOffline(conn, mc.OfflineInfo{MOTD: spec.OfflineMOTD}); err != nil {
 		g.logger.Debug("offline responder ended", "tunnel", spec.Name, "err", err)
 	}

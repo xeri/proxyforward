@@ -11,8 +11,33 @@ linters:
     - ineffassign # dead stores
     - unused # dead code
     - misspell # typos in comments, which are this repo's spec
+    - errcheck # an ignored error is a silent failure; every site says so explicitly
 
   settings:
+    errcheck:
+      # No blanket (io.Closer).Close exclude: a write-path Close is the
+      # last-bytes signal (a zip's central directory, a file's final flush), and
+      # hiding it is how a corrupt support bundle got reported as written. Each
+      # entry below is a type whose error is genuinely not actionable:
+      exclude-functions:
+        # Closing a socket: the peer is already gone or the FIN already sent by
+        # relay's CloseWrite. Nothing a caller could do differs on the error.
+        - (net.Conn).Close
+        - (net.Listener).Close
+        - (*net.TCPConn).Close
+        - (*net.UDPConn).Close
+        # An HTTP body closed after it has been read (or deliberately drained).
+        - (io.ReadCloser).Close
+        # Read-side database handles; the query's own error is the real signal.
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        # Diagnostic output. A failed write to stderr or into an archive entry
+        # cannot be reported anywhere better than the thing that just failed.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # Best-effort cleanup of a temp/quarantine path we are about to replace.
+        - os.Remove
     staticcheck:
       # SA* = correctness. QF*/ST* = quickfix + style opinions: De Morgan's law,
       # tagged switches, dropping embedded-field selectors. This codebase's
@@ -26,12 +51,12 @@ linters:
         - alltime
 
   exclusions:
-    presets:
-      - std-error-handling
-
-# errcheck is deliberately OFF. It reports 50 findings, and the large majority are
-# intentional - windows.SetStdHandle, deferred Close() on read paths, netsh calls
-# whose exit code is the signal. Turning it on means auditing all 50 and writing
-# explicit _ = assignments; that is a real change with real review value, and it
-# belongs in its own commit, not smuggled in with the CI suite.
-# Tracked in docs/agent/polish-backlog.md.
+    # No std-error-handling preset: its EXC0001 blanket-excludes every `.*Close`
+    # from errcheck, which is exactly the class that hid a corrupt support bundle
+    # being reported as written. The errcheck exclude-functions list above replaces
+    # it, naming each type whose Close error is genuinely not actionable.
+    rules:
+      # Test code: an unchecked error in a test surfaces as the test failing, and
+      # the noise would drown the production findings this linter exists for.
+      - path: _test\.go
+        linters: [errcheck]

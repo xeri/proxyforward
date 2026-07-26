@@ -155,13 +155,7 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
 
 ## CI debt
 
-21. **`errcheck` is disabled in `.golangci.yml`** — it reports 50 findings, and most
-    are deliberate (`windows.SetStdHandle`, deferred `Close()` on read paths, netsh
-    calls whose exit code is the real signal). Turning it on means auditing all 50 and
-    writing explicit `_ =` assignments with a reason. Worth doing as its own commit;
-    it was kept out of the CI suite so the lint gate could be green on day one.
-
-22. **Linux/macOS binaries build but cannot run** — CI compiles them to keep the
+21. **Linux/macOS binaries build but cannot run** — CI compiles them to keep the
     `*_other.go` stubs honest, but `ipc.Serve` returns `ErrUnsupported` off Windows
     (`internal/ipc/stub_other.go`), so the engine never starts. Shipping them means a
     real unix-socket IPC port — an `overhaul`-skill change, not a stub fix.

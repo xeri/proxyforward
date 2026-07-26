@@ -92,7 +92,7 @@ func (a *App) attachedAnalytics(op string, body json.RawMessage) (json.RawMessag
 			// Raced a mode change (engine start / shutdown); the reset owns
 			// the state — don't resurrect the pipe behind its back.
 			a.mu.Unlock()
-			c2.Close()
+			_ = c2.Close()
 			return nil, errAnalyticsUnavailable
 		}
 		a.anClient = c2
@@ -111,7 +111,7 @@ func (a *App) attachedAnalytics(op string, body json.RawMessage) (json.RawMessag
 	// Transport/timeout/unknown-type: this pipe (or the daemon's protocol)
 	// is broken. Drop the connection; latch only while still attached — a
 	// concurrent reset owns the state otherwise.
-	c.Close()
+	_ = c.Close()
 	a.mu.Lock()
 	if a.anClient == c {
 		a.anClient = nil

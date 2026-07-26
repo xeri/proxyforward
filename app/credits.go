@@ -113,7 +113,7 @@ func (a *App) fetchAvatar(prev *avatarMeta) ([]byte, *avatarMeta, error) {
 		}
 		m := *prev
 		m.FetchedMs = now
-		a.writeAvatarMeta(&m) // best-effort timestamp refresh
+		_ = a.writeAvatarMeta(&m) // best-effort timestamp refresh
 		return img, &m, nil
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -140,7 +140,7 @@ func (a *App) fetchAvatar(prev *avatarMeta) ([]byte, *avatarMeta, error) {
 	if err := os.WriteFile(a.avatarImgPath(), img, 0o600); err != nil {
 		return nil, nil, err
 	}
-	a.writeAvatarMeta(m)
+	_ = a.writeAvatarMeta(m)
 	return img, m, nil
 }
 

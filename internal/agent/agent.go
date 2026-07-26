@@ -496,7 +496,7 @@ func (a *Agent) dialGateway(ctx context.Context) (*tls.Conn, error) {
 		return nil, fmt.Errorf("dial gateway %s: %w", addr, err)
 	}
 	if tcp, ok := rawConn.(*net.TCPConn); ok {
-		tcp.SetNoDelay(true)
+		_ = tcp.SetNoDelay(true)
 	}
 	cfg := link.AgentTLSConfig(a.cfg.Agent.CertFingerprint)
 	cfg.ClientSessionCache = a.sessionCache
@@ -585,7 +585,7 @@ func (a *Agent) runSessionWith(ctx context.Context, tr string) (bool, error) {
 	if err != nil {
 		return false, err // connect/handshake failed — not serving
 	}
-	defer mux.Close()
+	defer func() { _ = mux.Close() }()
 	defer ctrl.Close()
 
 	active := tr
@@ -689,17 +689,17 @@ func (a *Agent) connectMux(ctx context.Context, sessCounters *stats.LinkCounters
 	}
 	caps, err := a.helloExchange(conn, conn.RemoteAddr().String(), offer)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, nil, err
 	}
 	mux, err := transport.NewMuxClient(stats.NewCountingConn(conn, &a.linkTotals, sessCounters))
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, nil, err
 	}
 	ctrl, err := mux.OpenStream()
 	if err != nil {
-		mux.Close() // closes the underlying conn too
+		_ = mux.Close() // closes the underlying conn too
 		return nil, nil, nil, fmt.Errorf("open control stream: %w", err)
 	}
 	return mux, ctrl, caps, nil
@@ -716,12 +716,12 @@ func (a *Agent) connectQUIC(ctx context.Context, sessCounters *stats.LinkCounter
 	}
 	ctrl, err := sess.OpenStream()
 	if err != nil {
-		sess.Close()
+		_ = sess.Close()
 		return nil, nil, nil, fmt.Errorf("open control stream: %w", err)
 	}
 	caps, err := a.helloExchange(ctrl, sess.RemoteAddr().String(), offer)
 	if err != nil {
-		sess.Close()
+		_ = sess.Close()
 		return nil, nil, nil, err
 	}
 	return sess, ctrl, caps, nil
@@ -755,7 +755,7 @@ type helloConn interface {
 // (a.peer) and clears the deadline; a fatal HelloErr maps to a sentinel error so
 // Run stops instead of retry-hammering.
 func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (control.CapSet, error) {
-	rw.SetDeadline(time.Now().Add(helloTimeout))
+	_ = rw.SetDeadline(time.Now().Add(helloTimeout))
 	hn, _ := os.Hostname()
 	pub, sig, ticket, err := a.authFields()
 	if err != nil {
@@ -798,7 +798,7 @@ func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (
 		a.configSeedNeeded.Store(ok.ConfigSeedNeeded)
 		a.finishEnrollment(ok.AssignedAgentID)
 		a.logger.Info("connected to gateway", "gateway", remoteAddr, "generation", ok.SessionGeneration, "gateway_version", ok.AppVersion, "gateway_host", ok.Hostname, "observed_ip", ok.ObservedIP, "capabilities", ok.Capabilities)
-		rw.SetDeadline(time.Time{})
+		_ = rw.SetDeadline(time.Time{})
 		return control.NewCapSet(ok.Capabilities), nil
 	case control.TypeHelloErr:
 		he, err := control.Decode[control.HelloErr](env)
@@ -867,8 +867,8 @@ func (s *session) Has(cap string) bool { return s.caps.Has(cap) }
 func (s *session) write(msgType string, payload any) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	s.ctrl.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
-	defer s.ctrl.SetWriteDeadline(time.Time{})
+	_ = s.ctrl.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
+	defer func() { _ = s.ctrl.SetWriteDeadline(time.Time{}) }()
 	return control.WriteMsg(s.ctrl, msgType, payload)
 }
 
@@ -988,7 +988,7 @@ func (s *session) serve(ctx context.Context) error {
 	// the liveness check.
 	go func() {
 		for {
-			s.ctrl.SetReadDeadline(time.Now().Add(controlIdleTimeout))
+			_ = s.ctrl.SetReadDeadline(time.Now().Add(controlIdleTimeout))
 			env, err := control.ReadMsg(s.ctrl, control.MaxFrame)
 			if err != nil {
 				errCh <- fmt.Errorf("control stream: %w", err)
@@ -1021,12 +1021,12 @@ func (s *session) serve(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			s.mux.Close()
+			_ = s.mux.Close()
 			return ctx.Err()
 		case <-s.mux.CloseChan():
 			return errors.New("session closed by peer")
 		case err := <-errCh:
-			s.mux.Close()
+			_ = s.mux.Close()
 			return err
 		case <-ticker.C:
 			s.quality.Sweep(time.Now(), lossTimeout)
@@ -1035,7 +1035,7 @@ func (s *session) serve(ctx context.Context) error {
 			s.quality.OnSent(seq, sent)
 			err := s.write(control.TypePing, control.Ping{Seq: seq, SentUnixNano: sent.UnixNano()})
 			if err != nil {
-				s.mux.Close()
+				_ = s.mux.Close()
 				return fmt.Errorf("send ping: %w", err)
 			}
 		}
@@ -1206,13 +1206,13 @@ func (s *session) handleControlMsg(env *control.Envelope) error {
 // per-conn transport — acquired by the caller (accept loop or dialBackData).
 func (s *session) handleDataStream(st relay.Conn) {
 	defer st.Close()
-	st.SetReadDeadline(time.Now().Add(openConnTimeout))
+	_ = st.SetReadDeadline(time.Now().Add(openConnTimeout))
 	env, err := control.ReadMsg(st, control.MaxFrame)
 	if err != nil || env.Type != control.TypeOpenConn {
 		s.agent.logger.Debug("data stream without open_conn header", "err", err)
 		return
 	}
-	st.SetReadDeadline(time.Time{})
+	_ = st.SetReadDeadline(time.Time{})
 	oc, err := control.Decode[control.OpenConn](env)
 	if err != nil {
 		s.agent.logger.Debug("bad open_conn", "err", err)
@@ -1249,7 +1249,7 @@ func (s *session) handleDataStream(st relay.Conn) {
 		return
 	}
 	tcp := local.(*net.TCPConn)
-	tcp.SetNoDelay(true)
+	_ = tcp.SetNoDelay(true)
 
 	// PROXY protocol v2: prepend the real client IP so the local server sees
 	// it instead of our loopback dial. Must be the very first bytes on the
@@ -1351,13 +1351,13 @@ func (s *session) dialBackData(connID string) {
 		s.agent.logger.Debug("per-conn dial-back failed", "conn_id", connID, "err", err)
 		return
 	}
-	conn.SetDeadline(time.Now().Add(helloTimeout))
+	_ = conn.SetDeadline(time.Now().Add(helloTimeout))
 	pub, sig, _, err := s.agent.authFields()
 	if err != nil {
 		// The control conn authenticates with the same identity, so a load failure
 		// has already killed the session fatally; this dial-back just gives up.
 		s.agent.logger.Debug("per-conn dial-back has no identity", "conn_id", connID, "err", err)
-		conn.Close()
+		_ = conn.Close()
 		return
 	}
 	err = control.WriteMsg(conn, control.TypeHello, control.Hello{
@@ -1369,17 +1369,17 @@ func (s *session) dialBackData(connID string) {
 	})
 	if err != nil {
 		s.agent.logger.Debug("per-conn data hello failed", "conn_id", connID, "err", err)
-		conn.Close()
+		_ = conn.Close()
 		return
 	}
-	conn.SetDeadline(time.Time{})
+	_ = conn.SetDeadline(time.Time{})
 	// Count this data conn's bytes into the session + process link totals, just
 	// as the counting conn under the control mux does. The wrapper preserves
 	// CloseWrite (the inner *tls.Conn has it), so it is a valid relay.Conn.
 	wrapped := stats.NewCountingConn(conn, &s.agent.linkTotals, s.linkCounters)
 	rc, ok := wrapped.(relay.Conn)
 	if !ok {
-		conn.Close()
+		_ = conn.Close()
 		return
 	}
 	s.handleDataStream(rc)
@@ -1407,8 +1407,8 @@ func writeProxyHeader(local *net.TCPConn, clientAddr string) error {
 	if dst == nil {
 		dst = &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)}
 	}
-	local.SetWriteDeadline(time.Now().Add(localDialTimeout))
-	defer local.SetWriteDeadline(time.Time{})
+	_ = local.SetWriteDeadline(time.Now().Add(localDialTimeout))
+	defer func() { _ = local.SetWriteDeadline(time.Time{}) }()
 	_, err = local.Write(proxyproto.HeaderV2(src, dst))
 	return err
 }

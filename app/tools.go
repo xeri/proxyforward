@@ -31,7 +31,7 @@ import (
 func openInFileManager(dir string) error {
 	switch runtime.GOOS {
 	case "windows":
-		exec.Command("explorer", dir).Start()
+		_ = exec.Command("explorer", dir).Start()
 		return nil
 	case "darwin":
 		return exec.Command("open", dir).Start()
@@ -102,7 +102,7 @@ func writeDiagnosticsTo(w io.Writer, cfg *config.Config, configDir string, statu
 	// everything the bundle says.
 	if status != nil {
 		if w, err := zw.Create("health.txt"); err == nil {
-			io.WriteString(w, diagnosticsHealth(*status, pseudo))
+			_, _ = io.WriteString(w, diagnosticsHealth(*status, pseudo))
 		}
 	}
 
@@ -111,14 +111,14 @@ func writeDiagnosticsTo(w io.Writer, cfg *config.Config, configDir string, statu
 	redacted := redactConfig(cfg)
 	if data, err := toml.Marshal(&redacted); err == nil {
 		if w, err := zw.Create("config.redacted.toml"); err == nil {
-			w.Write(data)
+			_, _ = w.Write(data)
 		}
 	}
 
 	// stats.redacted.json — bandwidth/lifetime history with peer IPs pseudonymised.
 	if raw, err := os.ReadFile(filepath.Join(configDir, "stats.json")); err == nil {
 		if w, err := zw.Create("stats.redacted.json"); err == nil {
-			w.Write(redactStatsJSON(raw, pseudo))
+			_, _ = w.Write(redactStatsJSON(raw, pseudo))
 		}
 	}
 
@@ -132,7 +132,7 @@ func writeDiagnosticsTo(w io.Writer, cfg *config.Config, configDir string, statu
 		if w, err := zw.Create("logs-recent.txt"); err == nil {
 			for _, e := range ring.EntriesSince(0) {
 				line := fmt.Sprintf("%s %-5s %s %s\n", time.UnixMilli(e.TimeMs).Format(time.RFC3339), e.Level, e.Msg, e.Attrs)
-				io.WriteString(w, scrub.clean(line))
+				_, _ = io.WriteString(w, scrub.clean(line))
 			}
 		}
 	}
@@ -218,7 +218,7 @@ func copyScrubbedIntoZip(zw *zip.Writer, nameInZip, src string, s *logScrubber) 
 	if err != nil {
 		return
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 	w, err := zw.Create(nameInZip)
 	if err != nil {
 		return
@@ -229,7 +229,7 @@ func copyScrubbedIntoZip(zw *zip.Writer, nameInZip, src string, s *logScrubber) 
 		// Scanner's 64 KiB token cap and silently truncate the rest of the file.
 		line, err := br.ReadString('\n')
 		if line != "" {
-			io.WriteString(w, s.clean(line))
+			_, _ = io.WriteString(w, s.clean(line))
 		}
 		if err != nil {
 			return

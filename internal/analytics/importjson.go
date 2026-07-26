@@ -29,7 +29,7 @@ func (d *DB) ImportLegacyStats(configDir string) {
 	snap, err := stats.LoadLegacyJSON(path)
 	if err != nil {
 		d.logger.Warn("analytics: legacy stats.json unreadable — starting fresh", "path", path, "err", err)
-		os.Rename(path, path+".bad")
+		_ = os.Rename(path, path+".bad")
 		return
 	}
 	if err := d.SaveStats(snap); err != nil {

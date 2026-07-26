@@ -100,12 +100,12 @@ func Serve(ctx context.Context, logger *slog.Logger, src Sources, owners ...stri
 func serveConn(ctx context.Context, logger *slog.Logger, conn net.Conn, src Sources) {
 	defer conn.Close()
 	for ctx.Err() == nil {
-		conn.SetReadDeadline(time.Now().Add(idleTimeout))
+		_ = conn.SetReadDeadline(time.Now().Add(idleTimeout))
 		env, err := control.ReadMsg(conn, control.MaxFrame)
 		if err != nil {
 			return // client went away or idled out
 		}
-		conn.SetWriteDeadline(time.Now().Add(requestTimeout))
+		_ = conn.SetWriteDeadline(time.Now().Add(requestTimeout))
 		switch env.Type {
 		case TypePing:
 			err = control.WriteMsg(conn, TypePong, struct{}{})

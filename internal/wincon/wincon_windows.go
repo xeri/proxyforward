@@ -26,21 +26,21 @@ func AttachParent() {
 	if !validStdHandle(windows.STD_OUTPUT_HANDLE) {
 		if f, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0); err == nil {
 			os.Stdout = f
-			windows.SetStdHandle(windows.STD_OUTPUT_HANDLE, windows.Handle(f.Fd()))
+			_ = windows.SetStdHandle(windows.STD_OUTPUT_HANDLE, windows.Handle(f.Fd()))
 			syscall.Stdout = syscall.Handle(f.Fd())
 		}
 	}
 	if !validStdHandle(windows.STD_ERROR_HANDLE) {
 		if f, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0); err == nil {
 			os.Stderr = f
-			windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(f.Fd()))
+			_ = windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(f.Fd()))
 			syscall.Stderr = syscall.Handle(f.Fd())
 		}
 	}
 	if !validStdHandle(windows.STD_INPUT_HANDLE) {
 		if f, err := os.OpenFile("CONIN$", os.O_RDONLY, 0); err == nil {
 			os.Stdin = f
-			windows.SetStdHandle(windows.STD_INPUT_HANDLE, windows.Handle(f.Fd()))
+			_ = windows.SetStdHandle(windows.STD_INPUT_HANDLE, windows.Handle(f.Fd()))
 			syscall.Stdin = syscall.Handle(f.Fd())
 		}
 	}

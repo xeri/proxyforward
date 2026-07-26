@@ -99,11 +99,11 @@ func (r *Resolver) refreshProfile(ctx context.Context, uuid string, nowMs int64)
 		r.db.ApplyProfileCheck(uuid, p.Name, nowMs)
 		r.setChecked(uuid, nowMs)
 	case resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotFound:
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		r.db.ApplyProfileCheck(uuid, "", nowMs)
 		r.setChecked(uuid, nowMs)
 	default:
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		r.logger.Debug("players: profile fetch rejected", "uuid", uuid,
 			"err", fmt.Errorf("status %d", resp.StatusCode))
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {

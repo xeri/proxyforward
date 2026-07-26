@@ -9,6 +9,13 @@ paths:
   and justify numbers — they are the spec; keep their density. If a change
   invalidates a why-comment, updating it is part of the change.
 - `log/slog` key-value logging, lowercase messages, no per-packet logs.
+- **An ignored error is written `_ = call()`, never a bare call** — errcheck is a CI
+  gate (`.golangci.yml`), so the blank assignment is the record that a human decided.
+  Add a why-comment when the reason is not local: the recurring silent classes are
+  deadline setters (they fail only on a conn whose next I/O fails anyway), teardown
+  `Close` on a path already returning an error, and best-effort replies to a peer
+  being rejected. A **write-path** `Close` is not in that set — it is the last-bytes
+  signal, and errcheck deliberately still checks it.
 - Errors wrap with `%w` and tell the user what to *do* ("re-pair with the gateway's
   current pairing code"). `errors.Join` for multi-error validation.
 - Concurrency idioms: single-writer actor for lifecycle, `atomic.Pointer[T]` + box

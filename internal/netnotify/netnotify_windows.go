@@ -34,7 +34,7 @@ func watchNetChange(ctx context.Context, logger *slog.Logger, ch chan<- struct{}
 	}
 	cancelEvent, err := windows.CreateEvent(nil, 1, 0, nil) // manual-reset
 	if err != nil {
-		windows.CloseHandle(event)
+		_ = windows.CloseHandle(event)
 		logger.Warn("network-change notifications unavailable", "err", err)
 		return
 	}
@@ -51,17 +51,17 @@ func watchNetChange(ctx context.Context, logger *slog.Logger, ch chan<- struct{}
 	go func() {
 		defer close(stopped)
 		<-watchCtx.Done()
-		windows.SetEvent(cancelEvent)
+		_ = windows.SetEvent(cancelEvent)
 	}()
 
 	defer func() {
 		cancelWatch()
 		<-stopped
 		if pending {
-			procCancelIPChangeNotify.Call(uintptr(unsafe.Pointer(overlap)))
+			_, _, _ = procCancelIPChangeNotify.Call(uintptr(unsafe.Pointer(overlap)))
 		}
-		windows.CloseHandle(event)
-		windows.CloseHandle(cancelEvent)
+		_ = windows.CloseHandle(event)
+		_ = windows.CloseHandle(cancelEvent)
 		runtime.KeepAlive(overlap)
 		runtime.KeepAlive(handle)
 	}()

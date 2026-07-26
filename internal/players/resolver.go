@@ -274,11 +274,11 @@ func (r *Resolver) lookup(ctx context.Context, names []string) (map[string]resol
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, true, fmt.Errorf("players: lookup status %d", resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, false, fmt.Errorf("players: lookup status %d", resp.StatusCode)
 	}
 	var entries []bulkEntry

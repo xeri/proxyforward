@@ -84,7 +84,7 @@ func (r *Resolver) Load(cityPath, asnPath string) {
 	r.mu.Unlock()
 	for _, db := range old {
 		if db != nil {
-			db.Close()
+			_ = db.Close()
 		}
 	}
 	if cityErr != "" {

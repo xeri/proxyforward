@@ -60,7 +60,10 @@ func (d *DB) NewRecorder(g GeoResolver) *Recorder {
 	}
 	r := &Recorder{db: d, geo: g}
 	var maxID int64
-	d.read.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM sessions`).Scan(&maxID)
+	// A failed scan leaves maxID 0, which is the same seed a fresh database gives.
+	// It can only fail on a database that is already unreadable, and that path has
+	// its own warning at open — reporting it twice buys nothing here.
+	_ = d.read.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM sessions`).Scan(&maxID)
 	r.nextID.Store(maxID)
 	return r
 }
