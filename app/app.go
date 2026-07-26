@@ -365,7 +365,11 @@ type UIStatus struct {
 	// Agents is the per-agent link state on a gateway (empty on the agent
 	// role); the Agents screen and drill-in read it. Tunnels/Connections stay
 	// flat and carry agentId so the GUI groups them per agent.
-	Agents []AgentUI `json:"agents"`
+	// AgentsTotal mirrors the ipc.MaxStatusAgents clamp the way ConnectionsTotal
+	// mirrors the connection one: count it, don't count the list. 0 = a daemon
+	// too old to say, so callers fall back to agents.length.
+	Agents      []AgentUI `json:"agents"`
+	AgentsTotal int       `json:"agentsTotal,omitempty"`
 
 	Tunnels       []TunnelUI `json:"tunnels"`
 	Connections   []ConnUI   `json:"connections"`
@@ -507,6 +511,7 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 	st.AllTimeBytesOut = s.AllTimeBytesOut
 	st.CumulativeUptimeMs = s.CumulativeUptimeMs
 	st.LinkSessions = s.LinkSessions
+	st.AgentsTotal = s.AgentsTotal
 	st.Agents = make([]AgentUI, 0, len(s.Agents))
 	for _, ag := range s.Agents {
 		st.Agents = append(st.Agents, AgentUI{

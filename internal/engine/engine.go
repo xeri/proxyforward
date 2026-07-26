@@ -655,7 +655,9 @@ func (e *Engine) Status() ipc.Status {
 			tunnelCount[t.AgentID]++
 		}
 		agentTraffic := e.Gateway.Conns.AgentTotals()
-		for _, ag := range e.Gateway.Agents() {
+		live := e.Gateway.Agents()
+		st.AgentsTotal = len(live)
+		for _, ag := range live {
 			if len(st.Agents) >= ipc.MaxStatusAgents {
 				break
 			}

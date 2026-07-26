@@ -13,7 +13,11 @@ export function ConnectionPill({status}: {status: UIStatus}) {
   const stale = useTickStale(status)
   const isAgent = status.role === 'agent'
   const agents = status.agents ?? []
-  const n = agents.length
+  // Count the fleet, not the rows we were sent: the list is clamped at
+  // ipc.MaxStatusAgents. The dot below still reads only the rows that arrived,
+  // which is why the roster spells the clamp out — a health rollup can't score
+  // an agent it wasn't told about.
+  const n = status.agentsTotal || agents.length
   const up = isAgent ? status.linkUp : status.agentConnected
 
   // 1 Hz re-render so uptime ticks between the 2 Hz snapshots.

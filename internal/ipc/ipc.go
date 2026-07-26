@@ -141,7 +141,12 @@ type Status struct {
 	// Agents[0] when there is exactly one) are deterministic. Tunnels and
 	// Connections stay flat and carry agentId, so the GUI groups them per agent
 	// without duplicating them here — keeping Status well under MaxFrame.
-	Agents []AgentStatus `json:"agents,omitempty"`
+	// AgentsTotal is the real count when Agents is clamped to MaxStatusAgents,
+	// for the same reason ConnectionsTotal exists below: a GUI that counts the
+	// list it was sent reports the cap as the fleet size. Zero from a daemon
+	// that predates the field, so callers fall back to len(Agents).
+	Agents      []AgentStatus `json:"agents,omitempty"`
+	AgentsTotal int           `json:"agentsTotal,omitempty"`
 
 	Tunnels []TunnelStatus `json:"tunnels,omitempty"`
 

@@ -340,6 +340,18 @@ export function Agents({status}: {status: UIStatus}) {
         <>
           <FleetSummary rows={rows} invites={liveInvites.length} />
 
+          {/* The roster below is the full enrollment list, but the live health
+              join comes from the status snapshot, which is clamped at
+              ipc.MaxStatusAgents. Past the cap a connected agent renders with
+              no link state at all — indistinguishable from offline — so the
+              clamp is said out loud rather than left to look like downtime. */}
+          {(status.agentsTotal ?? 0) > (status.agents ?? []).length && (
+            <p className="text-sub italic text-[var(--text-3)]">
+              Live link state is reported for {(status.agents ?? []).length} of {status.agentsTotal} connected
+              agents. The rest are listed below and still serving — this snapshot just doesn't carry their health.
+            </p>
+          )}
+
           <div className="flex flex-wrap items-center justify-between gap-3">
             <SegmentedControl<SortKey>
               value={sort} onChange={pickSort}

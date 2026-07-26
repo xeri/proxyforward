@@ -788,6 +788,7 @@ export namespace app {
 	    peerLanIps: string[];
 	    peerHeadless: boolean;
 	    agents: AgentUI[];
+	    agentsTotal?: number;
 	    tunnels: TunnelUI[];
 	    connections: ConnUI[];
 	    totalBytesIn: number;
@@ -834,6 +835,7 @@ export namespace app {
 	        this.peerLanIps = source["peerLanIps"];
 	        this.peerHeadless = source["peerHeadless"];
 	        this.agents = this.convertValues(source["agents"], AgentUI);
+	        this.agentsTotal = source["agentsTotal"];
 	        this.tunnels = this.convertValues(source["tunnels"], TunnelUI);
 	        this.connections = this.convertValues(source["connections"], ConnUI);
 	        this.totalBytesIn = source["totalBytesIn"];
@@ -958,6 +960,7 @@ export namespace config {
 	    Tunnels: Tunnel[];
 	    EnrollTicket: string;
 	    Paused: boolean;
+	    PoolSize: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentConfig(source);
@@ -973,6 +976,7 @@ export namespace config {
 	        this.Tunnels = this.convertValues(source["Tunnels"], Tunnel);
 	        this.EnrollTicket = source["EnrollTicket"];
 	        this.Paused = source["Paused"];
+	        this.PoolSize = source["PoolSize"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
