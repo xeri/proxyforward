@@ -275,3 +275,56 @@ func values(m map[string]string) []string {
 	}
 	return out
 }
+
+// failAfterWriter accepts n bytes and then fails every write — the shape of a full
+// disk or a dying network share partway through a bundle.
+type failAfterWriter struct{ left int }
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.left <= 0 {
+		return 0, io.ErrShortWrite
+	}
+	if len(p) > w.left {
+		n := w.left
+		w.left = 0
+		return n, io.ErrShortWrite
+	}
+	w.left -= len(p)
+	return len(p), nil
+}
+
+// TestWriteDiagnosticsReportsArchiveFailure: a bundle whose bytes did not all land
+// must be reported as a failure, not as a file. A zip's central directory is written
+// by Close, so swallowing that error hands the user a path to something that is not
+// an archive at all while the GUI says the export succeeded.
+func TestWriteDiagnosticsReportsArchiveFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeDiagnosticsTo(&failAfterWriter{left: 64}, sampleConfig(), dir, nil, nil); err == nil {
+		t.Fatal("writeDiagnosticsTo reported success for a bundle that could not be written")
+	}
+}
+
+// TestWriteDiagnosticsBundleIsComplete: the happy path still produces an archive
+// whose central directory is intact and readable.
+func TestWriteDiagnosticsBundleIsComplete(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bundle.zip")
+	if err := writeDiagnostics(path, sampleConfig(), dir, nil, nil); err != nil {
+		t.Fatalf("writeDiagnostics: %v", err)
+	}
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatalf("bundle is not a readable zip: %v", err)
+	}
+	defer zr.Close()
+	var names []string
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	if len(names) == 0 {
+		t.Fatal("bundle has no entries")
+	}
+	if !strings.Contains(strings.Join(names, ","), "version.txt") {
+		t.Fatalf("bundle entries = %v, want version.txt among them", names)
+	}
+}

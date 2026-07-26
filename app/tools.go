@@ -63,7 +63,24 @@ func testReachability(host string, port int) (string, error) {
 // status is the live link snapshot for health.txt, or nil when no engine is
 // running in this process.
 // Leak-tested by TestWriteDiagnosticsNoLeaks, which seeds every channel here.
-func writeDiagnostics(path string, cfg *config.Config, configDir string, status *ipc.Status, ring *logging.Ring) error {
+func writeDiagnostics(path string, cfg *config.Config, configDir string, status *ipc.Status, ring *logging.Ring) (err error) {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	// The file's own Close is the last flush; report it when nothing worse went
+	// wrong, so a bundle that did not fully land is never announced as written.
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	return writeDiagnosticsTo(f, cfg, configDir, status, ring)
+}
+
+// writeDiagnosticsTo writes the bundle archive to w. Split from writeDiagnostics so
+// the finalisation contract below is testable against a writer that fails partway.
+func writeDiagnosticsTo(w io.Writer, cfg *config.Config, configDir string, status *ipc.Status, ring *logging.Ring) error {
 	// The salt every pseudonym in this bundle is minted under, before anything is
 	// written. Everything else here is best-effort, but this fails the whole
 	// bundle: the alternative to a salt is not "a weaker salt", it is shipping the
@@ -73,13 +90,7 @@ func writeDiagnostics(path string, cfg *config.Config, configDir string, status 
 		return err
 	}
 
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	zw := zip.NewWriter(f)
-	defer zw.Close()
+	zw := zip.NewWriter(w)
 
 	// version.txt
 	if w, err := zw.Create("version.txt"); err == nil {
@@ -139,6 +150,12 @@ func writeDiagnostics(path string, cfg *config.Config, configDir string, status 
 	}
 	for _, p := range logFiles {
 		copyScrubbedIntoZip(zw, filepath.Base(p), p, scrub)
+	}
+	// Close writes the central directory — without it the bytes are not an archive
+	// at all. Every entry above is best-effort (a missing log file just isn't in the
+	// bundle), but this one error is the bundle's success signal.
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("finish diagnostics archive: %w", err)
 	}
 	return nil
 }
