@@ -1,7 +1,9 @@
 <!-- Companion to /CLAUDE.md ("Current phase"). Seeded from the full-repo audit of
-     2026-07-13; last coherence pass 2026-07-17 (line cites drift between passes —
-     verify before acting). Remove items when fixed; add new ones with the same
-     file:line discipline. -->
+     2026-07-13; last coherence pass 2026-07-26, which removed the consistency
+     cluster (one rttTone, one relative-time helper, one Pager, one direction
+     vocabulary, one activity ramp) and the small judgment calls as they were
+     fixed. Line cites drift between passes — verify before acting. Remove items
+     when fixed; add new ones with the same file:line discipline. -->
 
 # Polish backlog — concrete, file-cited
 
@@ -20,11 +22,6 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
    - Fix: implement it (registry Run key or startup-folder shortcut), or delete the
      config field. Decide with the human (scope call — escalation trigger).
 
-2. **Overview under-reports live sessions when truncated** — pipeline node and the
-   "Live sessions" tile use `conns.length` (clamped at 150 by `ipc.MaxStatusConns`)
-   instead of `status.connectionsTotal || conns.length`
-   (`Overview.tsx:157-158,180`). Traffic already handles it (`Traffic.tsx:160,169-173`).
-
 3. **README ↔ app copy drift**: README says "Settings → Windows integration → Add
    rule" (`README.md:53-54`); the section is titled "System" (`Settings.tsx:489`).
    README also claims "115 tests, including 5 fuzz targets" (actual: 214 test funcs,
@@ -32,58 +29,7 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
    `.github/workflows/ci.yml` but has never run — verify green on first push).
    Fix the README.
 
-## Consistency (same concept, forked treatments)
-
-4. **RTT tone thresholds duplicated ×3** — `<60 good, <130 warn` in
-   `Players.tsx:295` (PingBadge), `Analytics.tsx:105`, `GeoRank.tsx:10`. Extract one
-   `rttTone` next to `hasRtt` in `state.ts`; note it intentionally differs from the
-   *link*-health thresholds (`engine.go healthScore` — player ping ≠ control link).
-
-5. **Two "just now" cutoffs** — `fmtRelative` uses 45 s (`Traffic.tsx:349-357`),
-   `fmtLastSeen` uses 90 s (`players.ts:76-85`). Same rendering intent; unify into
-   one relative-time helper (state.ts) with one cutoff.
-
-6. **Pagination row duplicated** — identical "x–y of z · Previous/Next" blocks in
-   `Players.tsx:196-206` and `Analytics.tsx:581-591`. Extract a `Pager` into `ui.tsx`.
-
-7. **BandwidthChart's range + Line/Candles pickers are hand-rolled button rows**
-   (`BandwidthChart.tsx:85-121`) while every sibling toggle is `SegmentedControl`.
-   Likely deliberate (mono tabular labels, 9 dense options) — either port
-   `SegmentedControl` to support a dense/mono variant, or record the exception in the
-   component comment so it stops looking like drift.
-
-8. **Direction-column vocabulary varies**: "Received/Sent" (`Traffic.tsx:108-109`),
-   "Total ↓/Total ↑" (`Traffic.tsx:136-137`), bare "↓/↑" (`Analytics.tsx:532-533`,
-   `Players.tsx:374-375`). Pick: glyphs for dense tables, words for wide ones — and
-   apply it once.
-
-9. **Legend ramps differ for the same idea** — peak-hours swatches
-   `[10,30,55,80,100]%` (`Analytics.tsx:343`) vs map activity swatches
-   `[16,38,58,76,92]%` (`WorldMap.tsx:203`); the map's fill floor is 14 % + 78 %·t
-   (`WorldMap.tsx:18`) vs heatmap 7 % + 85 %·t (`Analytics.tsx:326`). Harmonize the
-   ramp constants (one exported pair in `charts/util.ts`).
-
-10. **Two duration styles side by side** — live sessions use clock format `1:02:03`
-    (`fmtElapsed`, `Traffic.tsx:341`) while dossier/history tables use `1h 2m`
-    (`fmtDuration`, `state.ts:61`). Both are defensible; choose per-context
-    (live-updating → clock, historical → words) and write that rule into `state.ts`.
-
 ## Small judgment calls
-
-11. **Overview shows RTT twice** — HealthPanel metric and the "Round trip" StatTile
-    (`Overview.tsx:177,262`). Probably drop the tile in favor of something not already
-    on screen (e.g. peak rate today).
-
-12. **AnalyticsUnavailable reuses the Players icon on the Analytics screen**
-    (`Players.tsx:53-60` rendered from `Analytics.tsx:42`). Give it a neutral icon
-    (IconAnalytics/IconActivity) or parameterize.
-
-13. **ConnectionPill ignores truncation** — at >150 conns the pill's source data is
-    clamped but nothing in the titlebar hints at it (`ConnectionPill.tsx`). Low
-    priority; only matters on very busy gateways.
-
-15. **`frontend/src/hooks.ts:26` carries an `eslint-disable` comment but no ESLint
-    config exists** — either add ESLint (decision) or drop the comment.
 
 16. **The analytics DB is role-blind, and the sidebar can now switch roles**
     (`RoleSwitcher.tsx`). `engine.New` opens the same `analytics.db` in the config dir
@@ -97,24 +43,6 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
     column + a filter on every query, or per-role data dirs — and the config dir also
     holds the cert, the logs, and the setup import/export target, so that is an
     `overhaul`-scale change, not a migration.
-
-17. **Analytics Geography empty state collapses three GeoIP conditions into one** —
-    the map's fallback branches only on `!geoStatus.cityLoaded` and always renders
-    "GeoIP not configured" (`Analytics.tsx:238`), so a *failed* city-DB open (a real
-    `geoStatus.cityError`) and a *pending* reload read identically to *unconfigured*.
-    Settings' `MmdbBadge` already tells Failed/Pending/Loaded apart from the same
-    `useGeoStatus` data, and CLAUDE.md's GUI contract cites `Analytics.tsx` as the
-    example of telling states apart — so this is a real gap against it. Predates the
-    glass pass. Fix: branch on `geoStatus.cityError` the way `MmdbBadge` does.
-
-18. **Wizard role-choice cards both wear Signal Glass** — the two `RoleCard`s on the
-    "choose role" step are each `.pf-signal` (`Wizard.tsx:327`), so two pointer-reactive
-    surfaces coexist on one screen, which `DESIGN.md` rule 2 and `glass.css`'s
-    live-activity-only restriction warn against (a role picker isn't live traffic). The
-    glass pass only dropped this card's inset bevel (§8); the `pf-signal` class predates
-    it. Fix: move `RoleCard` to `.pf-card` (or a "choice" recipe) reserving `.pf-signal`
-    for the live-handshake step, or record it as a reviewed exception in a one-line
-    comment (as #7 does for BandwidthChart's pickers).
 
 34. **Chart SVG text is px-locked outside `--ui-scale`** — axis ticks and in-chart
     annotations set `fontSize` as SVG attributes (`BandwidthChart.tsx`,
