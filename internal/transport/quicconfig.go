@@ -27,6 +27,11 @@ const quicALPN = "pf-quic/1"
 //     defaults to 100, which would block OpenStreamSync once a busy proxy crosses
 //     100 concurrent players. One player = one bidi stream, so lift the ceiling.
 //   - MaxIncomingUniStreams -1: we only use bidirectional streams; disallow uni.
+//   - EnableDatagrams: advertise RFC 9221 support so a udp tunnel's payload can
+//     ride unreliable datagrams instead of a reliable, ordered stream. On its own
+//     this is a transport parameter and nothing more — no datagram is sent unless
+//     a flow negotiates the capability, so enabling it must be, and is, a no-op
+//     for every tcp tunnel and every existing measurement.
 //
 // Congestion control is not pluggable in quic-go's public API (no BBR); we accept
 // its CUBIC-family default.
@@ -47,6 +52,6 @@ func quicConfig() *quic.Config {
 		MaxConnectionReceiveWindow:     12 << 20,
 		MaxIncomingStreams:             1 << 16,
 		MaxIncomingUniStreams:          -1,
-		EnableDatagrams:                false,
+		EnableDatagrams:                true,
 	}
 }

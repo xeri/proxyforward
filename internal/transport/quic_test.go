@@ -158,3 +158,48 @@ func TestQUICHalfClose(t *testing.T) {
 		t.Errorf("client link bytes = (in %d, out %d), want (4, 4)", in, out)
 	}
 }
+
+// TestQUICDatagramSessionSupport: the datagram seam is real on QUIC and only on
+// QUIC. Both ends report support after the handshake (each half of the RFC 9221
+// negotiation is a transport parameter, so this is a real answer, not a config
+// echo), a datagram round-trips, its bytes are counted like stream payload, and
+// one too large for the path is refused with the package's own error — the one
+// callers recognise without importing quic-go. (udp-datagram)
+func TestQUICDatagramSessionSupport(t *testing.T) {
+	server, client, clientTotals := quicLoopback(t)
+
+	cd, ok := client.(DatagramSession)
+	if !ok {
+		t.Fatal("a QUIC client session does not implement DatagramSession")
+	}
+	sd, ok := server.(DatagramSession)
+	if !ok {
+		t.Fatal("a QUIC server session does not implement DatagramSession")
+	}
+	if !cd.SupportsDatagrams() || !sd.SupportsDatagrams() {
+		t.Fatalf("datagram support not negotiated: client %v, server %v", cd.SupportsDatagrams(), sd.SupportsDatagrams())
+	}
+
+	payload := []byte("unreliable")
+	if err := cd.SendDatagram(payload); err != nil {
+		t.Fatalf("send datagram: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	got, err := sd.ReceiveDatagram(ctx)
+	if err != nil {
+		t.Fatalf("receive datagram: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Errorf("received %q, want %q", got, payload)
+	}
+	if _, out := clientTotals.Bytes(); out != int64(len(payload)) {
+		t.Errorf("client link bytes out = %d, want %d — datagram payload is not counted", out, len(payload))
+	}
+
+	// Larger than any path MTU: the send must refuse rather than fragment, and
+	// it must refuse with the error a caller can act on.
+	if err := cd.SendDatagram(make([]byte, 60000)); !errors.Is(err, ErrDatagramTooLarge) {
+		t.Errorf("oversize SendDatagram: err = %v, want ErrDatagramTooLarge", err)
+	}
+}

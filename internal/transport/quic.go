@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -127,6 +128,51 @@ func (q *quicSession) wrap(st *quic.Stream) *quicStream {
 func (q *quicSession) Close() error               { return q.conn.CloseWithError(0, "") }
 func (q *quicSession) CloseChan() <-chan struct{} { return q.conn.Context().Done() }
 func (q *quicSession) RemoteAddr() net.Addr       { return q.conn.RemoteAddr() }
+
+// --- DatagramSession: QUIC's unreliable datagram extension (RFC 9221). ---
+//
+// Datagram bytes are counted exactly as stream payload is, so the GUI's link
+// card does not go quiet when a udp tunnel moves to the fast path.
+
+// SupportsDatagrams reports whether both ends enabled the extension. Local is
+// our quicConfig; Remote is the peer's transport parameter, so this answer is
+// only meaningful after the handshake — which is the only time anything asks.
+func (q *quicSession) SupportsDatagrams() bool {
+	st := q.conn.ConnectionState().SupportsDatagrams
+	return st.Local && st.Remote
+}
+
+func (q *quicSession) SendDatagram(b []byte) error {
+	if err := q.conn.SendDatagram(b); err != nil {
+		var tooLarge *quic.DatagramTooLargeError
+		if errors.As(err, &tooLarge) {
+			// Translated, not wrapped: the caller must be able to recognise this
+			// without importing quic-go, which nothing outside this package does.
+			return ErrDatagramTooLarge
+		}
+		return err
+	}
+	if q.totals != nil {
+		q.totals.Out.Add(int64(len(b)))
+	}
+	if q.session != nil {
+		q.session.Out.Add(int64(len(b)))
+	}
+	return nil
+}
+
+func (q *quicSession) ReceiveDatagram(ctx context.Context) ([]byte, error) {
+	b, err := q.conn.ReceiveDatagram(ctx)
+	if len(b) > 0 {
+		if q.totals != nil {
+			q.totals.In.Add(int64(len(b)))
+		}
+		if q.session != nil {
+			q.session.In.Add(int64(len(b)))
+		}
+	}
+	return b, err
+}
 
 // TLSConnectionState exposes the negotiated TLS state so callers/tests can assert
 // the handshake (e.g. the PQ hybrid KEM) — the QUIC analogue of *tls.Conn's
