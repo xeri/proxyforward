@@ -81,6 +81,36 @@ func TestLoadMissingFileReturnsDefault(t *testing.T) {
 	}
 }
 
+// TestLoadKeepsDefaultsForAbsentKeys: Load decodes over Default(), so a config
+// written before a field existed reads as the default rather than as the zero
+// value. That distinction is the whole opt-out story for pool_size — an
+// upgraded agent pools by default, and only an explicit 0 turns it off.
+func TestLoadKeepsDefaultsForAbsentKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := "role = \"agent\"\n\n[agent]\ngateway_host = \"gw.example.com\"\ngateway_port = 7000\ncert_fingerprint = \"sha256:" + strings.Repeat("ab", 32) + "\"\ntransport = \"per-conn\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Agent.PoolSize != PoolSizeDefault {
+		t.Errorf("pool_size absent from the file read as %d, want the default %d", cfg.Agent.PoolSize, PoolSizeDefault)
+	}
+
+	if err := os.WriteFile(path, []byte(body+"pool_size = 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Agent.PoolSize != 0 {
+		t.Errorf("an explicit pool_size = 0 read as %d: pooling cannot be turned off", cfg.Agent.PoolSize)
+	}
+}
+
 func TestLoadRejectsBadTOML(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("role = [broken"), 0o600); err != nil {
@@ -125,6 +155,10 @@ func TestValidateCatches(t *testing.T) {
 			dup.ID = NewID()
 			c.Agent.Tunnels = append(c.Agent.Tunnels, dup)
 		}, "already used by another enabled udp tunnel"},
+		"negative pool size": {func(c *Config) { c.Agent.PoolSize = -1 }, "pool_size"},
+		"pool size over the ceiling": {func(c *Config) {
+			c.Agent.PoolSize = MaxPoolSize + 1
+		}, "pool_size"},
 		"negative bandwidth": {func(c *Config) {
 			c.Agent.Tunnels[0].Options.BandwidthLimitMbps = -1
 		}, "bandwidth_limit_mbps"},
@@ -170,6 +204,10 @@ func TestValidateAccepts(t *testing.T) {
 		},
 		"bandwidth scope ignored without a cap": func(c *Config) {
 			c.Agent.Tunnels[0].Options.BandwidthLimitScope = "sideways" // no cap, so not validated
+		},
+		"pooling turned off": func(c *Config) { c.Agent.PoolSize = 0 },
+		"pooling at the ceiling": func(c *Config) {
+			c.Agent.PoolSize = MaxPoolSize
 		},
 	}
 	for name, mutate := range cases {

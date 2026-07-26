@@ -116,6 +116,12 @@ type Agent struct {
 	healthInterval    time.Duration
 	healthDialTimeout time.Duration
 
+	// poolGrant is how many data connections the gateway will hold parked for us
+	// (HelloOK.PoolSize, never more than we asked for); 0 means no pooling, which
+	// is what a legacy gateway and every non-per-conn transport say. Written by
+	// the hello exchange, read when the session starts its pool maintainer.
+	poolGrant atomic.Int32
+
 	// curSession is the live session, for hot-apply pushes; nil when
 	// disconnected.
 	curSession atomic.Pointer[session]
@@ -765,12 +771,19 @@ func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (
 	if err != nil {
 		return nil, err
 	}
+	offered := control.NewCapSet(offer)
 	// Report our gateway-config view only when offering the capability, so an agent
 	// that doesn't participate sends a hello byte-identical to a legacy peer.
 	var cfgHash string
 	var cfgGen uint64
-	if control.NewCapSet(offer).Has(control.CapGatewayConfig) {
+	if offered.Has(control.CapGatewayConfig) {
 		cfgHash, cfgGen = a.configState()
+	}
+	// Same rule for the pool request: asked for only when offered, so the frame a
+	// non-pooling agent sends is unchanged down to the byte.
+	var poolReq int
+	if offered.Has(control.CapConnPool) {
+		poolReq = a.cfg.Agent.PoolSize
 	}
 	if err := control.WriteMsg(rw, control.TypeHello, control.Hello{
 		ProtocolVersion:  control.ProtocolVersion,
@@ -785,6 +798,7 @@ func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (
 		ConfigHash:       cfgHash,
 		ConfigGeneration: cfgGen,
 		Headless:         a.headless,
+		PoolSize:         poolReq,
 	}); err != nil {
 		return nil, fmt.Errorf("send hello: %w", err)
 	}
@@ -800,6 +814,10 @@ func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (
 		}
 		a.peer.Store(&peerIdentity{hostname: ok.Hostname, localIPs: ok.LocalIPs, observedIP: ok.ObservedIP, headless: ok.Headless})
 		a.configSeedNeeded.Store(ok.ConfigSeedNeeded)
+		// The grant can only shrink the request by construction — but our own
+		// footprint must be bounded by our own config whatever the peer says, so
+		// take the smaller of the two rather than the number we were handed.
+		a.poolGrant.Store(int32(min(ok.PoolSize, poolReq)))
 		a.finishEnrollment(ok.AssignedAgentID)
 		a.logger.Info("connected to gateway", "gateway", remoteAddr, "generation", ok.SessionGeneration, "gateway_version", ok.AppVersion, "gateway_host", ok.Hostname, "observed_ip", ok.ObservedIP, "capabilities", ok.Capabilities)
 		_ = rw.SetDeadline(time.Time{})
@@ -854,6 +872,16 @@ type session struct {
 	// every per-conn data conn — mirrored into a.linkTotals. Without counting
 	// the data conns the GUI's link card would under-report per-conn payload.
 	linkCounters *stats.LinkCounters
+
+	// parked holds the data connections this session has left at the gateway
+	// waiting for a player (control.CapConnPool), keyed by parkSeq. A parked
+	// connection has no player and no splice to end it and its reader carries no
+	// deadline, so session teardown closing it is the only thing that ever
+	// unblocks that reader; the map is what teardown works from. An entry lives
+	// only while the connection is parked — once a player takes it, it is an
+	// ordinary data leg.
+	parked  sync.Map
+	parkSeq atomic.Uint64
 
 	// pendingIncoming holds a gateway-authored config edit awaiting this machine's
 	// approval; pendingLocal an edit authored here awaiting the gateway's; and
@@ -974,7 +1002,16 @@ func (s *session) serve(ctx context.Context) error {
 	// rate delay.
 	sctx, cancel := context.WithCancel(ctx)
 	s.ctx = sctx
-	defer cancel()
+	// Connection pooling, where negotiated: park a few authenticated data conns
+	// at the gateway so a joining player is served on one that already exists.
+	// One defer for both halves — cancel first, then wait — because split defers
+	// would run in the wrong order (LIFO) and wait on a maintainer nothing had
+	// told to stop.
+	poolDone := s.startPoolMaintainer(sctx)
+	defer func() {
+		cancel()
+		<-poolDone
+	}()
 	errCh := make(chan error, 3)
 
 	// Route health transitions to the gateway for this session's lifetime,
@@ -1210,18 +1247,38 @@ func (s *session) handleControlMsg(env *control.Envelope) error {
 // per-conn transport — acquired by the caller (accept loop or dialBackData).
 func (s *session) handleDataStream(st relay.Conn) {
 	defer st.Close()
-	_ = st.SetReadDeadline(time.Now().Add(openConnTimeout))
-	env, err := control.ReadMsg(st, control.MaxFrame)
-	if err != nil || env.Type != control.TypeOpenConn {
-		s.agent.logger.Debug("data stream without open_conn header", "err", err)
+	oc, err := readOpenConn(st, openConnTimeout)
+	if err != nil {
+		s.agent.logger.Debug("data stream without a usable open_conn header", "err", err)
 		return
+	}
+	s.serveOpenConn(st, oc)
+}
+
+// readOpenConn reads the header naming the tunnel this leg serves. timeout
+// bounds the wait; zero waits indefinitely, which is what a parked connection
+// does — nothing is late until a player arrives, and the session's teardown
+// closes the connection rather than a deadline expiring on it.
+func readOpenConn(st relay.Conn, timeout time.Duration) (*control.OpenConn, error) {
+	if timeout > 0 {
+		_ = st.SetReadDeadline(time.Now().Add(timeout))
+	}
+	env, err := control.ReadMsg(st, control.MaxFrame)
+	if err != nil {
+		return nil, err
+	}
+	if env.Type != control.TypeOpenConn {
+		return nil, fmt.Errorf("data stream opened with %q, want open_conn", env.Type)
 	}
 	_ = st.SetReadDeadline(time.Time{})
-	oc, err := control.Decode[control.OpenConn](env)
-	if err != nil {
-		s.agent.logger.Debug("bad open_conn", "err", err)
-		return
-	}
+	return control.Decode[control.OpenConn](env)
+}
+
+// serveOpenConn is everything a data leg does once its header has been read:
+// find the tunnel, dial the local backend, splice. Shared by every way a leg is
+// acquired — a mux stream, a dial-back, or a connection that was parked at the
+// gateway long before this player existed.
+func (s *session) serveOpenConn(st relay.Conn, oc *control.OpenConn) {
 	tun := s.agent.enabledTunnelByID(oc.TunnelID)
 	if tun == nil {
 		// Unknown or not enabled — either way this agent does not serve it, and the
@@ -1345,48 +1402,68 @@ func (s *session) serveDatagramStream(st relay.Conn, tun *config.Tunnel, oc *con
 // dialBackData opens a fresh KindData connection to the gateway for one player,
 // identified by connID, and serves it like any other data stream. The gateway
 // matches connID to the waiting player, then writes the OpenConn header this
-// reads via handleDataStream. No HelloOK is expected on a data conn — the agent
-// goes straight to reading OpenConn; a rejected dial-back simply fails that
-// read. Per-conn transport only; runs in its own goroutine off the control
-// reader.
+// reads via handleDataStream. Per-conn transport only; runs in its own goroutine
+// off the control reader.
 func (s *session) dialBackData(connID string) {
-	conn, err := s.agent.dialGateway(s.ctx)
+	rc, err := s.dialData(connID, false)
 	if err != nil {
 		s.agent.logger.Debug("per-conn dial-back failed", "conn_id", connID, "err", err)
 		return
+	}
+	s.handleDataStream(rc)
+}
+
+// dialData opens an authenticated KindData connection to the gateway. connID
+// names the player it answers; pooled marks it as one parked for a player who
+// has not arrived yet (control.CapConnPool) — exactly one of the two is ever
+// set. No HelloOK is expected on a data conn: the agent goes straight to
+// reading the OpenConn header, and a rejected connection simply fails that
+// read. The returned conn's bytes are counted into the session + process link
+// totals, just as the counting conn under the control mux is.
+func (s *session) dialData(connID string, pooled bool) (relay.Conn, error) {
+	conn, err := s.agent.dialGateway(s.ctx)
+	if err != nil {
+		return nil, err
+	}
+	if pooled {
+		// This connection is about to go silent until a player arrives — possibly
+		// for hours, which is long enough for a NAT between here and the gateway
+		// to forget it. Keepalive holds the mapping open and, on both sides, is
+		// what turns a peer that vanished into an error instead of a black hole.
+		if err := link.KeepParkedAlive(conn); err != nil {
+			s.agent.logger.Debug("parking a data conn without keepalive", "err", err)
+		}
 	}
 	_ = conn.SetDeadline(time.Now().Add(helloTimeout))
 	pub, sig, _, err := s.agent.authFields()
 	if err != nil {
 		// The control conn authenticates with the same identity, so a load failure
-		// has already killed the session fatally; this dial-back just gives up.
-		s.agent.logger.Debug("per-conn dial-back has no identity", "conn_id", connID, "err", err)
+		// has already killed the session fatally; this dial just gives up.
 		_ = conn.Close()
-		return
+		return nil, fmt.Errorf("data conn has no identity: %w", err)
 	}
 	err = control.WriteMsg(conn, control.TypeHello, control.Hello{
 		ProtocolVersion: control.ProtocolVersion,
 		Kind:            control.KindData,
 		ConnID:          connID,
+		Pooled:          pooled,
 		AgentPubKey:     pub,
 		AgentSig:        sig,
 	})
 	if err != nil {
-		s.agent.logger.Debug("per-conn data hello failed", "conn_id", connID, "err", err)
 		_ = conn.Close()
-		return
+		return nil, fmt.Errorf("data hello: %w", err)
 	}
 	_ = conn.SetDeadline(time.Time{})
-	// Count this data conn's bytes into the session + process link totals, just
-	// as the counting conn under the control mux does. The wrapper preserves
-	// CloseWrite (the inner *tls.Conn has it), so it is a valid relay.Conn.
+	// The counting wrapper preserves CloseWrite (the inner *tls.Conn has it), so
+	// it is a valid relay.Conn.
 	wrapped := stats.NewCountingConn(conn, &s.agent.linkTotals, s.linkCounters)
 	rc, ok := wrapped.(relay.Conn)
 	if !ok {
 		_ = conn.Close()
-		return
+		return nil, errors.New("counted data conn cannot half-close")
 	}
-	s.handleDataStream(rc)
+	return rc, nil
 }
 
 // writeProxyHeader prepends a PROXY protocol v2 header carrying the real

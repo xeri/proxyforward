@@ -105,6 +105,14 @@ type AgentConfig struct {
 	// turns players away until resumed. Local-only state, not config — it
 	// rides the pause message, never config sync or consent.
 	Paused bool `toml:"paused"`
+	// PoolSize is how many data connections to keep parked at the gateway ahead
+	// of any player, so a join costs a header write instead of a TCP and TLS
+	// handshake. Meaningful only under the per-conn transport (mux and QUIC open
+	// a stream for free), and only a request: the gateway answers with its own
+	// grant, which can only be smaller. 0 turns pooling off; the default is
+	// PoolSizeDefault, kept low because a parked connection costs a descriptor on
+	// both machines and a NAT mapping between them whether or not anyone joins.
+	PoolSize int `toml:"pool_size"`
 }
 
 type Tunnel struct {
@@ -245,6 +253,7 @@ func Default() *Config {
 		Agent: AgentConfig{
 			GatewayPort: DefaultControlPort,
 			Transport:   TransportAuto,
+			PoolSize:    PoolSizeDefault,
 		},
 		Gateway: GatewayConfig{
 			BindAddr:           "0.0.0.0",
@@ -410,6 +419,9 @@ func (c *Config) validateAgent() []error {
 	default:
 		errs = append(errs, fmt.Errorf("agent.transport: must be one of %q, %q, %q, %q, got %q", TransportAuto, TransportQUIC, TransportPerConn, TransportMux, a.Transport))
 	}
+	if a.PoolSize < 0 || a.PoolSize > MaxPoolSize {
+		errs = append(errs, fmt.Errorf("agent.pool_size: must be 0 (off) to %d, got %d", MaxPoolSize, a.PoolSize))
+	}
 	seenID := map[string]bool{}
 	// Ports are per protocol: a TCP and a UDP tunnel may share a number.
 	seenPort := map[string]bool{}
@@ -462,6 +474,17 @@ func (c *Config) validateAgent() []error {
 	}
 	return errs
 }
+
+// PoolSizeDefault is how many connections a per-conn agent parks at the gateway
+// unless told otherwise, and MaxPoolSize the most an operator may ask for. Two
+// covers the ordinary case — a player joining, and the next one arriving while
+// the first is being refilled — without holding open sockets nobody is using.
+// The ceiling is this side's sanity bound only: the gateway answers every
+// request with its own grant, and that grant is what binds.
+const (
+	PoolSizeDefault = 2
+	MaxPoolSize     = 8
+)
 
 // maxHealthIntervalSec / maxHealthTimeoutSec bound the tuning an operator can
 // ask for. The ceilings are not policy so much as a guard against a typo turning
