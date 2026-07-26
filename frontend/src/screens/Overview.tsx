@@ -115,6 +115,11 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
   const consent = useAgentConsent(isAgent)
   const tunnels = status.tunnels ?? []
   const conns = status.connections ?? []
+  // The connection *list* is clamped (ipc.MaxStatusConns), so counting it
+  // under-reports a busy gateway. Every count on this screen reads the
+  // unclamped total, falling back to the list for a daemon too old to send one
+  // (Traffic.tsx does the same).
+  const liveSessions = status.connectionsTotal || conns.length
   const firstTunnel = tunnels[0]
 
   // 1 Hz re-render so uptime readouts tick between 2 Hz snapshots.
@@ -181,7 +186,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
           title="Overview"
           subtitle={isAgent ? 'The path from your server to your players.' : 'The public front door for your agent.'}
           action={runStateOf(status) !== 'stopped'
-            ? <PowerControls status={status} players={conns.length} />
+            ? <PowerControls status={status} players={liveSessions} />
             : undefined}
         />
 
@@ -302,7 +307,7 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
                 : (tunnels.length ? 'Open to players' : 'Waiting for tunnels')}
             extra={(
               <span className="font-mono text-sub tabular-nums text-[var(--text-3)]">
-                {conns.length} live session{conns.length === 1 ? '' : 's'}
+                {liveSessions} live session{liveSessions === 1 ? '' : 's'}
               </span>
             )}
           />
@@ -324,8 +329,8 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
             <StatTile label="Link uptime" value={linkUptime} sub={uptimeSub || undefined} />
             <StatTile label="Round trip" value={(isAgent ? status.linkUp : status.agentConnected) && hasRtt(status.rttMillis) ? fmtRtt(status.rttMillis) : '—'} />
             <StatTile
-              label="Live sessions" accent={conns.length > 0}
-              value={<NumberTicker value={conns.length} format={n => String(Math.round(n))} />}
+              label="Live sessions" accent={liveSessions > 0}
+              value={<NumberTicker value={liveSessions} format={n => String(Math.round(n))} />}
             />
             <StatTile
               label="Data moved"
