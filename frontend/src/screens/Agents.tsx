@@ -985,7 +985,6 @@ function AgentManagement({view, players, onChanged}: {view: AgentView; players: 
     setNickname(view.nickname || '')
     setPorts((view.scopePorts ?? []).join(', '))
     setTuns((view.scopeTunnels ?? []).join(', '))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.agentId, view.nickname, (view.scopePorts ?? []).join(','), (view.scopeTunnels ?? []).join(',')])
 
   const parsePorts = (s: string): number[] =>

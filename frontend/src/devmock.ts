@@ -1400,6 +1400,7 @@ export function installDevMock() {
   // Flag for helpers that must know there is no Go asset server behind them
   // (avatarUrl falls back to mc-heads / inline SVG in browser dev).
   w.__pfDevMock = true
-  // eslint-disable-next-line no-console
+  // The one console line in the app, and it only runs in browser dev: which
+  // scenario installed is the first thing you check when a mock axis misbehaves.
   console.info('[devmock] installed — scenario:', scenario)
 }

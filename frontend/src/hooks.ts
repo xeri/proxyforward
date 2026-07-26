@@ -23,7 +23,9 @@ export function usePolled<T>(cache: Map<string, T>, key: string | null, fetcher:
     fetchOnce()
     const t = setInterval(fetchOnce, pollMs)
     return () => { alive = false; clearInterval(t) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Deps are the key and the interval only, on purpose: `fetcher` is a fresh
+    // closure every render and lives in a ref for exactly that reason, so
+    // depending on it would tear down and restart the poll on each render.
   }, [key, pollMs])
   return data
 }
