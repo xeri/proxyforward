@@ -125,6 +125,9 @@ type harnessOpts struct {
 	// returns the address the agent should dial instead — e.g. a transparent
 	// TCP proxy that observes the agent→gateway connections.
 	interpose func(gwAddr string) string
+	// tweakTunnel, if set, adjusts the default tunnel after the harness has
+	// built it — for options with no dedicated field here.
+	tweakTunnel func(*config.Tunnel)
 }
 
 func newHarness(t *testing.T, localAddr string) *harness {
@@ -203,6 +206,10 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 			BandwidthLimitScope: opts.bandwidthScope,
 		},
 	}}
+
+	if opts.tweakTunnel != nil {
+		opts.tweakTunnel(&agentCfg.Agent.Tunnels[0])
+	}
 
 	h := &harness{t: t, gw: gw, gwCancel: gwCancel, agentCfg: agentCfg, agentDir: t.TempDir(), tunnelID: tunnelID, offerCaps: opts.offerCaps}
 	h.startAgent()

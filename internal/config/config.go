@@ -63,6 +63,16 @@ const (
 	BandwidthScopePerConnection = "per-connection"
 )
 
+// Health probe kinds for options.health_probe.
+const (
+	// HealthProbeTCP dials the local address and closes: a socket that accepts
+	// is called up. The default, and all a non-Minecraft backend can support.
+	HealthProbeTCP = "tcp"
+	// HealthProbeMCStatus performs a Server List Ping, so "accepts connections"
+	// and "is serving Minecraft" stop being the same answer. TCP tunnels only.
+	HealthProbeMCStatus = "mc-status"
+)
+
 type Config struct {
 	Role      Role            `toml:"role"`
 	Agent     AgentConfig     `toml:"agent"`
@@ -128,6 +138,25 @@ type TunnelOptions struct {
 	// BandwidthLimitScope selects what the cap applies to: combined (default),
 	// per-direction, or per-connection. Ignored when the cap is 0.
 	BandwidthLimitScope string `toml:"bandwidth_limit_scope"`
+	// Health-check tuning for this tunnel's local backend. These are
+	// deliberately agent-local and never cross the wire (the LocalAddr/PP2
+	// precedent): the probe targets the agent's LAN, which is the one thing the
+	// gateway cannot see. Every field zero = the shipped defaults, so an upgrade
+	// changes no behavior.
+	//
+	// HealthProbe selects how the backend is checked: "" or HealthProbeTCP is a
+	// bare dial (a socket that accepts is called up); HealthProbeMCStatus asks
+	// for a Server List Ping, so a process that accepts but will never serve
+	// reads down — TCP tunnels only, the status protocol has no UDP form.
+	HealthProbe string `toml:"health_probe"`
+	// HealthIntervalSec is how often to probe, HealthTimeoutSec how long one
+	// probe may take, and HealthMaxFailed how many CONSECUTIVE failures flip the
+	// tunnel down (1 = report the first failure; higher debounces a backend that
+	// stutters under load). One success always flips it back up and clears the
+	// counter.
+	HealthIntervalSec int `toml:"health_interval_sec"`
+	HealthTimeoutSec  int `toml:"health_timeout_sec"`
+	HealthMaxFailed   int `toml:"health_max_failed"`
 }
 
 type GatewayConfig struct {
@@ -427,6 +456,49 @@ func (c *Config) validateAgent() []error {
 			errs = append(errs, fmt.Errorf("%s: bandwidth_limit_scope: must be %q, %q, or %q (empty = %q), got %q",
 				where, BandwidthScopeCombined, BandwidthScopePerDirection, BandwidthScopePerConnection, BandwidthScopeCombined, t.Options.BandwidthLimitScope))
 		}
+		errs = append(errs, validateHealthOptions(where, t)...)
+	}
+	return errs
+}
+
+// maxHealthIntervalSec / maxHealthTimeoutSec bound the tuning an operator can
+// ask for. The ceilings are not policy so much as a guard against a typo turning
+// health reporting off: a probe every few hours would leave a dead backend
+// looking up for that long, and the gateway routes players on that answer.
+const (
+	maxHealthIntervalSec = 300
+	maxHealthTimeoutSec  = 60
+	maxHealthMaxFailed   = 10
+)
+
+// validateHealthOptions checks one tunnel's health-probe tuning. Zero means "use
+// the default" for every field, so an untouched config never errors here.
+func validateHealthOptions(where string, t *Tunnel) []error {
+	var errs []error
+	o := t.Options
+	switch o.HealthProbe {
+	case "", HealthProbeTCP:
+	case HealthProbeMCStatus:
+		if t.Type == TunnelUDP {
+			errs = append(errs, fmt.Errorf("%s: options.health_probe: %q needs tcp (the Java status protocol has no udp form)", where, HealthProbeMCStatus))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("%s: options.health_probe: must be %q or %q (empty = %q), got %q",
+			where, HealthProbeTCP, HealthProbeMCStatus, HealthProbeTCP, o.HealthProbe))
+	}
+	if o.HealthIntervalSec < 0 || o.HealthIntervalSec > maxHealthIntervalSec {
+		errs = append(errs, fmt.Errorf("%s: options.health_interval_sec: must be 0 (default) to %d, got %d", where, maxHealthIntervalSec, o.HealthIntervalSec))
+	}
+	if o.HealthTimeoutSec < 0 || o.HealthTimeoutSec > maxHealthTimeoutSec {
+		errs = append(errs, fmt.Errorf("%s: options.health_timeout_sec: must be 0 (default) to %d, got %d", where, maxHealthTimeoutSec, o.HealthTimeoutSec))
+	}
+	// A timeout longer than the interval would queue probes behind each other and
+	// make the interval a lie; the checker skips a tunnel whose probe is running.
+	if o.HealthIntervalSec > 0 && o.HealthTimeoutSec > o.HealthIntervalSec {
+		errs = append(errs, fmt.Errorf("%s: options.health_timeout_sec (%d) must not exceed health_interval_sec (%d)", where, o.HealthTimeoutSec, o.HealthIntervalSec))
+	}
+	if o.HealthMaxFailed < 0 || o.HealthMaxFailed > maxHealthMaxFailed {
+		errs = append(errs, fmt.Errorf("%s: options.health_max_failed: must be 0 (default) to %d, got %d", where, maxHealthMaxFailed, o.HealthMaxFailed))
 	}
 	return errs
 }

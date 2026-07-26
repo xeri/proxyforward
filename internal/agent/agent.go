@@ -102,6 +102,10 @@ type Agent struct {
 
 	// localUp maps tunnel ID → last observed health of its local target.
 	localUp sync.Map
+	// lastStatus maps tunnel ID → *mc.StatusInfo from the last SUCCESSFUL
+	// mc-status probe. Absent for tcp-probed tunnels, and deleted the moment a
+	// tunnel goes down — a retained player count would render as current.
+	lastStatus sync.Map
 	// healthSink is the live session's push func; nil while disconnected.
 	healthSink atomic.Pointer[healthSinkBox]
 	// healthObserver is a process-lifetime health observer (the engine's
