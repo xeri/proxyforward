@@ -235,6 +235,18 @@ function Geography({rangeMs, selectedCc, onSelectCc}: {
       )
     }
     if (rows.length === 0) {
+      // Three conditions, told apart the way Settings' MmdbBadge does it: a
+      // database that failed to open is not the same as one that was never
+      // configured, and saying "not configured" over a real error sends the
+      // reader to a settings field that is already filled in. geo.Load is
+      // synchronous, so anything that isn't loaded and has no error genuinely
+      // has no path set.
+      if (geoStatus?.cityError) {
+        return (
+          <EmptyState icon={<IconGlobe size={26} />} title="The GeoIP database failed to load"
+            hint={`${geoStatus.cityError}. Check the path in Settings → Analytics; the file may have moved or be unreadable.`} />
+        )
+      }
       return geoStatus && !geoStatus.cityLoaded ? (
         <EmptyState icon={<IconGlobe size={26} />} title="GeoIP not configured"
           hint="Add MaxMind GeoLite2 databases in Settings → Analytics to map where your players connect from." />
