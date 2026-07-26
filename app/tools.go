@@ -20,6 +20,7 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 
+	"proxyforward/internal/analytics"
 	"proxyforward/internal/config"
 	"proxyforward/internal/ipc"
 	"proxyforward/internal/logging"
@@ -61,9 +62,10 @@ func testReachability(host string, port int) (string, error) {
 // share — logs included, via logScrubber: they are shipped, so redacting only the
 // config would leave the same secrets in cleartext one file over.
 // status is the live link snapshot for health.txt, or nil when no engine is
-// running in this process.
+// running in this process; stats is the analytics store's summary, or nil when
+// it could not answer.
 // Leak-tested by TestWriteDiagnosticsNoLeaks, which seeds every channel here.
-func writeDiagnostics(path string, cfg *config.Config, configDir string, status *ipc.Status, ring *logging.Ring) (err error) {
+func writeDiagnostics(path string, cfg *config.Config, configDir string, status *ipc.Status, stats *analytics.Summary, ring *logging.Ring) (err error) {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -75,12 +77,12 @@ func writeDiagnostics(path string, cfg *config.Config, configDir string, status 
 			err = cerr
 		}
 	}()
-	return writeDiagnosticsTo(f, cfg, configDir, status, ring)
+	return writeDiagnosticsTo(f, cfg, configDir, status, stats, ring)
 }
 
 // writeDiagnosticsTo writes the bundle archive to w. Split from writeDiagnostics so
 // the finalisation contract below is testable against a writer that fails partway.
-func writeDiagnosticsTo(w io.Writer, cfg *config.Config, configDir string, status *ipc.Status, ring *logging.Ring) error {
+func writeDiagnosticsTo(w io.Writer, cfg *config.Config, configDir string, status *ipc.Status, stats *analytics.Summary, ring *logging.Ring) error {
 	// The salt every pseudonym in this bundle is minted under, before anything is
 	// written. Everything else here is best-effort, but this fails the whole
 	// bundle: the alternative to a salt is not "a weaker salt", it is shipping the
@@ -115,7 +117,26 @@ func writeDiagnosticsTo(w io.Writer, cfg *config.Config, configDir string, statu
 		}
 	}
 
-	// stats.redacted.json — bandwidth/lifetime history with peer IPs pseudonymised.
+	// stats.summary.json — the lifetime and all-time figures from the analytics
+	// store: counts, byte totals, peaks and their timestamps. analytics.Summary
+	// is numbers only — no address, name or id reaches it — so there is nothing
+	// here to pseudonymise. Omitted entirely when the store could not answer
+	// (detached, old daemon, failed open): a page of zeros would read as "this
+	// machine has never moved a byte", which is the lie the sentinels exist to
+	// prevent.
+	if stats != nil {
+		if data, err := json.MarshalIndent(stats, "", "  "); err == nil {
+			if w, err := zw.Create("stats.summary.json"); err == nil {
+				_, _ = w.Write(data)
+			}
+		}
+	}
+
+	// stats.redacted.json — the pre-SQLite stats file, with peer IPs
+	// pseudonymised. Only present before the first engine start after a legacy
+	// restore: ImportLegacyStats renames stats.json away once it has imported it
+	// (analytics/importjson.go), and everything it held is in the summary above
+	// from then on.
 	if raw, err := os.ReadFile(filepath.Join(configDir, "stats.json")); err == nil {
 		if w, err := zw.Create("stats.redacted.json"); err == nil {
 			_, _ = w.Write(redactStatsJSON(raw, pseudo))

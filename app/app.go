@@ -21,6 +21,7 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"proxyforward/internal/analytics"
 	"proxyforward/internal/config"
 	"proxyforward/internal/engine"
 	"proxyforward/internal/ipc"
@@ -1244,7 +1245,16 @@ func (a *App) ExportDiagnostics() (string, error) {
 		status = &st
 	}
 	a.mu.Unlock()
-	if err := writeDiagnostics(path, &cfg, a.configDir, status, a.ring); err != nil {
+	// The bundle's stats snapshot now comes from the analytics store — the old
+	// stats.json is renamed away by the first engine start that imports it. The
+	// call rides its own pipe conn (never under a.mu, per app/analytics.go), and
+	// a zero value means the store could not answer, in which case the bundle
+	// carries no snapshot rather than a page of zeros.
+	var summary *analytics.Summary
+	if s := a.Summary(0); s != (analytics.Summary{}) {
+		summary = &s
+	}
+	if err := writeDiagnostics(path, &cfg, a.configDir, status, summary, a.ring); err != nil {
 		return "", err
 	}
 	return path, nil

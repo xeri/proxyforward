@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"proxyforward/internal/analytics"
 	"proxyforward/internal/config"
 	"proxyforward/internal/ipc"
 	"proxyforward/internal/logging"
@@ -211,8 +212,18 @@ func TestWriteDiagnosticsNoLeaks(t *testing.T) {
 		LocalLANIPs:   []string{"10.9.8.7"},
 	}
 
+	// The analytics summary is the newest channel into the bundle. It is numbers
+	// only by construction, which is exactly the claim worth testing: seed it
+	// like the rest so the sweep below runs over real bytes it produced.
+	summary := &analytics.Summary{
+		BytesIn: 4096, BytesOut: 8192, Sessions: 3, UniquePlayers: 2,
+		PeakPlayers: 2, PeakPlayersAt: 1_700_000_000_000,
+		AvgRttMs: 42, AvgLossPct: -1, LinkUptimePct: 99.5,
+		LifetimeBytesIn: 1 << 30, LifetimeBytesOut: 1 << 31, LinkSessions: 7,
+	}
+
 	out := filepath.Join(dir, "diag.zip")
-	if err := writeDiagnostics(out, cfg, dir, status, ring); err != nil {
+	if err := writeDiagnostics(out, cfg, dir, status, summary, ring); err != nil {
 		t.Fatal(err)
 	}
 
@@ -235,7 +246,7 @@ func TestWriteDiagnosticsNoLeaks(t *testing.T) {
 
 	// The log channels must actually be in the bundle — if they silently stopped
 	// shipping, the sweep below would pass for the wrong reason.
-	for _, want := range []string{"version.txt", "health.txt", "config.redacted.toml", "stats.redacted.json", "logs-recent.txt", "proxyforward.log"} {
+	for _, want := range []string{"version.txt", "health.txt", "config.redacted.toml", "stats.summary.json", "stats.redacted.json", "logs-recent.txt", "proxyforward.log"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("bundle missing %s (have %v)", want, keys(names))
 		}
@@ -299,7 +310,7 @@ func (w *failAfterWriter) Write(p []byte) (int, error) {
 // an archive at all while the GUI says the export succeeded.
 func TestWriteDiagnosticsReportsArchiveFailure(t *testing.T) {
 	dir := t.TempDir()
-	if err := writeDiagnosticsTo(&failAfterWriter{left: 64}, sampleConfig(), dir, nil, nil); err == nil {
+	if err := writeDiagnosticsTo(&failAfterWriter{left: 64}, sampleConfig(), dir, nil, nil, nil); err == nil {
 		t.Fatal("writeDiagnosticsTo reported success for a bundle that could not be written")
 	}
 }
@@ -309,7 +320,7 @@ func TestWriteDiagnosticsReportsArchiveFailure(t *testing.T) {
 func TestWriteDiagnosticsBundleIsComplete(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bundle.zip")
-	if err := writeDiagnostics(path, sampleConfig(), dir, nil, nil); err != nil {
+	if err := writeDiagnostics(path, sampleConfig(), dir, nil, nil, nil); err != nil {
 		t.Fatalf("writeDiagnostics: %v", err)
 	}
 	zr, err := zip.OpenReader(path)
