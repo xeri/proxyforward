@@ -83,6 +83,20 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   **close** on both datagram legs — there is no FIN, so a no-op parks the opposite copy
   until the reaper. Ports are per protocol; health is *unknown*, never probed. Mechanics
   in `docs/agent/architecture.md`.
+- **A parked connection is filed under the identity it proved** (`CapConnPool`): the
+  agent's pre-dialled data conns live in its session's `connPool`
+  (`gateway/connpool.go`), bounded by a grant that can only shrink the request — so
+  no "extra" is ever closed and no redial loop exists. `openFlow` writes the
+  `open_conn` header, which doubles as the take-time liveness probe; a dead or empty
+  pool falls back to the dial-back and never refuses a player. `closeAll` drains it:
+  a parked conn has no player and no splice to close it.
+- **A udp flow goes unreliable only once the peer has proved it registered**
+  (`CapUDPDatagram`): the flow id rides `open_conn` on the *stream*, so a datagram
+  sent before the peer reads that header is dropped as unknown — a lost packet the
+  stream path never produces. Each side announces itself and sends unreliably only
+  after receiving a datagram for that flow (`relay/flowgram.go`). The stream stays
+  the flow's lifecycle anchor and `relay.Splice` is untouched; oversize falls back on
+  the connection's refusal, not on a constant. Mechanics in `docs/agent/architecture.md`.
 - **Pause is arbitration with two owners** (`CapPause`): each side holds its own bit,
   clears only its own, and a tunnel serves iff neither covers it — so resume can never
   expand what the agent exposes. The bits are state, not config: they must never reach
