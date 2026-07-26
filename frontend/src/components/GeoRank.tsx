@@ -5,10 +5,8 @@
 import {useMemo} from 'react'
 import type {CountryAgg} from '../analytics'
 import type {GeoMetric} from './charts/WorldMap'
-import {flagEmoji, fmtRtt, hasRtt} from '../state'
+import {flagEmoji, fmtRtt, hasRtt, rttTone} from '../state'
 import {Overline} from './ui'
-
-const rttTone = (ms: number): 'good' | 'warn' | 'bad' => (ms < 60 ? 'good' : ms < 130 ? 'warn' : 'bad')
 
 export function GeoRank({rows, metric, hoverCc, onHover, onSelect, selectedCc, compact = false}: {
   rows: CountryAgg[]

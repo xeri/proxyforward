@@ -127,6 +127,15 @@ export function hasRtt(ms: number): boolean {
   return ms > 0
 }
 
+/** rttTone: the player-ping ramp, and the one place its cutoffs live — shared
+ * by the Players badge, the Analytics tile and the GeoRank rows. Intentionally
+ * *not* the link-health thresholds (`engine.go healthScore`): a player's ping to
+ * the gateway and the control link's own round trip are different measurements
+ * and move for different reasons. Guard with hasRtt — unknown has no tone. */
+export function rttTone(ms: number): 'good' | 'warn' | 'bad' {
+  return ms < 60 ? 'good' : ms < 130 ? 'warn' : 'bad'
+}
+
 /** worstHealth: the fleet rollup — the least-healthy agent sets the verdict, so
  * one struggling machine is never hidden behind healthy ones. Unknown among
  * healthy reads as caution. Empty is 'good' (callers gate on count). The one

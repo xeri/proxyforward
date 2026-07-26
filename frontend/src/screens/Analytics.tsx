@@ -18,7 +18,7 @@ import {
 } from '../analytics'
 import {fmtLastSeen} from '../players'
 import {AnalyticsUnavailable} from './Players'
-import {UIStatus, flagEmoji, fmtBytes, fmtDuration, fmtRate, fmtRtt, hasRtt} from '../state'
+import {UIStatus, flagEmoji, fmtBytes, fmtDuration, fmtRate, fmtRtt, hasRtt, rttTone} from '../state'
 
 /** Analytics: the historical dashboard — range summary, the peak-hours
  * heatmap, per-tunnel uptime and packet-loss timelines, and browsable
@@ -103,7 +103,6 @@ export function Analytics({status}: {status: UIStatus}) {
 // ---------------------------------------------------------------------------
 
 const fmtInt = (n: number) => String(Math.round(n))
-const rttTone = (ms: number): 'good' | 'warn' | 'bad' => (ms < 60 ? 'good' : ms < 130 ? 'warn' : 'bad')
 
 function SummaryTiles({s}: {s: ReturnType<typeof useSummary>}) {
   if (!s) {
@@ -148,8 +147,8 @@ function SummaryTiles({s}: {s: ReturnType<typeof useSummary>}) {
       />
       <StatTile
         label="Avg latency"
-        value={rtt >= 0 ? fmtRtt(rtt) : '—'}
-        tone={rtt >= 0 ? rttTone(rtt) : undefined}
+        value={hasRtt(rtt) ? fmtRtt(rtt) : '—'}
+        tone={hasRtt(rtt) ? rttTone(rtt) : undefined}
       />
     </div>
   )

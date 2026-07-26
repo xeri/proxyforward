@@ -13,7 +13,7 @@ import {
   PLAYERS_PAGE_SIZE, PlayerCard, PlayersQuery, SessionMeta,
   fmtLastSeen, fmtPlaytime, takePendingDossier, usePlayerDetail, usePlayerHistory, usePlayerLatency, usePlayersPage,
 } from '../players'
-import {UIStatus, flagEmoji, fmtBytes, fmtDuration, fmtRtt, hasRtt} from '../state'
+import {UIStatus, flagEmoji, fmtBytes, fmtDuration, fmtRtt, hasRtt, rttTone} from '../state'
 
 /** Players: the head wall and the per-player dossier. Detail is screen-local
  * state (no router) — the wall stays mounted-warm via the module caches. */
@@ -290,7 +290,7 @@ function TileSkeleton() {
 /** PingBadge: the player's average RTT on the --rtt ramp (populates once the
  * gateway starts reporting per-connection RTT). */
 function PingBadge({ms}: {ms: number}) {
-  const tone = ms < 60 ? 'var(--good)' : ms < 130 ? 'var(--warn)' : 'var(--bad)'
+  const tone = `var(--${rttTone(ms)})`
   return (
     <span className="inline-flex items-center gap-1 font-mono tabular-nums" style={{color: tone}}>
       <span className="inline-block h-1.5 w-1.5 rounded-full" style={{background: tone}} />
