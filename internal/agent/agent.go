@@ -96,6 +96,10 @@ type Agent struct {
 	// process; linkSession is the live session's counters (nil while down).
 	linkTotals  stats.LinkCounters
 	linkSession atomic.Pointer[stats.LinkCounters]
+	// flowStats counts which path this agent's udp datagrams took — the
+	// unreliable one or a flow's stream. Shared by every flow; nothing branches
+	// on it.
+	flowStats relay.FlowStats
 	// publicPorts maps tunnel ID → actual bound public port (from
 	// register_ok). Tests and the GUI read it.
 	publicPorts sync.Map
@@ -333,7 +337,7 @@ func (a *Agent) SetCapabilityOffer(caps []string) { a.offerCaps = caps }
 // Connection pooling rides the same rung, and only that one: mux and QUIC open a
 // stream for free, so there is nothing a parked connection would save them.
 func offerFor(transport string) []string {
-	caps := []string{control.CapTunnelSync, control.CapConnStats, control.CapGatewayConfig, control.CapConfigConsent, control.CapPause, control.CapTunnelUDP}
+	caps := []string{control.CapTunnelSync, control.CapConnStats, control.CapGatewayConfig, control.CapConfigConsent, control.CapPause, control.CapTunnelUDP, control.CapUDPDatagram}
 	if transport == config.TransportPerConn {
 		caps = append(caps, control.CapPerConn, control.CapConnPool)
 	}
@@ -1441,7 +1445,7 @@ func (s *session) serveDatagramStream(st relay.Conn, tun *config.Tunnel, oc *con
 	var leg relay.Conn = &relay.DatagramStream{Conn: st}
 	if oc.FlowID != 0 {
 		if mux, sender := s.datagramFlows(); mux != nil {
-			fc := relay.NewFlowgramConn(mux, sender, oc.FlowID, st)
+			fc := relay.NewFlowgramConn(mux, sender, oc.FlowID, st, &s.agent.flowStats)
 			defer func() { _ = fc.Close() }()
 			leg = fc
 		} else {

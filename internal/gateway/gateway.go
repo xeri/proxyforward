@@ -127,6 +127,10 @@ type Gateway struct {
 	// parked, rather than one dialled back for them. Nothing on the data path
 	// branches on it; it is what proves the pool is doing its job.
 	pooledLegs atomic.Int64
+	// flowStats counts which path this gateway's udp datagrams took — the
+	// unreliable one or a flow's stream. Shared by every flow; nothing branches
+	// on it.
+	flowStats relay.FlowStats
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -2299,7 +2303,7 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 			// This flow's payload rides the connection's unreliable datagrams,
 			// with the stream kept for oversize ones and for the flow's
 			// lifecycle. Still a relay.Conn, still the same Splice.
-			fc := relay.NewFlowgramConn(flowMux, datagrams, flowID, stream)
+			fc := relay.NewFlowgramConn(flowMux, datagrams, flowID, stream, &g.flowStats)
 			// Runs once the splice has drained: unregisters the flow and joins
 			// its merge goroutine. The close error is the underlying socket's and
 			// is no more actionable here than any other teardown close — the last

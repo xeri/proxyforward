@@ -78,8 +78,9 @@ func (p pipeStream) CloseWrite() error { return p.Conn.Close() }
 // demultiplexes a whole connection's datagrams. Two muxes over one session would
 // race each other for every datagram, so tests never build a second.
 type flowFixture struct {
-	sess *fakeSession
-	mux  *relay.FlowMux
+	sess  *fakeSession
+	mux   *relay.FlowMux
+	stats relay.FlowStats
 }
 
 func newFlowFixture(t *testing.T) *flowFixture {
@@ -95,15 +96,25 @@ func newFlowFixture(t *testing.T) *flowFixture {
 }
 
 // flow registers one flow on the fixture's mux and returns it with the far end
-// of its stream leg.
-func (f *flowFixture) flow(t *testing.T, id uint32) (*relay.FlowgramConn, net.Conn) {
+// of its stream leg. ready mirrors what a live peer does: it delivers the
+// peer's announce, which is what lets this side use the unreliable path at all.
+func (f *flowFixture) flow(t *testing.T, id uint32, ready bool) (*relay.FlowgramConn, net.Conn) {
 	t.Helper()
 	near, far := net.Pipe()
-	fc := relay.NewFlowgramConn(f.mux, f.sess, id, pipeStream{near})
+	fc := relay.NewFlowgramConn(f.mux, f.sess, id, pipeStream{near}, &f.stats)
 	t.Cleanup(func() {
 		fc.Close()
 		far.Close()
 	})
+	if ready {
+		// One datagram from the peer, consumed: it both marks the flow ready and
+		// gives the test a synchronisation point, since reading it back can only
+		// happen after the demux has routed it.
+		f.sess.deliver(id, []byte("peer is here"))
+		if got := readOne(t, fc); string(got) != "peer is here" {
+			t.Fatalf("flow %d readiness datagram read back as %q", id, got)
+		}
+	}
 	return fc, far
 }
 
@@ -126,8 +137,8 @@ func readOne(t *testing.T, fc *relay.FlowgramConn) []byte {
 // nearest. (udp-datagram)
 func TestFlowgramDemuxRoutesByFlowID(t *testing.T) {
 	fx := newFlowFixture(t)
-	one, _ := fx.flow(t, 1)
-	two, _ := fx.flow(t, 2)
+	one, _ := fx.flow(t, 1, false)
+	two, _ := fx.flow(t, 2, false)
 
 	fx.sess.deliver(1, []byte("for one"))
 	fx.sess.deliver(2, []byte("for two"))
@@ -156,7 +167,7 @@ func TestFlowgramDemuxRoutesByFlowID(t *testing.T) {
 func TestFlowgramOversizeFallsBackToStream(t *testing.T) {
 	fx := newFlowFixture(t)
 	sess := fx.sess
-	fc, far := fx.flow(t, 7)
+	fc, far := fx.flow(t, 7, true)
 
 	// The far end reads the framed stream leg concurrently: net.Pipe is
 	// synchronous, so a stream write blocks until someone reads it.
@@ -180,18 +191,26 @@ func TestFlowgramOversizeFallsBackToStream(t *testing.T) {
 		}
 	}()
 
+	// The flow announced itself the moment it became routable: its id and
+	// nothing else, which is what lets a peer start using the unreliable path
+	// without waiting for traffic.
+	frames := sess.sentFrames()
+	if len(frames) != 1 || len(frames[0]) != 4 || binary.BigEndian.Uint32(frames[0]) != 7 {
+		t.Fatalf("expected one 4-byte announce for flow 7, got %d frames (%v)", len(frames), frames)
+	}
+
 	small := bytes.Repeat([]byte{0xAB}, 200)
 	if n, err := fc.Write(small); err != nil || n != len(small) {
 		t.Fatalf("write small: n=%d err=%v", n, err)
 	}
-	frames := sess.sentFrames()
-	if len(frames) != 1 {
-		t.Fatalf("small datagram produced %d unreliable sends, want 1", len(frames))
+	frames = sess.sentFrames()
+	if len(frames) != 2 {
+		t.Fatalf("small datagram produced %d unreliable sends, want 2 (announce + payload)", len(frames))
 	}
-	if id := binary.BigEndian.Uint32(frames[0]); id != 7 {
+	if id := binary.BigEndian.Uint32(frames[1]); id != 7 {
 		t.Errorf("unreliable send named flow %d, want 7", id)
 	}
-	if !bytes.Equal(frames[0][4:], small) {
+	if !bytes.Equal(frames[1][4:], small) {
 		t.Error("unreliable send did not carry the payload")
 	}
 
@@ -200,7 +219,7 @@ func TestFlowgramOversizeFallsBackToStream(t *testing.T) {
 	if n, err := fc.Write(big); err != nil || n != len(big) {
 		t.Fatalf("write big: n=%d err=%v", n, err)
 	}
-	if len(sess.sentFrames()) != 1 {
+	if len(sess.sentFrames()) != 2 {
 		t.Errorf("an oversize datagram was offered to the unreliable path: %d sends", len(sess.sentFrames()))
 	}
 	select {
@@ -243,8 +262,8 @@ func TestFlowgramOversizeFallsBackToStream(t *testing.T) {
 func TestFlowgramQueueDropsWhenFull(t *testing.T) {
 	fx := newFlowFixture(t)
 	sess := fx.sess
-	slow, _ := fx.flow(t, 1)
-	other, _ := fx.flow(t, 2)
+	slow, _ := fx.flow(t, 1, false)
+	other, _ := fx.flow(t, 2, false)
 
 	// Far more than the queue depth, from a flow nobody is reading.
 	for i := 0; i < 500; i++ {
@@ -282,7 +301,7 @@ func TestFlowgramQueueDropsWhenFull(t *testing.T) {
 func TestFlowgramReadDeadline(t *testing.T) {
 	fx := newFlowFixture(t)
 	sess := fx.sess
-	fc, _ := fx.flow(t, 3)
+	fc, _ := fx.flow(t, 3, false)
 
 	_ = fc.SetReadDeadline(time.Now().Add(80 * time.Millisecond))
 	start := time.Now()
@@ -314,7 +333,7 @@ func TestFlowgramReadDeadline(t *testing.T) {
 func TestFlowgramCloseUnregisters(t *testing.T) {
 	fx := newFlowFixture(t)
 	sess := fx.sess
-	fc, _ := fx.flow(t, 5)
+	fc, _ := fx.flow(t, 5, false)
 
 	sess.deliver(5, []byte("before close"))
 	if got := readOne(t, fc); string(got) != "before close" {
@@ -329,7 +348,7 @@ func TestFlowgramCloseUnregisters(t *testing.T) {
 	}
 
 	// The mux keeps serving other flows after one closes.
-	live, _ := fx.flow(t, 6)
+	live, _ := fx.flow(t, 6, false)
 	sess.deliver(5, []byte("too late"))
 	sess.deliver(6, []byte("live flow"))
 	if got := readOne(t, live); string(got) != "live flow" {
@@ -349,7 +368,7 @@ func TestFlowgramCloseUnregisters(t *testing.T) {
 // its gate slot and its local socket for minutes after they left. (udp-datagram)
 func TestFlowgramStreamEOFEndsReads(t *testing.T) {
 	fx := newFlowFixture(t)
-	fc, far := fx.flow(t, 4)
+	fc, far := fx.flow(t, 4, false)
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)

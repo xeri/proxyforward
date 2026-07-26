@@ -26,6 +26,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -74,7 +75,7 @@ type FlowMux struct {
 	done   chan struct{}
 
 	mu    sync.RWMutex
-	flows map[uint32]chan []byte
+	flows map[uint32]*FlowgramConn
 }
 
 // NewFlowMux starts the session's demux goroutine. It exits when ctx is
@@ -88,7 +89,7 @@ func NewFlowMux(ctx context.Context, sess FlowSender) *FlowMux {
 		ctx:    ctx,
 		cancel: cancel,
 		done:   make(chan struct{}),
-		flows:  make(map[uint32]chan []byte),
+		flows:  make(map[uint32]*FlowgramConn),
 	}
 	go m.run()
 	return m
@@ -101,32 +102,26 @@ func (m *FlowMux) run() {
 		if err != nil {
 			return // ctx cancelled or the connection is gone; either ends the mux
 		}
-		if len(b) <= flowgramHdr {
-			// Too short to name a flow, or naming one with nothing to deliver.
-			// Splice acts only on a Read returning n > 0, so an empty payload
-			// cannot be expressed through it — same rule as DatagramStream.
-			continue
+		if len(b) < flowgramHdr {
+			continue // too short to name a flow
 		}
 		id := binary.BigEndian.Uint32(b)
 		m.mu.RLock()
-		q := m.flows[id]
+		f := m.flows[id]
 		m.mu.RUnlock()
-		if q == nil {
+		if f == nil {
 			continue
 		}
-		select {
-		case q <- b[flowgramHdr:]:
-		default: // the flow is behind; drop the newest, never block the loop
-		}
+		f.receiveDatagram(b[flowgramHdr:])
 	}
 }
 
-// Register routes datagrams for id to q. Registering an id that is already
+// Register routes datagrams for id to f. Registering an id that is already
 // present replaces it — a flow id is issued once per flow, so this only happens
 // if one is reused, and the newer flow is the live one.
-func (m *FlowMux) Register(id uint32, q chan []byte) {
+func (m *FlowMux) Register(id uint32, f *FlowgramConn) {
 	m.mu.Lock()
-	m.flows[id] = q
+	m.flows[id] = f
 	m.mu.Unlock()
 }
 
@@ -144,6 +139,30 @@ func (m *FlowMux) Close() {
 	<-m.done
 }
 
+// FlowStats counts which path a flow's datagrams took, so a caller can prove
+// the fast path is carrying traffic without measuring time — a fast stream
+// looks exactly like an unreliable datagram on a loopback stopwatch. One
+// instance is shared by every flow on a gateway or agent; the adds are atomic,
+// in the same class as the splice's own byte counters. May be nil.
+type FlowStats struct {
+	// Datagrams is what went out unreliably; Streamed is what fell back to a
+	// flow's stream, for size or because the connection refused the send.
+	Datagrams atomic.Int64
+	Streamed  atomic.Int64
+}
+
+func (s *FlowStats) countDatagram() {
+	if s != nil {
+		s.Datagrams.Add(1)
+	}
+}
+
+func (s *FlowStats) countStreamed() {
+	if s != nil {
+		s.Streamed.Add(1)
+	}
+}
+
 // FlowgramConn is one udp flow's leg, presented as a relay.Conn so Splice,
 // the idle reaper and the byte counters treat it exactly like the stream leg it
 // replaces. Reads yield whole datagrams from either path; writes take the
@@ -156,6 +175,7 @@ type FlowgramConn struct {
 	sess   FlowSender
 	id     uint32
 	stream Conn
+	stats  *FlowStats
 	// framed is the stream leg in its datagram clothes — the oversize write path,
 	// and the source the merge goroutine reads. Its Read and Write touch disjoint
 	// state, and each is single-threaded here (merge reads; the splice writes),
@@ -171,6 +191,16 @@ type FlowgramConn struct {
 	mergeDone chan struct{}
 	once      sync.Once
 
+	// peerReady is the only thing that lets this side use the unreliable path.
+	// A flow id reaches the peer in the open_conn header, on the stream, and a
+	// datagram sent before the peer has read it and registered would be dropped
+	// as unknown — losing a player's packet, which the stream path never does.
+	// So nothing goes unreliably until a datagram has come back for this flow:
+	// the peer cannot have sent one without registering first. That is the whole
+	// interlock, and it needs no acknowledgement message because the announce
+	// below already is one.
+	peerReady atomic.Bool
+
 	// wbuf holds [flowID][payload] so a datagram is built without allocating per
 	// write. quic-go copies what it is handed, so reusing this is safe.
 	wbuf []byte
@@ -185,22 +215,49 @@ type FlowgramConn struct {
 
 // NewFlowgramConn registers flow id on mux and starts merging the stream leg
 // into the same queue. sess is the datagram sender; stream is the flow's own
-// stream, which stays open for its lifetime.
-func NewFlowgramConn(mux *FlowMux, sess FlowSender, id uint32, stream Conn) *FlowgramConn {
+// stream, which stays open for its lifetime; stats (may be nil) counts which
+// path each outgoing datagram took.
+func NewFlowgramConn(mux *FlowMux, sess FlowSender, id uint32, stream Conn, stats *FlowStats) *FlowgramConn {
 	f := &FlowgramConn{
 		mux:       mux,
 		sess:      sess,
 		id:        id,
 		stream:    stream,
+		stats:     stats,
 		framed:    &DatagramStream{Conn: stream},
 		queue:     make(chan []byte, flowQueueDepth),
 		eof:       make(chan struct{}),
 		closed:    make(chan struct{}),
 		mergeDone: make(chan struct{}),
 	}
-	mux.Register(id, f.queue)
+	mux.Register(id, f)
 	go f.merge()
+	// Announce: a datagram carrying this flow id and nothing else, sent the
+	// moment the flow is routable. It is what lets the peer start using the
+	// unreliable path without waiting for traffic to prove we are here. Best
+	// effort by construction — losing it costs nothing, because the first real
+	// datagram this side sends says the same thing.
+	var hdr [flowgramHdr]byte
+	binary.BigEndian.PutUint32(hdr[:], id)
+	_ = sess.SendDatagram(hdr[:])
 	return f
+}
+
+// receiveDatagram takes one datagram the mux routed to this flow. Any datagram
+// at all proves the peer has registered, which is what unblocks our own
+// unreliable sends; an empty one is the announce, which says exactly that and
+// nothing more.
+func (f *FlowgramConn) receiveDatagram(payload []byte) {
+	f.peerReady.Store(true)
+	if len(payload) == 0 {
+		// Splice acts only on a Read returning n > 0, so an empty payload cannot
+		// be expressed through it — the same rule DatagramStream follows.
+		return
+	}
+	select {
+	case f.queue <- payload:
+	default: // the flow is behind; drop the newest, never block the demux loop
+	}
 }
 
 // merge delivers the stream leg's datagrams — the ones too large for the
@@ -283,11 +340,13 @@ func deliverDatagram(p, b []byte) (int, error) {
 	return copy(p, b), nil
 }
 
-// Write sends one datagram. Small enough for the path and the unreliable send
-// carries it; anything else — including a send the connection refuses for size —
-// goes on the stream, framed, exactly as before this existed.
+// Write sends one datagram. Small enough for the path, with the peer known to be
+// listening for this flow, and the unreliable send carries it; anything else —
+// a flow the peer has not confirmed yet, a payload too large, or a send the
+// connection refuses — goes on the stream, framed, exactly as before this
+// existed.
 func (f *FlowgramConn) Write(p []byte) (int, error) {
-	if len(p) <= quicDatagramTryMax {
+	if len(p) <= quicDatagramTryMax && f.peerReady.Load() {
 		need := flowgramHdr + len(p)
 		if cap(f.wbuf) < need {
 			f.wbuf = make([]byte, need)
@@ -296,13 +355,18 @@ func (f *FlowgramConn) Write(p []byte) (int, error) {
 		binary.BigEndian.PutUint32(b, f.id)
 		copy(b[flowgramHdr:], p)
 		if err := f.sess.SendDatagram(b); err == nil {
+			f.stats.countDatagram()
 			return len(p), nil
 		}
 		// Any refusal falls back rather than failing: too large for the current
 		// path is the expected one, and every other reason (the connection is
 		// going away) fails the stream write below too, where it belongs.
 	}
-	return f.framed.Write(p)
+	n, err := f.framed.Write(p)
+	if err == nil {
+		f.stats.countStreamed()
+	}
+	return n, err
 }
 
 // CloseWrite half-closes the stream, which is this flow's only FIN. The peer's

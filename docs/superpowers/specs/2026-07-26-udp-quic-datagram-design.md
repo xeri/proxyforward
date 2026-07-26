@@ -102,7 +102,30 @@ A companion per-flow goroutine merges the stream leg's framed datagrams into the
 same queue, so the receiver sees one ordered-ish sequence regardless of which
 path each datagram took.
 
-### 6. Cross-path reordering is accepted
+### 6. Nothing goes unreliably until the peer has proved it registered
+
+Added during implementation, after an e2e flake made the hole obvious. The flow
+id travels in `open_conn`, **on the stream**. Between the gateway writing that
+header and the agent reading it and registering, a datagram naming the flow
+arrives at a peer whose table does not contain it — and is dropped, silently
+losing a player's packet. The stream path never loses one, so this would be a
+regression dressed as an optimization.
+
+The interlock is one bit per flow, and no new message:
+
+- A `FlowgramConn` sends unreliably only once it has *received* a datagram for
+  its flow. The peer cannot have sent one without registering first, so receipt
+  is proof.
+- On becoming routable, each side sends an **announce**: a datagram carrying its
+  flow id and no payload. That is what lets the peer start without waiting for
+  traffic. Losing it costs nothing — the first real datagram says the same thing.
+- Until then the payload takes the stream. Correct, just not accelerated.
+
+Cost: exactly one datagram per flow takes the stream (the e2e tests assert that
+number rather than pretending it is zero). Deadlock-free, because the announces
+are unconditional.
+
+### 7. Cross-path reordering is accepted
 
 A datagram sent on the stream can arrive after one sent unreliably later, because
 the two paths have independent delivery. This is UDP: reordering is a property
@@ -117,7 +140,7 @@ promised, and was never promised by UDP.
 - **No datagram path on yamux or per-conn.** Both are TCP.
 - **No MTU discovery.** `quicDatagramTryMax` is a conservative constant and the
   error is authoritative.
-- **No reordering buffer.** See decision 6.
+- **No reordering buffer.** See decision 7.
 
 ## Commit sequence
 

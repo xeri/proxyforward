@@ -144,6 +144,15 @@ func poolGrantFor(hello *control.Hello, caps control.CapSet, tcp bool) int {
 // lifetime.
 func (g *Gateway) PooledLegs() int64 { return g.pooledLegs.Load() }
 
+// DatagramCounts reports how many udp datagrams this gateway sent on QUIC's
+// unreliable path and how many fell back to a flow's stream (too large for the
+// path, or refused by the connection). Cumulative over this gateway's lifetime,
+// and the only honest way to tell the two paths apart — on a loopback stopwatch
+// they look identical.
+func (g *Gateway) DatagramCounts() (fast, streamed int64) {
+	return g.flowStats.Datagrams.Load(), g.flowStats.Streamed.Load()
+}
+
 // parkPooledConn files an authenticated, connID-less data connection in its own
 // agent's pool. The session is looked up by the identity the connection just
 // proved, so a connection can only ever be parked for the agent that dialled it:

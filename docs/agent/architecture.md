@@ -102,6 +102,7 @@ persisted to config.
 | Datagram idle reap | 2 min — a UDP flow has no FIN, so the reaper is the only thing that retires it; both ends share the constant | `relay/datagram.go DatagramIdleTimeout` |
 | Datagram frame | 2-byte big-endian length + payload; max payload 65507 B, checked before the buffer is sized | `relay/datagram.go MaxDatagram` |
 | UDP session queue / datagram buffer | 64 datagrams per player (full = drop, never block the shared read loop) / 2048 B pooled | `gateway/udp.go udpSessionQueue udpBufSize` |
+| Flowgram header / queue / unreliable-send bound | 4-byte big-endian flow id / 64 datagrams per flow (full = drop, same reasoning as above) / 1200 B, an optimization bound only — the connection's refusal is what decides | `relay/flowgram.go flowgramHdr flowQueueDepth quicDatagramTryMax` |
 | Bandwidth cap unit / burst | `Mbps × 125_000` B/s / `relay.BufSize` | `bwcap.go` |
 | Backoff | 1 s → 60 s full jitter, reset after 60 s stable | `link/backoff.go` |
 | Reconnect fast tier | first 3 attempts of an outage at 200 ms ±50 % before the curve starts; granted once per 60 s window, so a flapping NIC's Resets can't refill it | `link/backoff.go FastRetries FastDelay FastWindow` |
@@ -491,6 +492,39 @@ counts as up (`backendDown`), and the GUI shows "unknown" rather than a convinci
 `ECONNRESET`, on an unconnected socket, for a different peer. The read loop ignores it
 — returning would take the tunnel down the first time any player quit, leaving the
 port bound and answering nothing.
+
+### Flowgrams: the payload on QUIC datagrams (`internal/relay/flowgram.go`)
+
+A QUIC stream is reliable and ordered, so a lost packet carrying one datagram stalls
+the next until the retransmit lands — latency spent recovering data RakNet or a voice
+mod would rather have dropped. Under cap `udp-datagram`, a udp flow's payload rides
+QUIC's unreliable datagrams instead (RFC 9221, `transport.DatagramSession`). Three
+gates, all required: the capability negotiated, the session able to carry datagrams
+at all (only QUIC is), and the peer's QUIC advertising them. Any one failing leaves
+the framed-stream leg above in place, byte for byte.
+
+Datagrams are per *connection*, not per stream, so each carries `[4-byte BE flowID]`
+and `FlowMux` routes on it — one demux goroutine per session, a bounded queue per
+flow, unknown ids dropped. The gateway allocates the id and sends it in
+`OpenConn.FlowID`; 0 (a legacy peer, a tcp tunnel, a non-QUIC transport) means the
+payload rides the stream.
+
+Three properties keep it small and safe:
+
+- **The stream stays the flow's lifecycle anchor.** `FlowgramConn` is a `relay.Conn`,
+  so `Splice` is untouched; `Close`/`CloseWrite` delegate to the stream, and the
+  stream's EOF is what ends this leg's reads — a udp flow has no FIN of its own.
+- **Nothing goes unreliably until the peer proves it registered.** The flow id
+  travels on the stream, so a datagram sent before the peer read that header would be
+  dropped as unknown — losing a packet the stream path never loses. Each side sends
+  an announce (its flow id, no payload) when it becomes routable, and uses the
+  unreliable path only after receiving a datagram for that flow. Cost: exactly one
+  datagram per flow takes the stream.
+- **Oversize falls back, driven by the error.** `quicDatagramTryMax` is an
+  optimization bound; a send the connection refuses (`transport.ErrDatagramTooLarge`,
+  translated so nothing outside `internal/transport` imports quic-go) goes on the
+  stream whatever the constant says. A companion goroutine merges those back into the
+  same queue. Cross-path reordering is accepted — that is UDP.
 
 ## Analytics data model (`internal/analytics/schema.go`)
 
