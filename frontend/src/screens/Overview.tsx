@@ -327,7 +327,11 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
           <HealthPanel status={status} />
           <div className="grid grid-cols-2 gap-x-[var(--grid-gap)] gap-y-6 pt-2">
             <StatTile label="Link uptime" value={linkUptime} sub={uptimeSub || undefined} />
-            <StatTile label="Round trip" value={(isAgent ? status.linkUp : status.agentConnected) && hasRtt(status.rttMillis) ? fmtRtt(status.rttMillis) : '—'} />
+            {/* Not round trip: HealthPanel states it two rows up, and a screen
+                that says one number twice has wasted the second slot. Link
+                sessions is the reading that makes the uptime beside it mean
+                something — a short uptime with a high count is a flapping link. */}
+            <StatTile label="Link sessions" value={status.linkSessions ? String(status.linkSessions) : '—'} />
             <StatTile
               label="Live sessions" accent={liveSessions > 0}
               value={<NumberTicker value={liveSessions} format={n => String(Math.round(n))} />}
