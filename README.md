@@ -107,7 +107,7 @@ gh attestation verify proxyforward-<version>-windows-amd64.exe -R xeri/proxyforw
 4. **Forward** **25565/TCP** (or your chosen public port) *and* **8474/TCP+UDP** on the
    router to this machine — see [Ports to forward](#ports-to-forward--on-the-gateway-only) —
    and allow the inbound firewall rule when prompted
-   (Settings → Windows integration → *Add rule*).
+   (Settings → System → Firewall rule → *Add rule*).
 
 **On the Minecraft machine — the agent:**
 
@@ -500,8 +500,9 @@ cd frontend && npm run dev
 go test ./...
 ```
 
-9 fuzz targets on the internet-facing parsers (control frames, Minecraft
-handshake/VarInt/packet, login sniffer, offline responder, pairing code, sniff tap) plus an in-process
+11 fuzz targets on the internet-facing parsers (control frames, datagram framing,
+Minecraft handshake/VarInt/packet, login sniffer, offline responder, status ping,
+pairing code, sniff tap) plus an in-process
 loopback e2e suite that is goroutine-leak-checked with `goleak` and enforces the
 throughput/latency floor and per-transport twins described [above](#head-of-line-blocking-and-how-each-plane-answers-it).
 
