@@ -98,6 +98,15 @@ export function BandwidthPanel({historyUnsupported, compact = false, hero = fals
         </>
       )}
 
+      {/* A reviewed exception, not drift: these two rows are hand-rolled while
+          every other toggle in the app is SegmentedControl. That component
+          gives each segment the width of the widest label and slides a
+          draggable thumb between them — right for three prose choices, wrong
+          for nine mono range keys ("15s" … "all"), which would each be padded
+          out to the widest and eat the row. It also has no disabled state, and
+          candles genuinely are unavailable below 15m; a thumb you can drag onto
+          a segment that refuses is worse than a button that says no. Port it
+          only if SegmentedControl learns both. */}
       {!compact && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="inline-flex rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--panel-2)] p-0.5">
