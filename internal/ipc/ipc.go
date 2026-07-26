@@ -220,6 +220,16 @@ type TunnelStatus struct {
 	// carry neither and the UI's pause controls stay disabled.
 	Paused   bool   `json:"paused,omitempty"`
 	PausedBy string `json:"pausedBy,omitempty"`
+	// Server* carry what the local Minecraft server reported to the agent's
+	// mc-status health probe. ServerStatusKnown is the guard, mirroring
+	// LocalUp/LocalKnown: without it the counts below are meaningless, and a
+	// daemon that predates this field sends neither — so an absent report reads
+	// as unknown ("—" in the UI) rather than as an empty server.
+	ServerStatusKnown   bool   `json:"serverStatusKnown,omitempty"`
+	ServerMOTD          string `json:"serverMotd,omitempty"`
+	ServerPlayersOnline int    `json:"serverPlayersOnline,omitempty"`
+	ServerPlayersMax    int    `json:"serverPlayersMax,omitempty"`
+	ServerVersion       string `json:"serverVersion,omitempty"`
 }
 
 // StatusSource produces the current Status snapshot for each request.

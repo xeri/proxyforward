@@ -421,6 +421,15 @@ type TunnelUI struct {
 	// empty against a daemon that predates pause — the UI's controls disable.
 	Paused   bool   `json:"paused"`
 	PausedBy string `json:"pausedBy"`
+	// Server* mirror the local Minecraft server's own report, from the agent's
+	// mc-status health probe. ServerStatusKnown false means no report this tick
+	// (wrong probe kind, server down, or a daemon that predates the field) and
+	// the counts below must render as "—", never as zero players.
+	ServerStatusKnown   bool   `json:"serverStatusKnown"`
+	ServerMOTD          string `json:"serverMotd"`
+	ServerPlayersOnline int    `json:"serverPlayersOnline"`
+	ServerPlayersMax    int    `json:"serverPlayersMax"`
+	ServerVersion       string `json:"serverVersion"`
 }
 
 // ConnUI is one live connection for the frontend.
@@ -519,6 +528,11 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 			BandwidthLimitScope: t.BandwidthLimitScope,
 			Paused:              t.Paused,
 			PausedBy:            t.PausedBy,
+			ServerStatusKnown:   t.ServerStatusKnown,
+			ServerMOTD:          t.ServerMOTD,
+			ServerPlayersOnline: t.ServerPlayersOnline,
+			ServerPlayersMax:    t.ServerPlayersMax,
+			ServerVersion:       t.ServerVersion,
 		})
 	}
 	st.ConnectionsTruncated = s.ConnectionsTruncated

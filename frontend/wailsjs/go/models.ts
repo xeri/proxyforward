@@ -737,6 +737,11 @@ export namespace app {
 	    bandwidthLimitScope: string;
 	    paused: boolean;
 	    pausedBy: string;
+	    serverStatusKnown: boolean;
+	    serverMotd: string;
+	    serverPlayersOnline: number;
+	    serverPlayersMax: number;
+	    serverVersion: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TunnelUI(source);
@@ -754,6 +759,11 @@ export namespace app {
 	        this.bandwidthLimitScope = source["bandwidthLimitScope"];
 	        this.paused = source["paused"];
 	        this.pausedBy = source["pausedBy"];
+	        this.serverStatusKnown = source["serverStatusKnown"];
+	        this.serverMotd = source["serverMotd"];
+	        this.serverPlayersOnline = source["serverPlayersOnline"];
+	        this.serverPlayersMax = source["serverPlayersMax"];
+	        this.serverVersion = source["serverVersion"];
 	    }
 	}
 	export class UIStatus {
@@ -873,6 +883,10 @@ export namespace config {
 	    OfflineMOTD: string;
 	    BandwidthLimitMbps: number;
 	    BandwidthLimitScope: string;
+	    HealthProbe: string;
+	    HealthIntervalSec: number;
+	    HealthTimeoutSec: number;
+	    HealthMaxFailed: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new TunnelOptions(source);
@@ -885,6 +899,10 @@ export namespace config {
 	        this.OfflineMOTD = source["OfflineMOTD"];
 	        this.BandwidthLimitMbps = source["BandwidthLimitMbps"];
 	        this.BandwidthLimitScope = source["BandwidthLimitScope"];
+	        this.HealthProbe = source["HealthProbe"];
+	        this.HealthIntervalSec = source["HealthIntervalSec"];
+	        this.HealthTimeoutSec = source["HealthTimeoutSec"];
+	        this.HealthMaxFailed = source["HealthMaxFailed"];
 	    }
 	}
 	export class Tunnel {

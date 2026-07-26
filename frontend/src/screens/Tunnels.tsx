@@ -9,7 +9,7 @@ import {
   Modal, MonoChip, PageHeader, Select, Skeleton, TextInput, Toggle,
 } from '../components/ui'
 import {IconBolt, IconEdit, IconPlus, IconServer, IconTrash, IconTunnels} from '../components/icons'
-import {BANDWIDTH_SCOPES, PROTOCOLS, scopeLabel, UIStatus} from '../state'
+import {BANDWIDTH_SCOPES, HEALTH_PROBES, probeLabel, PROTOCOLS, scopeLabel, UIStatus} from '../state'
 
 type Tunnel = config.Tunnel
 
@@ -32,6 +32,19 @@ function blankTunnel(existing: Tunnel[]): Tunnel {
     LocalAddr: '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
     Options: {MinecraftAware: false, ProxyProtocolV2: false, OfflineMOTD: '', BandwidthLimitMbps: 0, BandwidthLimitScope: 'combined'},
   })
+}
+
+/** healthSummary describes a tunnel's health check in one line, or '' when it is
+ * entirely default — the card's Advanced list only names what was actually
+ * configured, so a default check adds no row. */
+function healthSummary(o?: config.TunnelOptions): string {
+  if (!o) return ''
+  const parts: string[] = []
+  if (o.HealthProbe === 'mc-status') parts.push('Server ping')
+  if (o.HealthIntervalSec) parts.push(`every ${o.HealthIntervalSec}s`)
+  if (o.HealthTimeoutSec) parts.push(`${o.HealthTimeoutSec}s timeout`)
+  if (o.HealthMaxFailed > 1) parts.push(`${o.HealthMaxFailed} failures to trip`)
+  return parts.join(' · ')
 }
 
 /** Tunnels: the agent owns the definitions (add/edit/delete, hot-applied);
@@ -179,6 +192,7 @@ export function Tunnels({status}: {status: UIStatus}) {
                   (t.Options.BandwidthLimitScope || 'combined') !== 'combined' ? ` · ${scopeLabel(t.Options.BandwidthLimitScope)}` : ''
                 }`] as [string, string]]
               : []),
+            ...(healthSummary(t.Options) ? [['Health check', healthSummary(t.Options)] as [string, string]] : []),
           ]
           return (
             <div key={t.ID} className="pf-card pf-lift flex flex-col p-4">
@@ -204,6 +218,26 @@ export function Tunnels({status}: {status: UIStatus}) {
                 {l?.paused && <PausedBadge pausedBy={l.pausedBy} peer="the gateway" />}
                 {l?.localKnown && <Badge tone={l.localUp ? 'good' : 'bad'}>{l.localUp ? 'Server up' : 'Server down'}</Badge>}
               </div>
+
+              {/* What the server itself said, from the mc-status probe. Metadata
+                  on whitespace, not a nested card. Absent for a tcp-probed or
+                  down tunnel — nothing is claimed when nothing was heard. */}
+              {l?.serverStatusKnown && (
+                <div className="mt-2.5 min-w-0 space-y-1">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-caption lowercase tracking-[var(--tracking-label)] text-[var(--text-3)]">players</span>
+                    <span className="text-emphasis font-medium tabular-nums text-[var(--text-1)]">
+                      {l.serverPlayersOnline >= 0 && l.serverPlayersMax >= 0
+                        ? `${l.serverPlayersOnline} / ${l.serverPlayersMax}`
+                        : '—'}
+                    </span>
+                    {l.serverVersion && <span className="truncate text-sub text-[var(--text-3)]">{l.serverVersion}</span>}
+                  </div>
+                  {l.serverMotd && (
+                    <div className="truncate text-sub text-[var(--text-3)]" title={l.serverMotd}>{l.serverMotd}</div>
+                  )}
+                </div>
+              )}
 
               {advanced.length > 0 && (
                 <div className="mt-3">
@@ -396,9 +430,64 @@ function TunnelEditor({title, initial, onSave, onCancel}: {
                 />
               </Field>
             </div>
+
+            <HealthFields opt={opt} setOpt={setOpt} isUDP={isUDP} />
           </div>
         </Disclosure>
       </div>
     </Modal>
+  )
+}
+
+/** HealthFields: how this tunnel's local server is checked. Folded away by
+ * default — the shipped behaviour needs no configuration — and every field
+ * placeholder shows the default it falls back to, so an empty box is never
+ * ambiguous about what will happen. */
+function HealthFields({opt, setOpt, isUDP}: {
+  opt: config.TunnelOptions
+  setOpt: (patch: Partial<config.TunnelOptions>) => void
+  isUDP: boolean
+}) {
+  const num = (v: string) => Math.max(0, parseInt(v, 10) || 0)
+  return (
+    <Disclosure
+      label="Health check"
+      hint={isUDP ? 'Not available on UDP' : probeLabel(opt.HealthProbe)}
+      defaultOpen={!isUDP && (!!opt.HealthProbe || !!opt.HealthIntervalSec || !!opt.HealthTimeoutSec || !!opt.HealthMaxFailed)}
+    >
+      {isUDP ? (
+        <p className="text-body text-[var(--text-3)]">
+          A UDP port cannot be probed — connecting to a dead one succeeds exactly as a live one does,
+          so this tunnel's server health reads <span className="font-medium text-[var(--text-2)]">unknown</span> rather
+          than a guess. Players are served either way.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          <Field label="Check" hint={opt.HealthProbe === 'mc-status'
+            ? 'Asks for the server list ping, so a process that accepts connections but never answers reads as down — and its MOTD and player count show on the card.'
+            : 'Opens a connection and closes it. Cheap, but anything listening on the port passes.'}>
+            <Select value={opt.HealthProbe || 'tcp'} onChange={v => setOpt({HealthProbe: v})} options={HEALTH_PROBES} />
+          </Field>
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="Every (s)" hint="Default 5">
+              <TextInput value={opt.HealthIntervalSec ? String(opt.HealthIntervalSec) : ''} placeholder="5"
+                onChange={v => setOpt({HealthIntervalSec: num(v)})} mono />
+            </Field>
+            <Field label="Timeout (s)" hint="Default 3">
+              <TextInput value={opt.HealthTimeoutSec ? String(opt.HealthTimeoutSec) : ''} placeholder="3"
+                onChange={v => setOpt({HealthTimeoutSec: num(v)})} mono />
+            </Field>
+            <Field label="Failures to trip" hint="Default 1">
+              <TextInput value={opt.HealthMaxFailed ? String(opt.HealthMaxFailed) : ''} placeholder="1"
+                onChange={v => setOpt({HealthMaxFailed: num(v)})} mono />
+            </Field>
+          </div>
+          <p className="text-caption text-[var(--text-3)]">
+            Consecutive failures — one success clears the count and brings the tunnel straight back up.
+            Raise it if the server stutters under load.
+          </p>
+        </div>
+      )}
+    </Disclosure>
   )
 }

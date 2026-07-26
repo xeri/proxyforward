@@ -605,6 +605,14 @@ func (e *Engine) Status() ipc.Status {
 			// "mine" is this agent's own bits (tunnel or agent-wide); "theirs"
 			// the gateway's reported set, whose all-bit covers() already folds.
 			ts.Paused, ts.PausedBy = pausedBy(t.Paused || e.Agent.AgentWidePaused(), e.Agent.PausedByGateway(t.ID))
+			// Only the mc-status probe has anything to report, and only while the
+			// server is answering — ServerStatus goes nil the moment it stops, so
+			// a stale player count can never be shown as current.
+			if info := e.Agent.ServerStatus(t.ID); info != nil {
+				ts.ServerStatusKnown = true
+				ts.ServerMOTD, ts.ServerVersion = info.MOTD, info.Version
+				ts.ServerPlayersOnline, ts.ServerPlayersMax = info.PlayersOnline, info.PlayersMax
+			}
 			st.Tunnels = append(st.Tunnels, ts)
 		}
 		setStatusConns(&st, e.Agent.Conns.Snapshot())

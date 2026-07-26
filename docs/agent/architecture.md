@@ -35,7 +35,8 @@ internal/
   analytics/            SQLite (modernc, WAL, single writer + read pool): sessions,
                         players, geo, rollups, uptime events, retention
   mc/ mcsniff/          Minecraft protocol: VarInt/handshake/login parsers (fuzzed),
-                        push-parser Sniffer, offline responder (unwired); tap glue
+                        push-parser Sniffer, offline responder, Server List Ping
+                        client (the mc-status health probe); tap glue
   players/ geo/         Mojang identity resolver (rate-limited); GeoLite2 lookups
   linkquality/          Jitter EWMA + loss window from the heartbeat; probe collector
   logging/ netid/ netnotify/ portowner/ proxyproto/ setup/ svc/ tcpinfo/ wincon/
@@ -111,6 +112,9 @@ persisted to config.
 | Pre-auth gate | `MaxConnsGlobal + 256` concurrent unauthenticated conns; slot freed at auth | `limits.go preAuthGate`, `preAuthHeadroom` |
 | Accept retry backoff | 5 ms doubling → 1 s; only a closed listener stops the loop | `gateway.go retryAccept` |
 | Rebind retry | 30 s ticker re-attempts every configured-but-unbound group socket and tunnel listener | `gateway/rebind.go rebindRetryInterval` |
+| Health probe | 5 s interval / 3 s timeout / 1 consecutive failure to trip, each overridable per tunnel; the checker wakes at 1 s or the fastest configured interval | `agent/health.go defaultHealthInterval defaultHealthDialTimeout defaultHealthMaxFailed healthTickResolution` |
+| Health tuning ceilings | interval ≤ 300 s, timeout ≤ 60 s (and ≤ the interval), failures ≤ 10 | `config.go maxHealthIntervalSec maxHealthTimeoutSec maxHealthMaxFailed` |
+| Status-ping response cap | 256 KiB, refused on the declared length before the buffer exists | `mc/statusping.go maxStatusResponse` |
 | Loss window / ping-loss timeout | 32 heartbeats / 2×interval | `agent.go lossWindow lossTimeout`, `linkquality.go` |
 | Gateway per-conn RTT sample | every 5 s, ≤200 entries per frame | `gateway.go rttSampleInterval`, `control.go MaxConnStatsPerFrame` |
 | GUI tick | 500 ms; log poll 250 ms; UI re-render tick 1 s | `app.go tickInterval`, `Activity.tsx pull`, `Overview.tsx` |
@@ -364,6 +368,33 @@ solo player gets. Members share world state — that precondition is the operato
 - **Ordinals never fall back**: a rejoining member gets a new, higher `joinOrdinal`,
   so a recovered ex-primary does not reclaim standby primary.
 
+## Tunnel health (`internal/agent/health.go`, `internal/mc/statusping.go`)
+
+One goroutine probes every enabled tunnel's local backend. It wakes at
+`healthTickResolution` — or the fastest configured interval, whichever is
+shorter — and probes whichever tunnels are due, rather than growing a goroutine
+and a timer per tunnel to get wrong on every config hot-apply. Probes are
+sequential, so a slow backend delays its peers by at most its own timeout.
+
+The tuning (`TunnelOptions.HealthProbe/HealthIntervalSec/HealthTimeoutSec/
+HealthMaxFailed`) is **agent-local and never on the wire**, the same call as
+`LocalAddr` and PP2: the probe targets the agent's LAN, the one thing the gateway
+cannot see. All-zero is the shipped behaviour.
+
+- **Two probe kinds.** `tcp` dials and closes — cheap, and anything listening
+  passes. `mc-status` runs a real Server List Ping (`mc.StatusPing`), so a
+  process that accepts connections but will never serve reads *down*. TCP only;
+  `mc-status` on a udp tunnel is a config error, and udp tunnels stay unprobed
+  and *unknown* either way.
+- **The failure counter is consecutive and resets on success.** frp's equivalent
+  never resets, which silently degrades its max-failed setting to 1 after the
+  backend's first ever blip (`TestHealthFailureCounterResetsOnSuccess`).
+  Recovery is never debounced — one success flips the tunnel straight back up.
+- **A status report is only ever current.** The server's MOTD, version and player
+  counts are retained for the GUI (`Agent.ServerStatus` → `ipc.TunnelStatus`
+  `Server*`) and dropped the moment the tunnel goes down, because a remembered
+  player count renders as a live one. Absent counts stay -1.
+
 ## Rebind retry (`internal/gateway/rebind.go`)
 
 A bind can fail for a reason that later goes away — an outside process holding the
@@ -533,6 +564,10 @@ revoke removes it),
 `&tray=off|notice` (the close fork: the mock's X mirrors `closeDecision` — default is
 tray-on with the notice seen; `off` → close quits, confirming when players are on;
 `notice` → an uneventful close shows the one-time tray notice),
+`&mcstatus=on|empty` (the default agent tunnel probes with mc-status, so its card
+carries the server's own report — `on` = 7/40 with an MOTD, `empty` = a server that
+answered but omitted its counts, which must render "—" and never 0/0; no axis = the
+tcp probe, which has nothing to report),
 `&pause=mine|theirs|both` (the default tunnel's pause bits — paused by this side, the
 peer, or both; Pause/Resume mutate this side's bit live, and `&consent=off` doubles as
 the "peer predates pause" state).

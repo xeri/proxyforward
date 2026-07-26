@@ -252,7 +252,6 @@ The README and the Settings UI **oversell**. Ground truth re-verified by the
 
 | Feature (advertised in README/UI) | Actual state |
 |---|---|
-| MC status polling (MOTD/players) | Only login sniffing (`mcsniff/`); the health probe is a bare TCP dial (`health.go probeOnce`), and udp tunnels are not probed at all — a UDP port cannot be dialled to prove it is alive, so their health stays *unknown* rather than fabricated. |
 | Autostart ("Start on login") | Stored (`config.go` `Autostart`), consumed by nothing, and shown nowhere since the honesty pass. The tray half of this row shipped (close-to-tray, run-state icon — `app/tray.go`). |
 | Linux / macOS binaries | CI **builds** them (`.github/workflows/ci.yml`) so the `*_other.go` stubs can't rot, but they **cannot run**: `ipc.Serve` returns `ErrUnsupported` off Windows and every engine must serve the pipe (`engine.go Run`), so the window opens and the engine dies. Unpublished artifacts, never release assets. Fixing this means a real unix-socket IPC port. |
 

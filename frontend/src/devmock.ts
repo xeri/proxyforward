@@ -74,6 +74,12 @@
 //                      clears its own). Gateway per-agent pause rides the same
 //                      state; &consent=off doubles as the "peer predates
 //                      pause" axis (roster pauseSupported false).
+//   &mcstatus=on|empty
+//                    — the default agent tunnel's health probe is mc-status, so
+//                      the card carries the server's own report. on → 7/40 and
+//                      an MOTD. empty → the server answered but omitted its
+//                      player counts, so they must render "—" and not 0/0.
+//                      No axis → the tcp probe: no report, no reading shown.
 //   &tray=off|notice — the close fork (X button). Default: the tray preference
 //                      is on and the one-time notice was already seen, so X
 //                      with players shows the Minimize/Quit fork and X without
@@ -110,6 +116,7 @@ export function installDevMock() {
   const axisConsentOff = params.get('consent') === 'off' // peer without config-consent
   const axisTray = params.get('tray') || '' // '' (on, notice seen) | off | notice
   const axisPause = params.get('pause') || '' // '' | mine | theirs | both
+  const axisMCStatus = params.get('mcstatus') || '' // '' (tcp probe, no report) | on | empty
   // Pause bits, mutable via the SetPause stub: mine/theirs per the default
   // tunnel, allMine the gateway's per-agent bit. &consent=off doubles as the
   // "peer predates pause" state (pauseSupported false on the roster).
@@ -663,7 +670,9 @@ export function installDevMock() {
     Role: state.role,
     Agent: {AgentID: 'agt_5w7d2k9rq3v8xj4m', GatewayHost: 'play.example.com', GatewayPort: 8474, CertFingerprint: 'sha256:ab', Transport: 'auto',
       Tunnels: [{ID: tunnelID, Name: 'Minecraft', Type: 'tcp', LocalAddr: '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
-        Options: {MinecraftAware: true, ProxyProtocolV2: false, OfflineMOTD: 'Server is offline — back soon', BandwidthLimitMbps: 40, BandwidthLimitScope: 'per-direction'}}]},
+        Options: {MinecraftAware: true, ProxyProtocolV2: false, OfflineMOTD: 'Server is offline — back soon',
+          BandwidthLimitMbps: 40, BandwidthLimitScope: 'per-direction',
+          HealthProbe: axisMCStatus ? 'mc-status' : '', HealthIntervalSec: 0, HealthTimeoutSec: 0, HealthMaxFailed: 0}}]},
     Gateway: {BindAddr: '0.0.0.0', ControlPort: 8474, PublicHost: 'play.example.com', PortAllowlist: [],
       MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10, MaxTunnelsPerAgent: 32},
     Metrics: {PrometheusEnabled: false, PrometheusAddr: '127.0.0.1:9464'},
@@ -733,7 +742,16 @@ export function installDevMock() {
             bandwidthLimitMbps: t.bandwidthLimitMbps ?? 0, bandwidthLimitScope: t.bandwidthLimitScope ?? '',
           })))]
         : [])
-      : [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true, paused: pausedNow(), pausedBy: pausedByNow()}]
+      : [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true,
+        paused: pausedNow(), pausedBy: pausedByNow(),
+        // The mc-status probe's report. Absent without the axis (a tcp-probed
+        // tunnel has nothing to say); `empty` is the server that answered but
+        // omitted its counts, which must read "—" rather than 0/0.
+        serverStatusKnown: axisMCStatus !== '',
+        serverMotd: axisMCStatus ? 'A Minecraft Server — season 4' : '',
+        serverPlayersOnline: axisMCStatus === 'empty' ? -1 : 7,
+        serverPlayersMax: axisMCStatus === 'empty' ? -1 : 40,
+        serverVersion: axisMCStatus ? '1.21.4' : ''}]
     const gwConns = gw
       ? (state.linkUp
         ? [...state.conns.map((c: any) => ({...c, agentId: 'agt_5w7d2k9rq3v8xj4m'})),

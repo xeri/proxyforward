@@ -123,8 +123,9 @@ type Tunnel struct {
 }
 
 type TunnelOptions struct {
-	// MinecraftAware enables status polling (authoritative MOTD/player data)
-	// and passive username sniffing for this tunnel.
+	// MinecraftAware enables passive username sniffing on this tunnel: the
+	// gateway reads the login handshake in passing to attribute connections to
+	// players. It does not poll the server — that is HealthProbe below.
 	MinecraftAware bool `toml:"minecraft_aware"`
 	// ProxyProtocolV2 prepends a PP2 header when dialing the local server so
 	// it sees real client IPs. Mutually exclusive with BungeeCord/Velocity

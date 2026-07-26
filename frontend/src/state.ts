@@ -92,6 +92,17 @@ export function scopeLabel(s: string): string {
   return BANDWIDTH_SCOPES.find(o => o.value === (s || 'combined'))?.label ?? 'Combined'
 }
 
+/** How a tunnel's local server is checked. Values match config.go's
+ * HealthProbe* constants; empty normalizes to "tcp". Labelled by what the check
+ * can actually tell you, because that is the whole difference between them. */
+export const HEALTH_PROBES = [
+  {value: 'tcp', label: 'Connect — is anything listening?'},
+  {value: 'mc-status', label: 'Server ping — is Minecraft answering?'},
+]
+export function probeLabel(s: string): string {
+  return HEALTH_PROBES.find(o => o.value === (s || 'tcp'))?.label ?? 'Connect'
+}
+
 /** Human labels for the active data-plane transport (Settings' link line and the
  * Agents drill-in chip). An unknown/empty value renders as "—" at the call site. */
 export const TRANSPORT_LABEL: Record<string, string> = {
