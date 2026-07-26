@@ -101,6 +101,7 @@ persisted to config.
 | UDP session queue / datagram buffer | 64 datagrams per player (full = drop, never block the shared read loop) / 2048 B pooled | `gateway/udp.go udpSessionQueue udpBufSize` |
 | Bandwidth cap unit / burst | `Mbps × 125_000` B/s / `relay.BufSize` | `bwcap.go` |
 | Backoff | 1 s → 60 s full jitter, reset after 60 s stable | `link/backoff.go` |
+| Reconnect fast tier | first 3 attempts of an outage at 200 ms ±50 % before the curve starts; granted once per 60 s window, so a flapping NIC's Resets can't refill it | `link/backoff.go FastRetries FastDelay FastWindow` |
 | Run stop grace | 10 s — the caller's wait for a clean unwind, not the run's; force skips it, over-IPC always does | `engine.go stopGrace`, `app.go engineStopGrace` |
 | Abuse defaults | 4096 global / 32 per-network conns; 10 auth fails/min/network (token bucket: burst 10, refill 10/min) | `config.go Default` |
 | Abuse accounting unit | one IPv4 address; one IPv6 **/64** (smallest block a subscriber holds) | `limits.go sourceNet` |

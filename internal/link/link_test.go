@@ -209,14 +209,16 @@ func TestPinnedTLSHandshake(t *testing.T) {
 
 func TestBackoffGrowsAndResets(t *testing.T) {
 	b := &Backoff{Base: time.Second, Max: 30 * time.Second, StableAfter: time.Minute}
-	seen := make([]time.Duration, 6)
+	seen := make([]time.Duration, FastRetries+6)
 	for i := range seen {
 		seen[i] = b.Next()
 	}
+	// The fast tier prepends FastRetries attempts; the curve then starts at Base
+	// (backoff_test.go covers the tier itself and its window).
 	for i, d := range seen {
-		ceil := time.Second << i
-		if ceil > 30*time.Second {
-			ceil = 30 * time.Second
+		ceil := 3 * FastDelay / 2
+		if i >= FastRetries {
+			ceil = min(time.Second<<(i-FastRetries), 30*time.Second)
 		}
 		if d < 1 || d > ceil {
 			t.Errorf("attempt %d: delay %v outside (0, %v]", i, d, ceil)
