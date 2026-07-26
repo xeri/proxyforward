@@ -27,6 +27,10 @@
 //                      connected/offline/revoked states render without any axis.
 //                      old: a pre-roster daemon (no agents array) → the Agents
 //                      screen's honest-unavailable state (ListAgents also [])
+//                      clamped: a fleet past ipc.MaxStatusAgents — the same five
+//                      agents, but agentsTotal says 31, so the title-bar pill
+//                      counts the fleet and the Agents screen says which rows
+//                      carry no live link state
 //   &groups=spread|standby|both
 //                    — gateway only. Seeds the Agents screen's tunnel-group cards:
 //                      spread → a 3-member least-connections group with one
@@ -107,7 +111,7 @@ export function installDevMock() {
   const axisAnalyticsOff = params.get('analytics') === 'off'
   const axisUnpaired = params.get('paired') === '0'
   const axisGeo = params.get('geo') || '' // off | empty | error | pending
-  const axisFleet = params.get('fleet') || '' // '' (single agent) | multi | old
+  const axisFleet = params.get('fleet') || '' // '' (single agent) | multi | old | clamped
   const axisGroups = params.get('groups') || '' // '' (none → empty state) | spread | standby | both
   const axisConflict = params.get('conflict') || '' // '' | port | clone | both
   const axisDeepLink = params.get('deeplink') === '1' // simulate a clicked pxf:// invite
@@ -721,7 +725,7 @@ export function installDevMock() {
       linkBytesOut: Math.round(state.bytesOut * 1.06) + 3_100_000,
       tunnels: 1, players: state.conns.length,
     }
-    const fleetExtras = gw && state.linkUp && axisFleet === 'multi' ? extraAgents : []
+    const fleetExtras = gw && state.linkUp && (axisFleet === 'multi' || axisFleet === 'clamped') ? extraAgents : []
     const gwAgents = gw && state.linkUp ? [agent0, ...fleetExtras.map(a => ({
       agentId: a.agentId, hostname: a.hostname, lanIps: a.lan, remoteIp: a.remote,
       linkUpSinceMs: a.upSinceMs, rttMillis: a.rtt, jitterMillis: a.jitter, packetLossPct: a.loss,
@@ -776,6 +780,9 @@ export function installDevMock() {
     localLanIps: isWizard ? [] : gw ? ['10.0.0.5'] : ['192.168.1.24'],
     peerLanIps: isWizard ? [] : gw ? ['192.168.1.24'] : ['10.0.0.5'],
     agents: gw ? (rosterOld ? undefined : gwAgents) : undefined,
+    // The real engine sends the fleet size beside the clamped list. &fleet=clamped
+    // is the only way to see the past-the-cap wording without 31 mock agents.
+    agentsTotal: gw && !rosterOld ? (axisFleet === 'clamped' ? 31 : gwAgents.length) : 0,
     tunnels: gwTunnels,
     connections: gwConns,
     totalBytesIn: state.bytesIn, totalBytesOut: state.bytesOut,

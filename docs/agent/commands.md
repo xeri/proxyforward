@@ -28,7 +28,7 @@ build/bin/proxyforward.exe --version  # verify the stamp
 `http://localhost:5173/?mock=agent` — scenarios `agent|gateway|wizard`, plus
 composable axes `&link=down &mode=attached &fatal=1 &engine=stopped
 &service=running|stopped &fresh=1 &analytics=off &paired=0
-&geo=off|empty|error|pending &fx=low|high &fleet=multi|old
+&geo=off|empty|error|pending &fx=low|high &fleet=multi|old|clamped
 &conflict=port|clone|both &deeplink=1 &pending=in|out|both &consent=off
 &invites=friend|single|both &tray=off|notice &pause=mine|theirs|both
 &mcstatus=on|empty`. Axis semantics are documented in

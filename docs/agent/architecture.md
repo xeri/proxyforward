@@ -606,10 +606,12 @@ service badge + its installed-but-stopped warning; Install/Start/Stop/Uninstall
 drive it), `&fresh=1`,
 `&analytics=off`, `&paired=0` (never paired to a gateway — the sidebar's role
 switcher cannot become the agent and must route to setup), `&geo=off|empty|error|pending`,
-`&fx=low|high`, `&fleet=multi|old` (gateway only — `multi`: a five-agent fleet with a
-good/fair/poor health spread instead of the default single agent, for the Agents roster
-+ drill-in; `old`: a pre-roster daemon that sends no agents array → the roster's
-honest-unavailable state), `&conflict=port|clone|both` (seeds the gateway event ring so
+`&fx=low|high`, `&fleet=multi|old|clamped` (gateway only — `multi`: a five-agent fleet
+with a good/fair/poor health spread instead of the default single agent, for the Agents
+roster + drill-in; `old`: a pre-roster daemon that sends no agents array → the roster's
+honest-unavailable state; `clamped`: that same fleet with `agentsTotal` past
+`ipc.MaxStatusAgents`, so the pill counts the fleet rather than the rows and the roster
+says which rows carry no live link state), `&conflict=port|clone|both` (seeds the gateway event ring so
 the conflict cards + event log have data), `&deeplink=1` (a clicked `pxf://` invite),
 `&pending=in|out|both` (config-consent: a proposal awaiting this side, awaiting the
 peer, or both — the approval surfaces on either role), `&consent=off` (the peer predates
