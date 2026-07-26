@@ -10,6 +10,13 @@
 // never its own. The one legitimate exception is Traffic.tsx's link-counter tile:
 // those counters are read/write on the shared conn, so ↓/↑ swap by role there —
 // that flip lives in exactly that one place. Never invent a third mapping.
+//
+// HOW IT IS SPELLED: direction is the glyph pair ↓/↑ — in table headers, in stat
+// subs, in legends. It is the only direction vocabulary the app has, and it is
+// the one the chart tokens (--dl/--ul) are named after. Words like
+// "Received"/"Sent" are not a second spelling, they are a question ("by whom?");
+// a word next to the glyph may only qualify the number ("Total ↓" = lifetime,
+// not this session), never name the direction.
 import {useEffect, useRef, useState} from 'react'
 import {BandwidthHistory, PeerStats} from '../wailsjs/go/app/App'
 import {stats} from '../wailsjs/go/models'

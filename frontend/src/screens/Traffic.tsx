@@ -105,8 +105,8 @@ export function Traffic({status, onNavigate}: {status: UIStatus; onNavigate: (id
     },
     {key: 'tunnel', header: 'Tunnel', render: c => <span className="text-[var(--text-2)]">{c.tunnelName || '—'}</span>},
     {key: 'dur', header: 'Duration', render: c => <span className="tabular-nums text-[var(--text-2)]">{fmtElapsed(Date.now() - c.startedAt)}</span>},
-    {key: 'rx', header: 'Received', align: 'right', render: c => fmtBytes(c.bytesOut)},
-    {key: 'tx', header: 'Sent', align: 'right', render: c => fmtBytes(c.bytesIn)},
+    {key: 'rx', header: '↓', align: 'right', render: c => fmtBytes(c.bytesOut)},
+    {key: 'tx', header: '↑', align: 'right', render: c => fmtBytes(c.bytesIn)},
     {
       key: 'rtt', header: 'Ping', align: 'right',
       render: c => hasRtt(c.rttMs)
