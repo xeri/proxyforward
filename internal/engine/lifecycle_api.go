@@ -1,6 +1,10 @@
 package engine
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"proxyforward/internal/config"
+)
 
 // Lifecycle op names — the stable wire contract for driving the tunnel run over
 // the IPC pipe, so an attached GUI (and the CLI) can stop and start a daemon it
@@ -38,8 +42,8 @@ func (e *Engine) setStopped(stopped bool) error {
 	if p := e.stoppedPersister.Load(); p != nil {
 		return (*p)(stopped)
 	}
-	e.cfg.Engine.Stopped = stopped
-	return e.cfg.Save(e.configPath)
+	e.cfgWrite(func(c *config.Config) { c.Engine.Stopped = stopped })
+	return e.saveConfig()
 }
 
 // lifecycleOp drives the tunnel run for a start_run / stop_run request and

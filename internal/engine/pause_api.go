@@ -85,11 +85,14 @@ func pausedBy(mine, theirs bool) (bool, string) {
 }
 
 // persistPause is the agent's default pause persister for hostless runs
-// (service/CLI): no app shares this config, so the engine writes it directly.
-// A GUI host overrides it with its lock-taking hook, exactly like the stopped
-// flag and the pushed-config persisters.
+// (service/CLI). The agent has already flipped these bits in the copy it reads
+// from — the same document here — but the write stays, so the persister is
+// self-contained and means the same thing in both hosting modes. A GUI host
+// overrides it with its own hook, which writes the app's separate copy.
 func (e *Engine) persistPause(agentWide bool, tunnels []config.Tunnel) error {
-	e.cfg.Agent.Paused = agentWide
-	e.cfg.Agent.Tunnels = tunnels
-	return e.cfg.Save(e.configPath)
+	e.cfgWrite(func(c *config.Config) {
+		c.Agent.Paused = agentWide
+		c.Agent.Tunnels = tunnels
+	})
+	return e.saveConfig()
 }

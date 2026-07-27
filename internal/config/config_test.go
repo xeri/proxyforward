@@ -258,3 +258,48 @@ func TestIDsAreUnique(t *testing.T) {
 		t.Error("NewID returned duplicates")
 	}
 }
+
+// TestCloneSharesNoMemory (D7): Clone is what lets a GUI and a running engine each
+// own a configuration document instead of racing on one, so a field it copies
+// shallowly is a shared write that nothing else will catch. Tunnels in particular
+// is mutated element-wise (a pause bit), not only replaced.
+func TestCloneSharesNoMemory(t *testing.T) {
+	src := Default()
+	src.Role = RoleAgent
+	src.Agent.Tunnels = []Tunnel{
+		{ID: "tnl_a", Name: "a", Type: TunnelTCP, LocalAddr: "127.0.0.1:1", PublicPort: 1, Enabled: true},
+		{ID: "tnl_b", Name: "b", Type: TunnelTCP, LocalAddr: "127.0.0.1:2", PublicPort: 2, Enabled: true},
+	}
+	src.Gateway.PortAllowlist = []int{25565, 25566}
+
+	dst := src.Clone()
+
+	// Element-wise writes on either side must not cross.
+	dst.Agent.Tunnels[0].Name = "renamed"
+	dst.Agent.Tunnels[0].Paused = true
+	dst.Gateway.PortAllowlist[0] = 1
+	if src.Agent.Tunnels[0].Name != "a" || src.Agent.Tunnels[0].Paused {
+		t.Fatalf("a write to the clone's tunnel reached the source: %+v", src.Agent.Tunnels[0])
+	}
+	if src.Gateway.PortAllowlist[0] != 25565 {
+		t.Fatalf("a write to the clone's allowlist reached the source: %v", src.Gateway.PortAllowlist)
+	}
+	src.Agent.Tunnels[1].Name = "renamed too"
+	if dst.Agent.Tunnels[1].Name != "b" {
+		t.Fatal("a write to the source's tunnel reached the clone")
+	}
+	// Appends must not alias either (same length, spare capacity would share).
+	src.Agent.Tunnels = append(src.Agent.Tunnels, Tunnel{ID: "tnl_c"})
+	if len(dst.Agent.Tunnels) != 2 {
+		t.Fatalf("clone grew to %d tunnels with the source", len(dst.Agent.Tunnels))
+	}
+	// A nil slice stays nil rather than becoming empty — the marshalled config
+	// must not sprout keys a clone round-trip invented.
+	bare := &Config{}
+	if c := bare.Clone(); c.Agent.Tunnels != nil || c.Gateway.PortAllowlist != nil {
+		t.Fatalf("Clone turned nil slices into empty ones: %+v", c)
+	}
+	if (*Config)(nil).Clone() != nil {
+		t.Fatal("Clone of nil must be nil")
+	}
+}

@@ -78,8 +78,14 @@ var (
 )
 
 type Agent struct {
-	cfg    *config.Config
-	cfgMu  sync.RWMutex // guards cfg.Agent.Tunnels against hot-apply
+	cfg *config.Config
+	// cfgMu guards every field of cfg this agent mutates or reads while running:
+	// the tunnel set against hot-apply, the pause bits, and the identity pair
+	// enrollment rewrites. cfg is this engine's OWN document (the app hands the
+	// engine a clone) — the fields nothing here writes, and that a settings change
+	// only reaches through a restart (gateway host/port, fingerprint, transport,
+	// pool size), are read without it.
+	cfgMu  sync.RWMutex
 	logger *slog.Logger
 
 	// rttMillis is the latest heartbeat round-trip, for status surfaces.
@@ -277,15 +283,54 @@ func (a *Agent) SetEnrollmentPersister(fn EnrollmentPersister) { a.enrollPersist
 // session goroutine — the same one that builds the next hello — so by the time a
 // reconnect reads the config, a successful persist has already landed.
 func (a *Agent) finishEnrollment(assigned string) {
+	a.cfgMu.Lock()
 	if assigned == "" || (assigned == a.cfg.Agent.AgentID && a.cfg.Agent.EnrollTicket == "") {
+		a.cfgMu.Unlock()
 		return // steady state: nothing new to record
 	}
+	// Record it in our own copy before handing it to the persister: the host owns
+	// a separate document, so its write is what makes the change durable, and this
+	// one is what makes the next hello, and every connection opened from here on,
+	// use the identity the gateway just assigned.
+	a.cfg.Agent.AgentID = assigned
+	a.cfg.Agent.EnrollTicket = ""
+	a.cfgMu.Unlock()
+
 	a.logger.Info("enrolled with gateway", "agent_id", assigned)
 	if p := a.enrollPersister.Load(); p != nil {
 		if err := (*p)(assigned); err != nil {
 			a.logger.Warn("enrollment not persisted; the spent ticket stays in the config", "err", err)
 		}
 	}
+}
+
+// agentID is this agent's identity as it stands now. Read under the lock because
+// enrollment rewrites it mid-run, and the data path reads it per connection.
+func (a *Agent) agentID() string {
+	a.cfgMu.RLock()
+	defer a.cfgMu.RUnlock()
+	return a.cfg.Agent.AgentID
+}
+
+// AgentID is agentID for the host process, which shares this document and reads
+// the identity from its own goroutines (status, uptime journal).
+func (a *Agent) AgentID() string { return a.agentID() }
+
+// ReadConfig runs fn with the configuration document locked for reading, and
+// WriteConfig with it locked for writing. They exist for the process that hosts
+// this agent: a hostless engine hands over the very document the agent mutates,
+// so its status reads and its config saves have to hold the agent's lock or they
+// are reading a struct mid-write. fn must not call back into the agent.
+func (a *Agent) ReadConfig(fn func(*config.Config)) {
+	a.cfgMu.RLock()
+	defer a.cfgMu.RUnlock()
+	fn(a.cfg)
+}
+
+func (a *Agent) WriteConfig(fn func(*config.Config)) {
+	a.cfgMu.Lock()
+	defer a.cfgMu.Unlock()
+	fn(a.cfg)
 }
 
 func New(cfg *config.Config, dir string, logger *slog.Logger) *Agent {
@@ -319,7 +364,10 @@ func (a *Agent) authFields() (pub, sig []byte, ticket string, err error) {
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("%w: %v", ErrNoIdentity, err)
 	}
-	return pubKey, link.SignAgentAuth(priv, a.cfg.Agent.CertFingerprint), a.cfg.Agent.EnrollTicket, nil
+	a.cfgMu.RLock()
+	fp, ticket := a.cfg.Agent.CertFingerprint, a.cfg.Agent.EnrollTicket
+	a.cfgMu.RUnlock()
+	return pubKey, link.SignAgentAuth(priv, fp), ticket, nil
 }
 
 // SetCapabilityOffer overrides the capabilities offered in the hello
@@ -1351,7 +1399,7 @@ func (s *session) serveOpenConn(st relay.Conn, oc *control.OpenConn) {
 	// connection for control-link RTT reports; an old gateway sends "" and
 	// EntryByConnKey("") already guards. Passed into Open (never written
 	// post-hoc) because the control goroutine reads ConnKey concurrently.
-	entry, closeEntry := s.agent.Conns.Open(s.agent.cfg.Agent.AgentID, tun.ID, tun.Name, "", oc.ClientAddr, oc.ConnID, false)
+	entry, closeEntry := s.agent.Conns.Open(s.agent.agentID(), tun.ID, tun.Name, "", oc.ClientAddr, oc.ConnID, false)
 	defer closeEntry()
 	// Track the local leg so pause-with-disconnect can drop this tunnel's
 	// players by closing it (either leg closing unwinds the splice).
@@ -1430,7 +1478,7 @@ func (s *session) serveDatagramStream(st relay.Conn, tun *config.Tunnel, oc *con
 	s.agent.logger.Debug("client connected", "tunnel", tun.Name, "client", oc.ClientAddr)
 	// Splice(local, stream): AToB is local→client, so In (client→server) is the
 	// B→A side — inIsAToB=false, exactly as on the TCP path.
-	entry, closeEntry := s.agent.Conns.Open(s.agent.cfg.Agent.AgentID, tun.ID, tun.Name, "", oc.ClientAddr, oc.ConnID, false)
+	entry, closeEntry := s.agent.Conns.Open(s.agent.agentID(), tun.ID, tun.Name, "", oc.ClientAddr, oc.ConnID, false)
 	defer closeEntry()
 	// Track the local leg so pause-with-disconnect can drop this tunnel's
 	// players by closing it (either leg closing unwinds the splice).

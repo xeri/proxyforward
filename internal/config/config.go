@@ -352,6 +352,31 @@ func (c *Config) Save(path string) error {
 	return nil
 }
 
+// Clone returns a deep copy: every slice gets its own backing array, so the two
+// configs share no memory at all.
+//
+// It exists because a *Config is a document with exactly one owner, and handing
+// the same pointer to two of them is how a GUI and a running engine ended up
+// writing the same fields under two different locks. `*dst = *src` is not enough
+// here — Tunnels is mutated element-wise (a pause bit) as well as replaced, so a
+// shallow copy leaves both owners writing one backing array.
+//
+// Anything added to this struct that is not a scalar or a string must be copied
+// here too; a missed slice is a shared write that nothing else will catch.
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	if c.Agent.Tunnels != nil {
+		out.Agent.Tunnels = append([]Tunnel(nil), c.Agent.Tunnels...)
+	}
+	if c.Gateway.PortAllowlist != nil {
+		out.Gateway.PortAllowlist = append([]int(nil), c.Gateway.PortAllowlist...)
+	}
+	return &out
+}
+
 // Validate checks structural invariants. It validates both role sections only
 // as far as they are exercised by the configured role, so a fresh config with
 // an unset role passes.

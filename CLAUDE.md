@@ -192,6 +192,13 @@ all of these looked reasonable right up until they didn't.
 - Exactly one process owns ports and config: every engine serves the named pipe
   `\\.\pipe\proxyforward`; a GUI that finds it attaches as a thin client; pipe
   conflict is fatal by design (`engine.go Run`, `app/app.go Startup`).
+- **And exactly one owner per `*config.Config` inside a process.** The GUI hands the
+  engine a `Clone`, never its own document (`app.go startEngineLocked`), and returns
+  one from `GetConfig` — two owners meant two locks on one struct, and a whole-struct
+  write racing the data path's tunnel scan. Where a document genuinely is shared (a
+  hostless engine and its agent), every access goes through the owner's lock
+  (`engine.go cfgRead`/`cfgWrite`, `agent.go ReadConfig`/`WriteConfig`). A change one
+  side must see crosses on purpose — a persister, `ApplyTunnels`, or a restart.
 - **The pipe outlives the tunnel run.** `Run` is a supervisor (pipe, store, sampler,
   metrics) with the role run — `StartRun`/`StopRun` — nested inside it; a run that
   stops or dies fatally leaves the supervisor serving, because the GUI needs the pipe

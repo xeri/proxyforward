@@ -232,8 +232,18 @@ func (a *App) closeAnalyticsConnLocked() {
 }
 
 // startEngineLocked launches the in-process engine; a.mu must be held.
+//
+// The engine gets a *clone* of the config, never this one. A config is a document
+// with one owner, and the engine has owners of its own — the agent's control
+// reader applies a pushed tunnel set, its GUI ops flip a pause bit — each under
+// the agent's lock, not a.mu. Sharing the pointer put two lock domains on one
+// struct: SaveSettings' whole-struct write raced enabledTunnelByID's scan of the
+// same slice on every player connect, and a torn slice header is an out-of-range
+// index, not a stale read. The seams that used to lean on the sharing are all
+// explicit already: the persisters below carry the new values back to this copy,
+// and an engine-affecting settings change takes a restart, which clones afresh.
 func (a *App) startEngineLocked() {
-	eng, err := engine.New(a.cfg, a.configDir, a.configPath, a.logger)
+	eng, err := engine.New(a.cfg.Clone(), a.configDir, a.configPath, a.logger)
 	if err != nil {
 		// Near-unreachable (New only rejects an unset role, and every caller
 		// checks that first), but it used to log and return with the mode
@@ -734,10 +744,15 @@ func (a *App) SetupAgent(pairingCode, localAddr string, publicPort int) error {
 // ---- Config ----
 
 // GetConfig returns the current configuration for the settings screens.
+//
+// A clone, not the live document: the binding layer marshals the result after
+// this returns, so handing out the pointer would serialize a struct this app
+// keeps mutating under a.mu — a read with no lock at all, however carefully the
+// method itself takes one.
 func (a *App) GetConfig() *config.Config {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.cfg
+	return a.cfg.Clone()
 }
 
 // SaveTunnels validates and persists a new tunnel set, hot-applying it to a
@@ -778,9 +793,9 @@ func (a *App) SaveTunnels(tunnels []config.Tunnel) error {
 
 // persistPushedConfig saves a gateway-pushed tunnel set to disk. The push is the
 // single commit point for every authoritative config change (a consent approval, a
-// port reclaim, an auto-reassign), and the app and agent share one *config.Config,
-// so the new set is already what the editor reads — this is what makes it survive a
-// restart instead of being silently re-pushed every connect.
+// port reclaim, an auto-reassign), so this is both what makes the new set survive a
+// restart and what carries it into the copy the editor reads — the agent holds its
+// own document now, and this write is the only thing that keeps the two in step.
 //
 // It runs on the agent's control-reader goroutine and takes a.mu itself; the agent
 // calls it without holding its own cfgMu, so SaveTunnels' a.mu → cfgMu order is

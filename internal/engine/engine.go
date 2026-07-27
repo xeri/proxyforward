@@ -134,14 +134,56 @@ type Engine struct {
 	stoppedPersister atomic.Pointer[StoppedPersister]
 }
 
-// persistEnrollment records the gateway-assigned identity in the config and
-// clears the spent enrollment ticket, so config.toml is credential-free in steady
-// state. The bare write is safe only because a hostless daemon shares its config
-// with nobody; GUI-hosted runs substitute the app's locked persister.
+// persistEnrollment records the gateway-assigned identity and clears the spent
+// enrollment ticket, so config.toml is credential-free in steady state. The agent
+// has already made the same edit to the copy it reads from — which here is this
+// engine's own document — but the write stays here too, so the persister is
+// self-contained and means the same thing in both hosting modes. GUI-hosted runs
+// substitute the app's persister, which makes it against the app's copy.
 func (e *Engine) persistEnrollment(assignedID string) error {
-	e.cfg.Agent.AgentID = assignedID
-	e.cfg.Agent.EnrollTicket = ""
-	return e.cfg.Save(e.configPath)
+	e.cfgWrite(func(c *config.Config) {
+		c.Agent.AgentID = assignedID
+		c.Agent.EnrollTicket = ""
+	})
+	return e.saveConfig()
+}
+
+// saveConfig serializes the configuration document to disk under whatever lock
+// protects it. A hostless engine hands its own document to the agent, whose
+// control reader swaps the tunnel set and whose GUI ops flip pause bits — so
+// marshalling it without that lock reads a struct mid-write. The gateway role has
+// no such writer and needs no lock.
+func (e *Engine) saveConfig() error {
+	var err error
+	e.cfgRead(func(c *config.Config) { err = c.Save(e.configPath) })
+	return err
+}
+
+// cfgRead / cfgWrite run fn against the configuration document under the agent's
+// lock when an agent shares it, and plainly when none does.
+func (e *Engine) cfgRead(fn func(*config.Config)) {
+	if e.Agent != nil {
+		e.Agent.ReadConfig(fn)
+		return
+	}
+	fn(e.cfg)
+}
+
+func (e *Engine) cfgWrite(fn func(*config.Config)) {
+	if e.Agent != nil {
+		e.Agent.WriteConfig(fn)
+		return
+	}
+	fn(e.cfg)
+}
+
+// agentIdentity is this daemon's own agent id, read under the document's lock
+// because enrollment rewrites it mid-run. Empty on the gateway role.
+func (e *Engine) agentIdentity() string {
+	if e.Agent == nil {
+		return ""
+	}
+	return e.Agent.AgentID()
 }
 
 // conns returns the active role's connection registry.
@@ -197,7 +239,7 @@ func New(cfg *config.Config, configDir, configPath string, logger *slog.Logger) 
 	// and does not probe, so it records only link events.)
 	if e.Agent != nil {
 		e.Agent.SetHealthObserver(func(tunnelID string, up bool) {
-			e.rec.RecordEvent(analytics.EventTunnelLocal, e.cfg.Agent.AgentID, tunnelID, up)
+			e.rec.RecordEvent(analytics.EventTunnelLocal, e.agentIdentity(), tunnelID, up)
 		})
 	}
 	return e, nil
@@ -430,7 +472,7 @@ func (e *Engine) RunState() (RunState, error) {
 // gateway it is the connected agent's. Empty when no agent is connected.
 func (e *Engine) linkAgentID() string {
 	if e.Agent != nil {
-		return e.cfg.Agent.AgentID
+		return e.Agent.AgentID()
 	}
 	return e.Gateway.AgentID()
 }
@@ -587,11 +629,17 @@ func (e *Engine) Status() ipc.Status {
 		st.PacketLossPct = e.Agent.PacketLossPct()
 		st.LinkUpSinceMs = e.Agent.LinkUpSinceMs()
 		st.LinkBytesIn, st.LinkBytesOut = e.Agent.LinkSessionBytes()
-		st.PeerAddr = net.JoinHostPort(e.cfg.Agent.GatewayHost, strconv.Itoa(e.cfg.Agent.GatewayPort))
+		// Read under the document's lock: on a hostless run the agent owns the
+		// same struct and rewrites its identity when enrollment completes.
+		var gwHost, agentGW string
+		var gwPort int
+		e.cfgRead(func(c *config.Config) { gwHost, gwPort = c.Agent.GatewayHost, c.Agent.GatewayPort })
+		agentGW = gwHost
+		st.PeerAddr = net.JoinHostPort(gwHost, strconv.Itoa(gwPort))
 		st.PeerHostname = e.Agent.PeerHostname()
 		st.PeerLANIPs = e.Agent.PeerLANIPs()
 		st.PublicIP = e.Agent.ObservedIP()
-		st.PeerPublicIP = e.cfg.Agent.GatewayHost
+		st.PeerPublicIP = agentGW
 		st.HealthScore = healthScore(st.LinkUp, st.JitterMillis, st.PacketLossPct, st.LinkUpSinceMs)
 		st.PeerHeadless = e.Agent.PeerHeadless()
 		for _, t := range e.Agent.Tunnels() {
