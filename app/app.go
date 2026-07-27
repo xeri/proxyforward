@@ -806,7 +806,31 @@ func (a *App) SaveTunnels(tunnels []config.Tunnel) error {
 func (a *App) persistPushedConfig(tunnels []config.Tunnel, _ uint64) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.cfg.Agent.Tunnels = tunnels
+	return a.commitCfgLocked(func(c *config.Config) { c.Agent.Tunnels = tunnels })
+}
+
+// commitCfgLocked applies fn to a trial copy and only adopts it once the result
+// validates, so a set this app cannot represent never reaches the live document.
+// a.mu must be held.
+//
+// The order matters, and getting it wrong is not a one-off failure: Save
+// validates, so mutating first and saving second leaves the invalid set in
+// memory when the save is refused — and every later save of anything at all, a
+// theme or the stopped flag, then fails the same validation. One bad push and the
+// config file silently stops being written.
+//
+// Refusing is the honest outcome for the one input that can be invalid: a pushed
+// set naming a tunnel this agent has never held carries no LocalAddr (the wire
+// never had one), and a tunnel with nowhere to dial is not something the file can
+// hold. The engine keeps running it; the file and the editor keep the last set
+// that was real.
+func (a *App) commitCfgLocked(fn func(*config.Config)) error {
+	trial := a.cfg.Clone()
+	fn(trial)
+	if err := trial.Validate(); err != nil {
+		return fmt.Errorf("refusing to record a configuration this app cannot represent: %w", err)
+	}
+	*a.cfg = *trial
 	return a.cfg.Save(a.configPath)
 }
 
@@ -918,9 +942,10 @@ type setPauseReq struct {
 func (a *App) persistPause(agentWide bool, tunnels []config.Tunnel) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.cfg.Agent.Paused = agentWide
-	a.cfg.Agent.Tunnels = tunnels
-	return a.cfg.Save(a.configPath)
+	return a.commitCfgLocked(func(c *config.Config) {
+		c.Agent.Paused = agentWide
+		c.Agent.Tunnels = tunnels
+	})
 }
 
 // StartEngine starts the tunnel run. Usually a resume: the daemon is already

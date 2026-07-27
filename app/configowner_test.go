@@ -80,3 +80,44 @@ func TestGetConfigHandsOutACopy(t *testing.T) {
 		t.Fatal("mutating the returned config reached the app's own — the copy shares a backing array")
 	}
 }
+
+// TestBadPushedConfigDoesNotWedgeSaving (D7): Config.Save validates, so a
+// persister that mutated the live document first and saved second left the
+// invalid set behind when the save was refused — and every later save of
+// anything, a theme or the stopped flag, failed the same validation from then on.
+//
+// A gateway can produce exactly that input: push_config auto-applies and its
+// specs carry no LocalAddr, so a spec for a tunnel this agent has never held
+// merges into one with nowhere to dial, which config.Validate rejects. One such
+// push must not stop the config file being written ever again.
+func TestBadPushedConfigDoesNotWedgeSaving(t *testing.T) {
+	a := newTestAppDir(t, agentCfg())
+	if err := a.SetTheme("light"); err != nil {
+		t.Fatalf("baseline save failed: %v", err)
+	}
+
+	// What mergeTunnels produces for a pushed spec naming an unknown tunnel.
+	bad := []config.Tunnel{{ID: "tnl_invented", Name: "invented", Type: config.TunnelTCP, Enabled: true}}
+	if err := a.persistPushedConfig(bad, 7); err == nil {
+		t.Fatal("a tunnel with no local address was accepted; config.Validate rejects it")
+	}
+
+	// The live document must be untouched, and unrelated writes must still land.
+	a.mu.Lock()
+	kept := append([]config.Tunnel(nil), a.cfg.Agent.Tunnels...)
+	a.mu.Unlock()
+	if len(kept) != 1 || kept[0].ID != "tnl_mc" {
+		t.Fatalf("the refused set reached the live config: %+v", kept)
+	}
+	if err := a.SetTheme("dark"); err != nil {
+		t.Fatalf("a later save failed after the refused push — the config is wedged: %v", err)
+	}
+	reloaded, err := config.Load(a.configPath)
+	if err != nil {
+		t.Fatalf("config no longer loads: %v", err)
+	}
+	if reloaded.UI.Theme != "dark" || len(reloaded.Agent.Tunnels) != 1 {
+		t.Fatalf("on-disk config wrong after the refused push: theme=%q tunnels=%d",
+			reloaded.UI.Theme, len(reloaded.Agent.Tunnels))
+	}
+}
