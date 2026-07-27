@@ -258,15 +258,17 @@ func (a *App) startEngineLocked() {
 		// set lives only in memory and the config file keeps a set the gateway no
 		// longer holds until the next connect re-pushes it.
 		eng.Agent.SetConfigPersister(a.persistPushedConfig)
-		// And land the assigned identity under a.mu — this config is shared with
-		// the 2 Hz status read, so the engine's bare-write default must not run.
+		// And land the assigned identity here rather than in the engine's own
+		// copy, which this app would never see: these persisters are the seam an
+		// engine-side change crosses to reach the document the settings screens
+		// read.
 		eng.Agent.SetEnrollmentPersister(a.persistEnrollment)
-		// Same for the pause bits: the app owns the shared config's writes.
+		// Same for the pause bits.
 		eng.Agent.SetPausePersister(a.persistPause)
 	}
 	// A lifecycle op over the pipe (an attached GUI, or another GUI driving this
-	// engine) persists the stopped flag through a.mu — this config is shared
-	// with the app, so the engine must not write it bare.
+	// engine) persists the stopped flag through a.mu, so it lands in the document
+	// this app owns and not only in the engine's copy.
 	eng.SetStoppedPersister(a.persistStoppedErr)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -977,10 +979,10 @@ func (a *App) StartEngine() error {
 	return nil
 }
 
-// persistEnrollment overrides the engine's bare-write default: the assigned
-// agt_ identity replaces Agent.AgentID and the spent enrollment ticket is
-// cleared, under a.mu because this config is shared with the status read and the
-// settings screens. Mirrors persistStopped.
+// persistEnrollment overrides the engine's own: the assigned agt_ identity
+// replaces Agent.AgentID and the spent enrollment ticket is cleared, in the
+// document this app owns — the engine's copy learns it separately, and neither
+// would see the other's write. Mirrors persistStopped.
 func (a *App) persistEnrollment(assignedID string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

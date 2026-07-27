@@ -23,21 +23,20 @@ func isLifecycleOp(op string) bool {
 }
 
 // StoppedPersister records the run's on/off intent so it survives restart and
-// reboot. The app wires one that takes its own lock, because in a GUI-hosted
-// daemon the engine and the app share one *config.Config and a bare write would
-// race the 2 Hz status read. With none set — the service and headless runs,
-// which host no app — the engine persists its own config directly.
+// reboot. A GUI-hosted engine holds its own copy of the config, so a write here
+// would never reach the app's; the app wires one that writes the document it owns
+// instead. With none set — the service and headless runs, which host no app — the
+// engine persists its own.
 type StoppedPersister func(stopped bool) error
 
-// SetStoppedPersister installs the lock-taking persistence hook for the run's
-// stopped flag. Mirrors SetConfigPersister: the app owns the config it shares
-// with the engine, so the app owns the write.
+// SetStoppedPersister installs the persistence hook for the run's stopped flag.
+// Mirrors SetConfigPersister: the write belongs wherever the authoritative
+// document lives, which in a GUI-hosted run is the app.
 func (e *Engine) SetStoppedPersister(fn StoppedPersister) { e.stoppedPersister.Store(&fn) }
 
-// setStopped persists the run's on/off intent. Through the app's hook when one
-// is set (lock-safe against the shared config), else straight to the engine's
-// own config file — safe there because a hostless daemon shares that config
-// with nobody.
+// setStopped persists the run's on/off intent. Through the app's hook when one is
+// set (the app's document is the authoritative one there), else into this
+// engine's own — under the agent's lock, which a hostless run shares with it.
 func (e *Engine) setStopped(stopped bool) error {
 	if p := e.stoppedPersister.Load(); p != nil {
 		return (*p)(stopped)

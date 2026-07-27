@@ -145,7 +145,11 @@ func (a *App) importSetupFromPath(path, passphrase string) error {
 	if err != nil {
 		return fmt.Errorf("imported config failed to load: %w", err)
 	}
-	*a.cfg = *loaded // App, Engine and role objects share this pointer
+	// In place, so every App field still pointing here sees the imported setup;
+	// the engine gets it the only way it ever does, as the clone the start below
+	// hands it. Safe to overwrite whole: the old engine is fully stopped, so
+	// nothing else is reading this document.
+	*a.cfg = *loaded
 	a.startEngineLocked()
 	a.logger.Info("setup imported", "path", path, "role", role)
 	return nil

@@ -268,10 +268,10 @@ func (a *Agent) SetConfigPersister(fn ConfigPersister) { a.configPersister.Store
 
 // EnrollmentPersister persists the gateway-assigned identity after a successful
 // hello: Agent.AgentID becomes the assigned agt_ id and the spent EnrollTicket is
-// cleared, so config.toml holds no live credential in steady state. The persister
-// owns the config mutation and its locking: the engine wires a direct write for
-// hostless runs, and the app substitutes a lock-taking one in GUI-hosted runs
-// (the config is shared with the 2 Hz status read there).
+// cleared, so config.toml holds no live credential in steady state. The agent has
+// already recorded the assignment in its own document by the time this runs; the
+// persister is what makes it durable, and in a GUI-hosted run also what carries it
+// into the app's separate copy.
 type EnrollmentPersister func(assignedID string) error
 
 // SetEnrollmentPersister installs the hook that persists the gateway-assigned
