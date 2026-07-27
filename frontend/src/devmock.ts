@@ -122,6 +122,11 @@ export function installDevMock() {
   const axisTray = params.get('tray') || '' // '' (on, notice seen) | off | notice
   const axisPause = params.get('pause') || '' // '' | mine | theirs | both
   const axisMCStatus = params.get('mcstatus') || '' // '' (tcp probe, no report) | on | empty
+  // &local=unset is the tunnel the gateway created by id: it holds a public port
+  // but names no local address, because the wire has no field to carry one. It
+  // must never read as "server down" — that sends the operator to restart a
+  // machine that was never the problem.
+  const axisLocal = params.get('local') || '' // '' (a named, reachable server) | unset
   // Pause bits, mutable via the SetPause stub: mine/theirs per the default
   // tunnel, allMine the gateway's per-agent bit. &consent=off doubles as the
   // "peer predates pause" state (pauseSupported false on the roster).
@@ -674,7 +679,7 @@ export function installDevMock() {
   const config = {
     Role: state.role,
     Agent: {AgentID: 'agt_5w7d2k9rq3v8xj4m', GatewayHost: 'play.example.com', GatewayPort: 8474, CertFingerprint: 'sha256:ab', Transport: 'auto',
-      Tunnels: [{ID: tunnelID, Name: 'Minecraft', Type: 'tcp', LocalAddr: '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
+      Tunnels: [{ID: tunnelID, Name: 'Minecraft', Type: 'tcp', LocalAddr: axisLocal === 'unset' ? '' : '127.0.0.1:25565', PublicPort: 25565, Enabled: true,
         Options: {MinecraftAware: true, ProxyProtocolV2: false, OfflineMOTD: 'Server is offline — back soon',
           BandwidthLimitMbps: 40, BandwidthLimitScope: 'per-direction',
           HealthProbe: axisMCStatus ? 'mc-status' : '', HealthIntervalSec: 0, HealthTimeoutSec: 0, HealthMaxFailed: 0}}]},
@@ -747,7 +752,8 @@ export function installDevMock() {
             bandwidthLimitMbps: t.bandwidthLimitMbps ?? 0, bandwidthLimitScope: t.bandwidthLimitScope ?? '',
           })))]
         : [])
-      : [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0, localUp: true, localKnown: true,
+      : [{id: tunnelID, name: 'Minecraft', publicPort: state.linkUp ? 25565 : 0,
+        localUp: axisLocal !== 'unset', localKnown: true, needsLocalAddr: axisLocal === 'unset',
         paused: pausedNow(), pausedBy: pausedByNow(),
         // The mc-status probe's report. Absent without the axis (a tcp-probed
         // tunnel has nothing to say); `empty` is the server that answered but

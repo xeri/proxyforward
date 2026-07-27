@@ -650,6 +650,9 @@ func (e *Engine) Status() ipc.Status {
 			}
 			ts.PublicPort, _ = e.Agent.TunnelPublicPort(t.ID)
 			ts.LocalUp, ts.LocalKnown = e.Agent.LocalUp(t.ID)
+			// Only this side holds LocalAddr, so only this side can say the
+			// tunnel is unpointed rather than unreachable.
+			ts.NeedsLocalAddr = t.LocalAddr == ""
 			// "mine" is this agent's own bits (tunnel or agent-wide); "theirs"
 			// the gateway's reported set, whose all-bit covers() already folds.
 			ts.Paused, ts.PausedBy = pausedBy(t.Paused || e.Agent.AgentWidePaused(), e.Agent.PausedByGateway(t.ID))

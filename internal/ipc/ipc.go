@@ -345,6 +345,14 @@ type TunnelStatus struct {
 	PublicPort int    `json:"publicPort,omitempty"` // confirmed bound port
 	LocalUp    bool   `json:"localUp"`
 	LocalKnown bool   `json:"localKnown"`
+	// NeedsLocalAddr distinguishes "the local server is down" from "this tunnel
+	// was never pointed at one" — a tunnel the gateway created by id, which the
+	// wire has no LocalAddr field to create with. Both report LocalUp=false, but
+	// only one of them is fixed by starting a server, so the UI must not offer
+	// the same answer for both. Agent role only: the gateway learns health from
+	// a bool on the wire and cannot tell the two apart. omitempty, so a legacy
+	// daemon's frames are unchanged and read as "not this case".
+	NeedsLocalAddr bool `json:"needsLocalAddr,omitempty"`
 	// BandwidthLimitMbps/Scope surface a tunnel's configured cap read-only (0 =
 	// unlimited); omitempty keeps uncapped tunnels' frames unchanged.
 	BandwidthLimitMbps  int    `json:"bandwidthLimitMbps,omitempty"`

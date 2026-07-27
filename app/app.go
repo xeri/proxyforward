@@ -431,12 +431,17 @@ type UIStatus struct {
 
 // TunnelUI is one tunnel's live state for the frontend.
 type TunnelUI struct {
-	AgentID             string `json:"agentId,omitempty"` // owning agent (gateway role)
-	ID                  string `json:"id"`
-	Name                string `json:"name"`
-	PublicPort          int    `json:"publicPort"`
-	LocalUp             bool   `json:"localUp"`
-	LocalKnown          bool   `json:"localKnown"`
+	AgentID    string `json:"agentId,omitempty"` // owning agent (gateway role)
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	PublicPort int    `json:"publicPort"`
+	LocalUp    bool   `json:"localUp"`
+	LocalKnown bool   `json:"localKnown"`
+	// NeedsLocalAddr: this tunnel names no local address, so it holds a public
+	// port that dials nowhere. Distinct from LocalUp=false, which means a named
+	// server is not answering — starting a server fixes that one and not this
+	// one. Agent role only; false on the gateway, which cannot tell them apart.
+	NeedsLocalAddr      bool   `json:"needsLocalAddr"`
 	BandwidthLimitMbps  int    `json:"bandwidthLimitMbps"`  // configured cap (0 = unlimited)
 	BandwidthLimitScope string `json:"bandwidthLimitScope"` // combined | per-direction | per-connection
 	// Paused: the tunnel turns players away while keeping its port. PausedBy
@@ -550,6 +555,7 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 			AgentID: t.AgentID,
 			ID:      t.ID, Name: t.Name, PublicPort: t.PublicPort,
 			LocalUp: t.LocalUp, LocalKnown: t.LocalKnown,
+			NeedsLocalAddr:      t.NeedsLocalAddr,
 			BandwidthLimitMbps:  t.BandwidthLimitMbps,
 			BandwidthLimitScope: t.BandwidthLimitScope,
 			Paused:              t.Paused,

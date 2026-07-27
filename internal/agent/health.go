@@ -154,6 +154,21 @@ func (a *Agent) probeTunnels(ctx context.Context, tunnels []config.Tunnel, state
 			return
 		}
 		live[t.ID] = true
+		if t.LocalAddr == "" {
+			// Not a probe verdict but a config fact, so it is settled here rather
+			// than dialled for: a tunnel with no local address cannot serve, and
+			// no probe will ever say otherwise. It arises from a push naming a
+			// tunnel id this agent has never seen — mergeTunnels creates it, and
+			// the wire carries no LocalAddr to create it with.
+			//
+			// Ahead of the UDP branch on purpose. That branch declines to *verdict*
+			// an address it cannot handshake with; this one has no address at all,
+			// which is knowable without a protocol. Reporting it unknown there
+			// would count it as up (backendDown) and show a black hole as healthy.
+			a.markLocalDown(t, "tunnel has no local address; set one for it to serve")
+			delete(states, t.ID)
+			continue
+		}
 		if t.Type == config.TunnelUDP {
 			// A UDP local address cannot be probed. There is no handshake, so
 			// net.Dial("udp") connects to a dead port just as happily as a live
@@ -242,6 +257,26 @@ func (a *Agent) recordProbe(t config.Tunnel, st *healthState, info *mc.StatusInf
 	}
 	if obs := a.healthObserver.Load(); obs != nil {
 		obs.notify(t.ID, up)
+	}
+}
+
+// markLocalDown records a tunnel as down for a reason no probe produced, on the
+// same transition-only terms as recordProbe: notify when the verdict changes,
+// stay silent while it holds. There is no failure debounce because there is no
+// failure to debounce — the condition is a fact about the config, true from the
+// moment it is read and unchanged by waiting.
+func (a *Agent) markLocalDown(t config.Tunnel, reason string) {
+	a.lastStatus.Delete(t.ID) // nothing is known about a server we cannot reach
+	if prev, known := a.LocalUp(t.ID); known && !prev {
+		return
+	}
+	a.localUp.Store(t.ID, false)
+	a.logger.Warn(reason, "tunnel", t.Name, "tunnel_id", t.ID)
+	if sink := a.healthSink.Load(); sink != nil {
+		sink.notify(t.ID, false)
+	}
+	if obs := a.healthObserver.Load(); obs != nil {
+		obs.notify(t.ID, false)
 	}
 }
 

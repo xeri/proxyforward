@@ -1357,6 +1357,17 @@ func (s *session) serveOpenConn(st relay.Conn, oc *control.OpenConn) {
 		s.agent.logger.Debug("refusing open_conn for a paused tunnel", "tunnel_id", oc.TunnelID)
 		return
 	}
+	if tun.LocalAddr == "" {
+		// A tunnel this agent never authored: a push naming an unknown id creates
+		// it (mergeTunnels) and the wire carries no LocalAddr to create it with.
+		// Refused here rather than left to fail in the dial below, which would
+		// log "local server unreachable" against a server the operator never
+		// named — and would say it once per player, forever, since nothing about
+		// the local machine can fix it.
+		s.agent.logger.Warn("open_conn for a tunnel with no local address; set one on this agent",
+			"tunnel", tun.Name, "tunnel_id", tun.ID)
+		return
+	}
 	if tun.Type == config.TunnelUDP {
 		// Same header, same stream, different body: from here the leg carries
 		// framed datagrams rather than a byte stream. Split out rather than

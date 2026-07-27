@@ -631,7 +631,12 @@ answered but omitted its counts, which must render "—" and never 0/0; no axis 
 tcp probe, which has nothing to report),
 `&pause=mine|theirs|both` (the default tunnel's pause bits — paused by this side, the
 peer, or both; Pause/Resume mutate this side's bit live, and `&consent=off` doubles as
-the "peer predates pause" state).
+the "peer predates pause" state),
+`&local=unset` (agent only — the tunnel a gateway created by id: it holds its public
+port but names no local address, because the wire has no field to carry one. It must
+read "No local address", never "Server down", and Overview's one call to action must
+say to set an address rather than to start Minecraft — the two states share
+`localUp=false` and only one of them is fixed by starting a server).
 The traffic model is deterministic functions of absolute time, so
 chart/tiles/replay all agree at any poll cadence. When you add a binding, add its stub
 here or the mock throws. Role setup mutates the mock's role, so the switcher flips the

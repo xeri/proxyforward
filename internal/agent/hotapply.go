@@ -185,6 +185,17 @@ func (a *Agent) applyPushedConfig(specs []control.TunnelSpec, generation uint64)
 		}
 	}
 	a.logger.Info("applied gateway-authoritative config", "generation", generation, "tunnels", len(specs))
+	// A pushed id this agent has never held becomes a tunnel with no LocalAddr —
+	// the wire has no field to carry one. That is the intended landing for a
+	// gateway-authored tunnel (the operator fills the address in), but until they
+	// do it holds a public port that dials nowhere, so it is named at the moment
+	// it appears rather than left to be inferred from a player's failed join.
+	for _, t := range merged {
+		if t.Enabled && t.LocalAddr == "" {
+			a.logger.Warn("pushed tunnel has no local address; it will hold its public port without serving until one is set",
+				"tunnel", t.Name, "tunnel_id", t.ID)
+		}
+	}
 	if p := a.configPersister.Load(); p != nil {
 		if err := (*p)(append([]config.Tunnel(nil), merged...), generation); err != nil {
 			a.logger.Warn("persisting gateway config failed; gateway will re-push on reconnect", "err", err)

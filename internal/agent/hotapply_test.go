@@ -89,8 +89,18 @@ func TestMergeTunnelsKeepsDisabledDraftsDisabled(t *testing.T) {
 
 // TestMergeTunnelsAppliesToEnabledAndNewTunnels: the guard above must not cost the
 // gateway its actual authority. It still resolves ports for tunnels the user
-// enabled, and a tunnel it introduces still lands (harmlessly — the wire carries no
-// LocalAddr, so an invented tunnel has nothing to dial until its owner fills one in).
+// enabled, and a tunnel it introduces still lands with no LocalAddr — the wire has
+// no field to carry one, so an introduced tunnel has nothing to dial until its
+// owner fills one in.
+//
+// "Nothing to dial" is the security half and it is not the whole story: until that
+// address is filled in the tunnel holds a public port and black-holes every player
+// who reaches it. Landing it here is still right — a gateway-authored tunnel has to
+// appear somewhere for its address to be typed into — so the cost is paid by making
+// the state legible rather than by refusing it: probed as down without a dial
+// (health.go, TestProbeReportsUnpointedTunnelDownWithoutProbing), refused by name at
+// serveOpenConn, and labelled "No local address" rather than "Server down" in the UI
+// (ipc.TunnelStatus NeedsLocalAddr).
 func TestMergeTunnelsAppliesToEnabledAndNewTunnels(t *testing.T) {
 	existing := []config.Tunnel{
 		{ID: "tnl_mc", Name: "mc", Type: config.TunnelTCP, LocalAddr: "127.0.0.1:25565", PublicPort: 0, Enabled: true},

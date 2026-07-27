@@ -733,6 +733,7 @@ export namespace app {
 	    publicPort: number;
 	    localUp: boolean;
 	    localKnown: boolean;
+	    needsLocalAddr: boolean;
 	    bandwidthLimitMbps: number;
 	    bandwidthLimitScope: string;
 	    paused: boolean;
@@ -755,6 +756,7 @@ export namespace app {
 	        this.publicPort = source["publicPort"];
 	        this.localUp = source["localUp"];
 	        this.localKnown = source["localKnown"];
+	        this.needsLocalAddr = source["needsLocalAddr"];
 	        this.bandwidthLimitMbps = source["bandwidthLimitMbps"];
 	        this.bandwidthLimitScope = source["bandwidthLimitScope"];
 	        this.paused = source["paused"];

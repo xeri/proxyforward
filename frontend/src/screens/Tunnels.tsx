@@ -212,7 +212,10 @@ export function Tunnels({status}: {status: UIStatus}) {
                   </div>
                   <div className="min-w-0">
                     <div className="truncate font-semibold">{t.Name}</div>
-                    <div className="select-text truncate font-mono text-xs text-[var(--text-3)]">{t.LocalAddr} → :{t.PublicPort}</div>
+                    {/* A gateway-created tunnel carries no local address — the wire
+                        has no field for one. Sentinel, not a blank gap, so the row
+                        reads as "nothing here yet" rather than as a rendering bug. */}
+                    <div className="select-text truncate font-mono text-xs text-[var(--text-3)]">{t.LocalAddr || '—'} → :{t.PublicPort}</div>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -225,7 +228,13 @@ export function Tunnels({status}: {status: UIStatus}) {
                 {!t.Enabled && <Badge tone="neutral">Disabled</Badge>}
                 {t.Enabled && <Badge tone={bound ? 'good' : 'warn'}>{bound ? 'Bound' : 'Pending'}</Badge>}
                 {l?.paused && <PausedBadge pausedBy={l.pausedBy} peer="the gateway" />}
-                {l?.localKnown && <Badge tone={l.localUp ? 'good' : 'bad'}>{l.localUp ? 'Server up' : 'Server down'}</Badge>}
+                {/* "Server down" and "no local address" are both localUp=false, but
+                    only one of them is fixed by starting a server — so they never
+                    share a label. Red either way: a tunnel that cannot serve is a
+                    tunnel that cannot serve, and the words carry the difference. */}
+                {l?.needsLocalAddr
+                  ? <Badge tone="bad">No local address</Badge>
+                  : l?.localKnown && <Badge tone={l.localUp ? 'good' : 'bad'}>{l.localUp ? 'Server up' : 'Server down'}</Badge>}
               </div>
 
               {/* What the server itself said, from the mc-status probe. Metadata

@@ -265,11 +265,19 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
             state={isAgent ? localState : linkState}
             headline={off ? 'Stopped'
               : isAgent
-                ? (localState === 'good' ? 'Online' : localState === 'bad' ? 'Not reachable' : 'Checking…')
+                ? (localState === 'good' ? 'Online'
+                  : firstTunnel?.needsLocalAddr ? 'Not configured'
+                    : localState === 'bad' ? 'Not reachable' : 'Checking…')
                 : (status.agentConnected ? 'Connected' : 'Waiting')}
             detail={off ? 'Tunnel is turned off'
               : isAgent
-                ? (firstTunnel?.localUp ? 'Minecraft is ready' : 'Start your Minecraft server')
+                // A tunnel with no local address is not a server that stopped, and
+                // telling its owner to start Minecraft sends them to fix a machine
+                // that was never the problem. The one station that names a next
+                // action has to name the right one.
+                ? (firstTunnel?.localUp ? 'Minecraft is ready'
+                  : firstTunnel?.needsLocalAddr ? 'Set a local address for this tunnel'
+                    : 'Start your Minecraft server')
                 : (status.agentConnected ? 'Agent is dialed in' : 'No agent connected yet')}
           />
           <Conduit on={flowing && (isAgent ? localState !== 'bad' : true)} label={leftHop > 0 ? fmtBytes(leftHop) : undefined} />
