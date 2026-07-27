@@ -92,6 +92,56 @@ func TestPairingRejectsOverlong(t *testing.T) {
 	}
 }
 
+// A pairing code is a value that must survive being re-emitted: the app stores
+// it, shows it, and hands it on. url.Parse is lenient about the authority — it
+// splits an unbracketed IPv6 literal at the last colon, so "pxf://::1/..."
+// yielded host ":" and port 1 — and a host like that is one String() cannot put
+// back (JoinHostPort brackets anything containing a colon, and a bracketed
+// non-IP is not a URL). So the parser must refuse a host that is neither an IP
+// nor a name, rather than hand back a code that decays on the next hop.
+// Found by FuzzParsePairingCode.
+func TestPairingRejectsAHostItCannotReEmit(t *testing.T) {
+	fp := "sha256:" + strings.Repeat("ab", 32)
+	bad := map[string]string{
+		"unbracketed v6 loopback": "pxf://::1/v1/pair/tok#" + fp,
+		"unbracketed v6 literal":  "pxf://2001:db8::1/v1/pair/tok#" + fp,
+		"colon in a name":         "pxf://a:b:8474/v1/pair/tok#" + fp,
+		"space in a name":         "pxf://a%20b:8474/v1/pair/tok#" + fp,
+		"bracket in a name":       "pxf://a%5Db:8474/v1/pair/tok#" + fp,
+		"zoned v6 literal":        "pxf://[fe80::1%25eth0]:8474/v1/pair/tok#" + fp,
+	}
+	for name, s := range bad {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParsePairingCode(s)
+			if err == nil {
+				t.Fatalf("accepted %q as host %q; String() re-emits it as %q", s, got.Host, got.String())
+			}
+		})
+	}
+}
+
+// The hosts a pairing code legitimately carries must still parse, and must be
+// the fixed point the type promises. Bracketed IPv6 is the case the rejection
+// above must not take with it.
+func TestPairingAcceptsRealHosts(t *testing.T) {
+	fp := "sha256:" + strings.Repeat("ab", 32)
+	for _, host := range []string{
+		"gw.example.com", "gw", "GW.Example.COM", "203.0.113.7", "2001:db8::1",
+		"::1", "host_1.internal", "gw-2.example.com.", "xn--mnchen-3ya.example",
+	} {
+		t.Run(host, func(t *testing.T) {
+			in := PairingCode{Host: host, Port: 8474, Token: "tok", Fingerprint: fp}
+			got, err := ParsePairingCode(in.String())
+			if err != nil {
+				t.Fatalf("rejected a real host: %v (code %q)", err, in.String())
+			}
+			if got != in {
+				t.Fatalf("round trip: got %+v want %+v", got, in)
+			}
+		})
+	}
+}
+
 func TestPairingParseRejects(t *testing.T) {
 	fp := "sha256:" + strings.Repeat("ab", 32)
 	bad := map[string]string{

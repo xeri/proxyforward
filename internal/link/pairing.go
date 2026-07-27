@@ -3,6 +3,7 @@ package link
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -81,6 +82,9 @@ func ParsePairingCode(s string) (PairingCode, error) {
 	if host == "" {
 		return PairingCode{}, fmt.Errorf("pairing code is missing the gateway host")
 	}
+	if !pairingHostOK(host) {
+		return PairingCode{}, fmt.Errorf("pairing code has an invalid gateway host %q — write an IPv6 address in brackets, as pxf://[2001:db8::1]:8474/…", host)
+	}
 	portStr := u.Port()
 	if portStr == "" {
 		return PairingCode{}, fmt.Errorf("pairing code is missing the gateway control port")
@@ -99,6 +103,44 @@ func ParsePairingCode(s string) (PairingCode, error) {
 		}
 	}
 	return PairingCode{Host: host, Port: port, Token: token, Fingerprint: strings.ToLower(fp)}, nil
+}
+
+// pairingHostOK reports whether host is something a pairing code may carry — and
+// therefore also something String can put back, because a PairingCode is a value
+// the app stores, displays and hands on, and one that decays on re-emission is
+// one that could name a different gateway on the next hop than the one shown.
+//
+// Two shapes qualify. An IP literal: String brackets a v6 one and url.Parse
+// accepts it back. A *zoned* one does not — fe80::1%eth0 names an interface on
+// the machine that minted the code, which is meaningless on the machine that
+// pastes it, and netip's zone is not carried through a URL authority anyway.
+//
+// Otherwise a DNS name, spelled with the characters DNS names are spelled with.
+// That set is not arbitrary tidiness: it is exactly what url.URL.String leaves
+// unescaped in an authority and does not read as a host/port separator, which is
+// what makes parse∘String a fixed point. An internationalized name travels in its
+// punycode (xn--) form, which is ASCII and reads the same on both machines —
+// unlike a raw unicode host, which a human is being asked to eyeball as the trust
+// anchor for a whole gateway.
+//
+// Without this check url.Parse's lenient authority split had the last word, and
+// it cuts an unbracketed IPv6 literal at its final colon: pxf://2001:db8::1/…
+// parsed as host "2001:db8:" on port 1, and pxf://::1/… as host ":" on port 1.
+// Neither is the gateway the operator copied, and neither said so.
+// Found by FuzzParsePairingCode; regression TestPairingRejectsAHostItCannotReEmit.
+func pairingHostOK(host string) bool {
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return addr.Zone() == ""
+	}
+	for _, c := range host {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '-', c == '.', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // tokenFromV1Path validates the /<version>/<kind>/<token> path of a pxf:// code and
