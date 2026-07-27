@@ -91,13 +91,29 @@ func (r *eventRing) push(ev GatewayEvent) {
 	}
 }
 
-// since returns every retained event with Seq > cursor, oldest first. A cursor at
-// or beyond the newest seq returns nothing; a zero cursor returns all retained.
+// maxEventsPerPoll bounds one since() answer so the reply always fits
+// control.MaxFrame. A clone-suspected event carries a long explanatory message,
+// so a full ring of them marshals to ~90 KB — well past the 64 KiB frame the
+// daemon can write, and past it for as long as the ring stays full. The GUI's
+// first poll uses a zero cursor, so the answer never got smaller on its own: the
+// event log showed its written-empty state on a gateway with 256 things to say.
+//
+// Chunking rather than truncating is what makes this lossless: the caller
+// advances its cursor past what it received (`Agents.tsx useGatewayEvents`) and
+// the next poll — 3 s later — carries the rest. Nothing is dropped and nothing
+// has to be flagged, because nothing is missing by the time the log is read.
+const maxEventsPerPoll = 128
+
+// since returns retained events with Seq > cursor, oldest first, at most
+// maxEventsPerPoll of them. A cursor at or beyond the newest seq returns nothing.
 func (r *eventRing) since(cursor uint64) []GatewayEvent {
 	var out []GatewayEvent
 	for _, e := range r.events {
 		if e.Seq > cursor {
 			out = append(out, e)
+			if len(out) == maxEventsPerPoll {
+				break // oldest first, so the caller's next cursor resumes here
+			}
 		}
 	}
 	return out

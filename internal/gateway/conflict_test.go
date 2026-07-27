@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -181,4 +182,49 @@ func hasEventKind(evs []GatewayEvent, kind string) bool {
 		}
 	}
 	return false
+}
+
+// TestEventPollFitsFrameAndLosesNothing (D7) is the regression for an event log
+// that showed "no events" on a gateway with a full ring. GatewayEvents(0) — the
+// GUI's first poll — returned all 256 retained events, and a ring of
+// clone-suspected messages marshals past control.MaxFrame, so the daemon served
+// "reply exceeds frame limit" instead. The cursor never advanced, so the next
+// poll asked the same impossible question forever.
+//
+// The chunked answer must fit the frame AND deliver every event across
+// successive polls, in order, with no gaps or repeats.
+func TestEventPollFitsFrameAndLosesNothing(t *testing.T) {
+	r := newEventRing(eventRingCap)
+	for i := 0; i < eventRingCap; i++ {
+		r.push(GatewayEvent{
+			TimeMs: 1700000000000, Kind: EventCloneSuspected,
+			AgentID: "agt_0123456789abcdef", TunnelID: "tnl_0123456789abcdef",
+			Message: fmt.Sprintf("agent %s is being contested from two addresses (%s and %s) — its identity key looks cloned; re-enroll one machine for its own identity",
+				"agt_0123456789abcdef", "203.0.113.45", "198.51.100.200"),
+			RequestedPort: 25565, ActualPort: 49152,
+		})
+	}
+
+	var got []GatewayEvent
+	cursor := uint64(0)
+	for polls := 0; polls < 16; polls++ {
+		batch := r.since(cursor)
+		if len(batch) == 0 {
+			break
+		}
+		// Every poll's answer must be a frame the daemon can actually write.
+		if err := control.WriteMsg(io.Discard, "ipc_analytics_resp", batch); err != nil {
+			t.Fatalf("poll %d: %d events rejected: %v", polls, len(batch), err)
+		}
+		got = append(got, batch...)
+		cursor = batch[len(batch)-1].Seq
+	}
+	if len(got) != eventRingCap {
+		t.Fatalf("polled %d events across the ring, want all %d", len(got), eventRingCap)
+	}
+	for i, e := range got {
+		if e.Seq != uint64(i+1) {
+			t.Fatalf("event %d has seq %d, want %d — the chunked polls gapped or repeated", i, e.Seq, i+1)
+		}
+	}
 }
