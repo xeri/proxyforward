@@ -790,6 +790,8 @@ export namespace app {
 	    agents: AgentUI[];
 	    agentsTotal?: number;
 	    tunnels: TunnelUI[];
+	    tunnelsTruncated?: boolean;
+	    tunnelsTotal?: number;
 	    connections: ConnUI[];
 	    totalBytesIn: number;
 	    totalBytesOut: number;
@@ -837,6 +839,8 @@ export namespace app {
 	        this.agents = this.convertValues(source["agents"], AgentUI);
 	        this.agentsTotal = source["agentsTotal"];
 	        this.tunnels = this.convertValues(source["tunnels"], TunnelUI);
+	        this.tunnelsTruncated = source["tunnelsTruncated"];
+	        this.tunnelsTotal = source["tunnelsTotal"];
 	        this.connections = this.convertValues(source["connections"], ConnUI);
 	        this.totalBytesIn = source["totalBytesIn"];
 	        this.totalBytesOut = source["totalBytesOut"];

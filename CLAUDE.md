@@ -62,8 +62,10 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   stay **byte-identical** — enforced by `internal/control/hello_compat_test.go`.
 - Unknown message types are ignored, never errors (the `handleControlMsg` default
   arms in both `agent.go` and `gateway.go`). Replies that can grow are chunked or
-  clamped under the frame cap (`MaxConnStatsPerFrame`, `ipc.MaxStatusConns`) —
-  never raise the cap itself.
+  clamped under the frame cap (`MaxConnStatsPerFrame`, `ipc.FitStatus`) — never
+  raise the cap itself. A reply carrying **several** lists is bounded by measuring
+  the frame, never by dividing the cap between them in a comment: the arithmetic
+  goes stale on the next added field, silently (`ipc.FitStatus`).
 - Never advertise a capability that isn't implemented end-to-end — the peer acts on
   the offer, then fails. (`tunnel-udp` violated this until it was un-advertised.)
 - **Consent vs arbitration** — every config path picks a side (`CapConfigConsent`).

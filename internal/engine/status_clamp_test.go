@@ -30,8 +30,8 @@ func TestSetStatusConnsClamp(t *testing.T) {
 			RttMs:      123.456789,
 		}
 	}
-	var st ipc.Status
-	setStatusConns(&st, snaps)
+	st := ipc.Status{Connections: snaps}
+	ipc.FitStatus(&st)
 
 	if len(st.Connections) != ipc.MaxStatusConns {
 		t.Fatalf("connections = %d, want %d", len(st.Connections), ipc.MaxStatusConns)
@@ -54,8 +54,8 @@ func TestSetStatusConnsClamp(t *testing.T) {
 	}
 
 	// Under the cap: passthrough untouched.
-	var small ipc.Status
-	setStatusConns(&small, snaps[:5])
+	small := ipc.Status{Connections: snaps[:5]}
+	ipc.FitStatus(&small)
 	if small.ConnectionsTruncated || small.ConnectionsTotal != 5 || len(small.Connections) != 5 {
 		t.Fatalf("small set mangled: %+v", fmt.Sprintf("trunc=%v total=%d n=%d",
 			small.ConnectionsTruncated, small.ConnectionsTotal, len(small.Connections)))

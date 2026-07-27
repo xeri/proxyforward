@@ -98,6 +98,10 @@ export function Tunnels({status}: {status: UIStatus}) {
 
   if (!isAgent) {
     const gwTunnels = status.tunnels ?? []
+    // The list is clamped so the status frame fits (ipc.MaxStatusTunnels), and on
+    // a gateway it is the whole fleet's — so count the fleet, not the rows. 0 from
+    // a daemon too old to say, which is also one too old to clamp.
+    const gwTotal = status.tunnelsTotal || gwTunnels.length
     const cols: Column<(typeof gwTunnels)[number]>[] = [
       {key: 'name', header: 'Tunnel', pin: true, render: t => <span className="font-medium">{t.name}</span>},
       {key: 'port', header: 'Public port', render: t => <MonoChip>{t.publicPort > 0 ? t.publicPort : '—'}</MonoChip>},
@@ -111,7 +115,7 @@ export function Tunnels({status}: {status: UIStatus}) {
       <div className="pf-stagger space-y-4">
         <PageHeader eyebrow="passage" title="Tunnels" subtitle="Registered by the connected agent." />
         <Card title="Registered tunnels" pad={false}
-          action={gwTunnels.length > 0 ? <div className="pr-4"><Badge tone="neutral">{gwTunnels.length}</Badge></div> : undefined}>
+          action={gwTotal > 0 ? <div className="pr-4"><Badge tone="neutral">{gwTotal}</Badge></div> : undefined}>
           <DataTable
             columns={cols} rows={gwTunnels} rowKey={t => t.id}
             empty={{
@@ -120,6 +124,11 @@ export function Tunnels({status}: {status: UIStatus}) {
               hint: 'Tunnels appear here once an agent connects and registers its ports.',
             }}
           />
+          {status.tunnelsTruncated && (
+            <div className="px-4 py-2 text-sub tabular-nums text-[var(--text-3)]">
+              showing {gwTunnels.length} of {gwTotal} tunnels
+            </div>
+          )}
         </Card>
       </div>
     )

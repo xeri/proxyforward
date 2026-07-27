@@ -10,6 +10,7 @@ import (
 	"errors"
 
 	"proxyforward/internal/conntrack"
+	"proxyforward/internal/control"
 	"proxyforward/internal/stats"
 )
 
@@ -67,9 +68,13 @@ const maxIPCEntries = 300
 
 // MaxStatusConns clamps Status.Connections the same way. A snapshot with
 // every field populated (player identity, bracketed IPv6 address) marshals
-// to ~340 bytes, so 150 keeps the full status a comfortable margin under
-// MaxFrame. The newest connections win; ConnectionsTruncated /
+// to ~340 bytes. The newest connections win; ConnectionsTruncated /
 // ConnectionsTotal tell the GUI what it isn't seeing.
+//
+// It is a per-list ceiling, not the thing that makes the frame fit: three
+// lists grow independently here, and no single ceiling can bound their sum.
+// FitStatus is what guarantees the frame, so these are chosen for what each
+// surface wants to show rather than by dividing MaxFrame three ways.
 const MaxStatusConns = 150
 
 // HistoryReq asks for the trailing windowMs of bandwidth history (0 = all)
@@ -151,7 +156,14 @@ type Status struct {
 	Agents      []AgentStatus `json:"agents,omitempty"`
 	AgentsTotal int           `json:"agentsTotal,omitempty"`
 
-	Tunnels []TunnelStatus `json:"tunnels,omitempty"`
+	// Tunnels is every registered tunnel of every agent (the gateway role's
+	// list is the fleet's, not one agent's, so it grows as agents ×
+	// tunnels-per-agent). Clamped to MaxStatusTunnels with TunnelsTruncated /
+	// TunnelsTotal, for the reason Connections is: a list the GUI renders
+	// short must say it is short, or it reads as the whole set.
+	Tunnels          []TunnelStatus `json:"tunnels,omitempty"`
+	TunnelsTruncated bool           `json:"tunnelsTruncated,omitempty"`
+	TunnelsTotal     int            `json:"tunnelsTotal,omitempty"`
 
 	// Live proxied connections and lifetime byte totals (both roles).
 	// Connections holds at most MaxStatusConns (the newest); when clamped,
@@ -181,12 +193,127 @@ type Status struct {
 	ConfigPath string `json:"configPath,omitempty"`
 }
 
-// MaxStatusAgents bounds the per-agent link records in a Status frame. With
-// Connections already clamped to MaxStatusConns (~51 KB) and each AgentStatus
-// ~200 bytes, this keeps the whole frame under the 64 KiB MaxFrame even at the
-// cap. Far beyond the "several friends" topology; excess agents are dropped
-// from the status view (they keep serving — only the dashboard row is elided).
-const MaxStatusAgents = 24
+// MaxStatusAgents bounds the per-agent link records in a Status frame, and
+// MaxStatusTunnels the flat tunnel list. Both are far beyond the "several
+// friends" topology; excess rows are dropped from the status view (they keep
+// serving — only the dashboard row is elided), and the Total fields say so.
+const (
+	MaxStatusAgents  = 24
+	MaxStatusTunnels = 128
+)
+
+// Worst-case marshalled size of one row of each variable-length list, rounded
+// up from a fully-populated example (bracketed IPv6 client address, player
+// identity, a long MOTD). They exist only to answer "could this frame
+// possibly be too big?" without marshalling on the 2 Hz path, so they must
+// over-estimate: an under-estimate would skip the exact check that FitStatus
+// relies on. A field added to any of these structs makes them stale in the
+// safe direction, and the exact check behind them catches the rest.
+const (
+	statusBaseBytes   = 1024
+	statusConnBytes   = 352
+	statusAgentBytes  = 352
+	statusTunnelBytes = 448
+)
+
+// statusFrameBudget is how much of control.MaxFrame one Status may occupy.
+// The slack under the cap covers the envelope WriteMsg wraps it in and leaves
+// room for a field landing on Status between releases.
+const statusFrameBudget = control.MaxFrame - 2048
+
+// FitStatus clamps a Status so its frame always fits control.MaxFrame, and is
+// the single place that promise is kept. Producers build the full picture and
+// call this last.
+//
+// Three lists grow here on independent axes — live players, fleet size, and
+// tunnels per agent — so no combination of per-list ceilings bounds their sum;
+// dividing MaxFrame three ways only moves the arithmetic into a comment, where
+// the next field added to any of these structs silently invalidates it. (That
+// is exactly what happened: the ceilings were sized one list at a time, and a
+// gateway with a busy public port and a handful of agents produced a status
+// frame WriteMsg refused, which tore down the pipe connection on every poll —
+// the GUI went blank on precisely the gateway that needed watching.)
+//
+// So: per-list ceilings for what each surface wants to show, then an exact
+// size check that sheds rows until the frame fits. The ceilings are the common
+// case and cost one comparison; the exact path marshals only when the
+// (deliberately pessimistic) estimate says the frame might not fit.
+func FitStatus(s *Status) {
+	s.ConnectionsTotal = len(s.Connections)
+	if len(s.Connections) > MaxStatusConns {
+		// The newest connections win: the snapshot is ID-ascending, and a live
+		// list is most useful showing who just arrived.
+		s.Connections = s.Connections[len(s.Connections)-MaxStatusConns:]
+		s.ConnectionsTruncated = true
+	}
+	s.TunnelsTotal = len(s.Tunnels)
+	if len(s.Tunnels) > MaxStatusTunnels {
+		// Tunnels and agents arrive sorted, so keeping the head keeps a stable
+		// prefix — the same rows survive poll to poll instead of flickering.
+		s.Tunnels = s.Tunnels[:MaxStatusTunnels]
+		s.TunnelsTruncated = true
+	}
+	s.AgentsTotal = len(s.Agents)
+	if len(s.Agents) > MaxStatusAgents {
+		s.Agents = s.Agents[:MaxStatusAgents]
+	}
+
+	if statusEstimate(s) <= statusFrameBudget {
+		return // cannot be too large; skip the marshal entirely
+	}
+	for statusSize(s) > statusFrameBudget && shedStatus(s) {
+	}
+}
+
+// statusEstimate is the pessimistic upper bound on a Status's marshalled size.
+func statusEstimate(s *Status) int {
+	return statusBaseBytes +
+		len(s.Connections)*statusConnBytes +
+		len(s.Agents)*statusAgentBytes +
+		len(s.Tunnels)*statusTunnelBytes
+}
+
+// statusSize is the exact marshalled size. A failed marshal reports the frame
+// as over budget, so the caller sheds rather than trusting a number it could
+// not compute.
+func statusSize(s *Status) int {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return statusFrameBudget + 1
+	}
+	return len(b)
+}
+
+// shedStatus drops rows from every list at once, so an over-budget frame
+// degrades all three surfaces a little rather than blanking one to spare
+// another. It reports false when there is nothing left to drop.
+func shedStatus(s *Status) bool {
+	shed := false
+	if n := len(s.Connections); n > 0 {
+		s.Connections = s.Connections[n-keepAfterShed(n):]
+		s.ConnectionsTruncated = true
+		shed = true
+	}
+	if n := len(s.Tunnels); n > 0 {
+		s.Tunnels = s.Tunnels[:keepAfterShed(n)]
+		s.TunnelsTruncated = true
+		shed = true
+	}
+	if n := len(s.Agents); n > 0 {
+		s.Agents = s.Agents[:keepAfterShed(n)]
+		shed = true
+	}
+	return shed
+}
+
+// keepAfterShed is how much of a list survives one shedding round: seven
+// eighths, and always at least one row fewer, so the loop terminates.
+func keepAfterShed(n int) int {
+	if k := n * 7 / 8; k < n {
+		return k
+	}
+	return n - 1
+}
 
 // AgentStatus is one connected agent's link state on a gateway: identity, link
 // quality, and tunnel/player counts. The tunnel and connection lists live flat

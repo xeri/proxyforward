@@ -121,7 +121,8 @@ persisted to config.
 | Loss window / ping-loss timeout | 32 heartbeats / 2×interval | `agent.go lossWindow lossTimeout`, `linkquality.go` |
 | Gateway per-conn RTT sample | every 5 s, ≤200 entries per frame | `gateway.go rttSampleInterval`, `control.go MaxConnStatsPerFrame` |
 | GUI tick | 500 ms; log poll 250 ms; UI re-render tick 1 s | `app.go tickInterval`, `Activity.tsx pull`, `Overview.tsx` |
-| IPC clamps | 150 conns in status; 300 buckets/peers | `ipc.go MaxStatusConns maxIPCEntries` |
+| IPC status fit | per-list ceilings 150 conns / 128 tunnels / 24 agents, then an exact byte trim — three lists grow on independent axes, so no set of ceilings bounds their sum | `ipc.go FitStatus MaxStatusConns MaxStatusTunnels MaxStatusAgents` |
+| IPC clamps | 300 buckets/peers | `ipc.go maxIPCEntries` |
 | Query clamps | 80 players / 100 sessions / 300 points / 60 name+IP spans / 250 countries / 16 tunnels × 100 uptime events | `queries.go MaxPlayersPage MaxHistoryPoints`, `geoquery.go MaxCountryRows`, `summary.go MaxUptimeEvents MaxUptimeTunnels` |
 | Stats tiers | 100 ms×1200, 1 s×1800, 15 s×7200, 10 m×5760, 1 d×1100; tiers ≥2 persisted | `stats.go tierSpecs` |
 | Sampler | 10 Hz sample, 45 s flush, 15 s session-replay samples | `engine.go sampleInterval flushInterval sessionSampleInterval` |
@@ -609,9 +610,10 @@ switcher cannot become the agent and must route to setup), `&geo=off|empty|error
 `&fx=low|high`, `&fleet=multi|old|clamped` (gateway only — `multi`: a five-agent fleet
 with a good/fair/poor health spread instead of the default single agent, for the Agents
 roster + drill-in; `old`: a pre-roster daemon that sends no agents array → the roster's
-honest-unavailable state; `clamped`: that same fleet with `agentsTotal` past
-`ipc.MaxStatusAgents`, so the pill counts the fleet rather than the rows and the roster
-says which rows carry no live link state), `&conflict=port|clone|both` (seeds the gateway event ring so
+honest-unavailable state; `clamped`: that same fleet past the status caps
+(`ipc.FitStatus`) — `agentsTotal` and `tunnelsTotal` outrun their lists, so the pill
+and the Tunnels card count the fleet rather than the rows and the roster says which rows
+carry no live link state), `&conflict=port|clone|both` (seeds the gateway event ring so
 the conflict cards + event log have data), `&deeplink=1` (a clicked `pxf://` invite),
 `&pending=in|out|both` (config-consent: a proposal awaiting this side, awaiting the
 peer, or both — the approval surfaces on either role), `&consent=off` (the peer predates

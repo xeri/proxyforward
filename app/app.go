@@ -372,10 +372,16 @@ type UIStatus struct {
 	Agents      []AgentUI `json:"agents"`
 	AgentsTotal int       `json:"agentsTotal,omitempty"`
 
-	Tunnels       []TunnelUI `json:"tunnels"`
-	Connections   []ConnUI   `json:"connections"`
-	TotalBytesIn  int64      `json:"totalBytesIn"`
-	TotalBytesOut int64      `json:"totalBytesOut"`
+	// TunnelsTruncated/TunnelsTotal mirror the ipc.Status clamp the way the
+	// connection pair below does: on a gateway this list is the whole fleet's,
+	// so it is the one that grows fastest.
+	Tunnels          []TunnelUI `json:"tunnels"`
+	TunnelsTruncated bool       `json:"tunnelsTruncated,omitempty"`
+	TunnelsTotal     int        `json:"tunnelsTotal,omitempty"`
+
+	Connections   []ConnUI `json:"connections"`
+	TotalBytesIn  int64    `json:"totalBytesIn"`
+	TotalBytesOut int64    `json:"totalBytesOut"`
 
 	// Control-link/session metadata. PeerAddr is the other end of the tunnel
 	// link: gateway host:port on the agent, agent IP on the gateway.
@@ -524,6 +530,8 @@ func (st *UIStatus) applyIPCStatus(s ipc.Status) {
 			Tunnels: ag.Tunnels, Players: ag.Players,
 		})
 	}
+	st.TunnelsTruncated = s.TunnelsTruncated
+	st.TunnelsTotal = s.TunnelsTotal
 	st.Tunnels = make([]TunnelUI, 0, len(s.Tunnels))
 	for _, t := range s.Tunnels {
 		st.Tunnels = append(st.Tunnels, TunnelUI{

@@ -27,9 +27,10 @@
 //                      connected/offline/revoked states render without any axis.
 //                      old: a pre-roster daemon (no agents array) → the Agents
 //                      screen's honest-unavailable state (ListAgents also [])
-//                      clamped: a fleet past ipc.MaxStatusAgents — the same five
-//                      agents, but agentsTotal says 31, so the title-bar pill
-//                      counts the fleet and the Agents screen says which rows
+//                      clamped: a fleet past the status caps — the same five
+//                      agents, but agentsTotal says 31 and tunnelsTotal 97, so
+//                      the title-bar pill and the Tunnels card count the fleet
+//                      rather than the rows, and the Agents screen says which rows
 //                      carry no live link state
 //   &groups=spread|standby|both
 //                    — gateway only. Seeds the Agents screen's tunnel-group cards:
@@ -784,6 +785,12 @@ export function installDevMock() {
     // is the only way to see the past-the-cap wording without 31 mock agents.
     agentsTotal: gw && !rosterOld ? (axisFleet === 'clamped' ? 31 : gwAgents.length) : 0,
     tunnels: gwTunnels,
+    // Same axis, the other clamped list: a fleet past the status caps has more
+    // tunnels than the frame carries, and the Tunnels card must count the fleet's
+    // rather than the rows'. The rows themselves stay as they are — the mock is
+    // showing the wording, not 97 tunnels.
+    tunnelsTruncated: gw && axisFleet === 'clamped',
+    tunnelsTotal: gw ? (axisFleet === 'clamped' ? 97 : gwTunnels.length) : 0,
     connections: gwConns,
     totalBytesIn: state.bytesIn, totalBytesOut: state.bytesOut,
     linkUpSinceMs: isWizard || !state.linkUp ? 0 : LINK_UP_SINCE,

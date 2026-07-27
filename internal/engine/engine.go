@@ -615,7 +615,7 @@ func (e *Engine) Status() ipc.Status {
 			}
 			st.Tunnels = append(st.Tunnels, ts)
 		}
-		setStatusConns(&st, e.Agent.Conns.Snapshot())
+		st.Connections = e.Agent.Conns.Snapshot()
 		st.TotalBytesIn, st.TotalBytesOut = e.Agent.Conns.Totals()
 	case e.Gateway != nil:
 		st.AgentConnected = e.Gateway.AgentConnected()
@@ -656,11 +656,7 @@ func (e *Engine) Status() ipc.Status {
 		}
 		agentTraffic := e.Gateway.Conns.AgentTotals()
 		live := e.Gateway.Agents()
-		st.AgentsTotal = len(live)
 		for _, ag := range live {
-			if len(st.Agents) >= ipc.MaxStatusAgents {
-				break
-			}
 			st.Agents = append(st.Agents, ipc.AgentStatus{
 				AgentID:       ag.AgentID,
 				Hostname:      ag.Hostname,
@@ -677,20 +673,13 @@ func (e *Engine) Status() ipc.Status {
 				Players:       agentTraffic[ag.AgentID].Players,
 			})
 		}
-		setStatusConns(&st, e.Gateway.Conns.Snapshot())
+		st.Connections = e.Gateway.Conns.Snapshot()
 		st.TotalBytesIn, st.TotalBytesOut = e.Gateway.Conns.Totals()
 	}
+	// Last, and only here: every list above is built whole, then clamped in one
+	// place that knows what a frame holds. The status is read in-process by a
+	// GUI-hosted engine and over the pipe by an attached one, and both go
+	// through this — so what the two modes show can never diverge.
+	ipc.FitStatus(&st)
 	return st
-}
-
-// setStatusConns clamps the connection list to ipc.MaxStatusConns so the
-// status frame always fits control.MaxFrame. The snapshot is ID-ascending, so
-// keeping the tail keeps the newest connections.
-func setStatusConns(st *ipc.Status, snaps []conntrack.Snapshot) {
-	st.ConnectionsTotal = len(snaps)
-	if len(snaps) > ipc.MaxStatusConns {
-		snaps = snaps[len(snaps)-ipc.MaxStatusConns:]
-		st.ConnectionsTruncated = true
-	}
-	st.Connections = snaps
 }
