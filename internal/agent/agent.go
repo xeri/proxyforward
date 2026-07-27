@@ -1324,6 +1324,14 @@ func (s *session) serveOpenConn(st relay.Conn, oc *control.OpenConn) {
 		s.agent.logger.Warn("local server unreachable", "tunnel", tun.Name, "local_addr", tun.LocalAddr, "err", err)
 		return
 	}
+	// Owned from the moment it exists, exactly as serveDatagramStream owns its
+	// socket. Splice closes both legs when it ends, but it is the *last* thing
+	// here, and every early return before it (the PROXY header below today,
+	// anything added later) would otherwise drop this connection on the floor: a
+	// descriptor and a Minecraft connection slot held until the local server's
+	// own timeout, once per player, at a rate the gateway chooses — oc.ClientAddr
+	// is what decides, and it comes off the wire.
+	defer local.Close()
 	tcp := local.(*net.TCPConn)
 	_ = tcp.SetNoDelay(true)
 
