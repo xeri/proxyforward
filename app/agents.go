@@ -17,12 +17,38 @@ import (
 // ListAgents returns the gateway's agent roster: every enrolled agent, online or
 // not, with identity, scope, and live status. Empty on any error (agent role,
 // detached, old daemon).
+//
+// The roster arrives a page at a time — it outgrows one IPC frame at ~120 agents
+// and, because revoked records stay on the allowlist, never shrinks back under it
+// (`gateway.maxAgentsPerPoll`). Reassembling it here keeps the paging entirely
+// inside the daemon boundary: the binding's callers still receive one whole
+// roster, so no GUI code knows a cursor exists.
 func (a *App) ListAgents() []gateway.AgentView {
-	var out []gateway.AgentView
-	if err := a.analyticsCall(engine.OpListAgents, nil, &out); err != nil || out == nil {
-		return []gateway.AgentView{}
+	out := []gateway.AgentView{}
+	cursor := ""
+	for {
+		var page []gateway.AgentView
+		req := struct {
+			AfterAgentID string `json:"afterAgentId"`
+		}{cursor}
+		if err := a.analyticsCall(engine.OpListAgents, req, &page); err != nil {
+			// A partial roster read as a complete one would show an agent as
+			// gone; the poll repeats in seconds, so answer nothing instead.
+			return []gateway.AgentView{}
+		}
+		if len(page) == 0 {
+			return out
+		}
+		// A daemon too old to page ignores the cursor and answers the whole
+		// roster every time. Its second answer starts at an id we already hold,
+		// which is the tell — stop there rather than appending forever. That
+		// leaves exactly the roster such a daemon could always serve.
+		if page[0].AgentID <= cursor {
+			return out
+		}
+		out = append(out, page...)
+		cursor = out[len(out)-1].AgentID
 	}
-	return out
 }
 
 // IssuePairingCode mints a pxf:// pairing code carrying a fresh enrollment ticket.

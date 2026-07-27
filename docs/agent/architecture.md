@@ -122,7 +122,7 @@ persisted to config.
 | Gateway per-conn RTT sample | every 5 s, ≤200 entries per frame | `gateway.go rttSampleInterval`, `control.go MaxConnStatsPerFrame` |
 | GUI tick | 500 ms; log poll 250 ms; UI re-render tick 1 s | `app.go tickInterval`, `Activity.tsx pull`, `Overview.tsx` |
 | IPC status fit | per-list ceilings 150 conns / 128 tunnels / 24 agents, then an exact byte trim — three lists grow on independent axes, so no set of ceilings bounds their sum | `ipc.go FitStatus MaxStatusConns MaxStatusTunnels MaxStatusAgents` |
-| IPC clamps | 300 buckets/peers; 128 gateway events per poll (chunked, not truncated — the cursor resumes) | `ipc.go maxIPCEntries`, `conflict.go maxEventsPerPoll` |
+| IPC clamps | 300 buckets/peers; 128 gateway events per poll and 64 agent-roster rows per poll (both chunked, not truncated — the cursor resumes) | `ipc.go maxIPCEntries`, `conflict.go maxEventsPerPoll`, `gateway.go maxAgentsPerPoll` |
 | Query clamps | 80 players / 100 sessions / 300 points / 60 name+IP spans / 250 countries / 16 tunnels × 100 uptime events | `queries.go MaxPlayersPage MaxHistoryPoints`, `geoquery.go MaxCountryRows`, `summary.go MaxUptimeEvents MaxUptimeTunnels` |
 | Stats tiers | 100 ms×1200, 1 s×1800, 15 s×7200, 10 m×5760, 1 d×1100; tiers ≥2 persisted | `stats.go tierSpecs` |
 | Sampler | 10 Hz sample, 45 s flush, 15 s session-replay samples | `engine.go sampleInterval flushInterval sessionSampleInterval` |

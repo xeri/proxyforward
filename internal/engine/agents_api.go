@@ -70,7 +70,17 @@ func (e *Engine) agentAdminOp(op string, body json.RawMessage) (json.RawMessage,
 	}
 	switch op {
 	case OpListAgents:
-		return encodeResult(e.Gateway.ListAgentViews(), nil)
+		// Paged: the roster outgrows one frame at ~120 agents and never shrinks
+		// (see gateway.maxAgentsPerPoll). A caller too old to send a cursor asks
+		// from the beginning and gets the first page, which is the whole roster
+		// for every fleet that fit before.
+		var q struct {
+			AfterAgentID string `json:"afterAgentId"`
+		}
+		if err := decodeBody(body, &q); err != nil {
+			return nil, err
+		}
+		return encodeResult(e.Gateway.ListAgentViewsAfter(q.AfterAgentID), nil)
 	case OpGatewayEvents:
 		var q struct {
 			SinceSeq uint64 `json:"sinceSeq"`

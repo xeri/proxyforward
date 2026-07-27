@@ -595,6 +595,38 @@ func (g *Gateway) ListAgentViews() []AgentView {
 	return out
 }
 
+// maxAgentsPerPoll bounds one ListAgentViewsAfter answer so the reply always fits
+// control.MaxFrame. A fully-populated AgentView — agent id, nickname, hostname, a
+// bracketed IPv6 address, a version and transport, and a scope naming several ports
+// and tunnel ids — marshals to ~534 bytes, so ~120 rows overflow the 64 KiB frame
+// the daemon can write.
+//
+// That is a reachable roster, and worse, a one-way one: an enrolment record outlives
+// revocation by design (the allowlist is the roster's row set, so a revoked agent
+// stays visible), so the row count only ever grows. A fleet that crossed the line
+// stayed across it and the daemon served "reply exceeds frame limit" on every poll —
+// the roster never loaded at all, on precisely the gateway with the most to manage.
+//
+// Chunking rather than truncating keeps it lossless, and keeps the answer the same
+// shape a single-frame roster had. The rows are sorted by AgentID and agent ids are
+// unique, so the last id of a batch is a cursor with a total order behind it: the
+// caller asks again from there and reassembles the whole roster (`app.ListAgents`).
+// 64 rows is ~34 KB — half the frame, so the margin survives a field or two landing
+// on AgentView before this number needs revisiting.
+const maxAgentsPerPoll = 64
+
+// ListAgentViewsAfter answers one page of the roster: the agents ordered strictly
+// after the cursor, at most maxAgentsPerPoll of them. An empty cursor starts at the
+// beginning; an answer shorter than the cap means the roster ended there.
+func (g *Gateway) ListAgentViewsAfter(after string) []AgentView {
+	all := g.ListAgentViews()
+	i := 0
+	for i < len(all) && all[i].AgentID <= after {
+		i++
+	}
+	return all[i:min(i+maxAgentsPerPoll, len(all))]
+}
+
 // AgentConfigView is the gateway-authoritative desired tunnel set the GUI shows in
 // an agent's drill-in: the tunnels the gateway holds for that agent, and their
 // generation. Generation 0 with no tunnels means the agent has not seeded a config
