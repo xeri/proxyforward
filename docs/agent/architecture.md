@@ -17,7 +17,8 @@ cli.go / cliview.go     The IPC client group — status | agents | pair issue |
 app/                    Wails-bound layer: App methods = the whole JS API; 2 Hz tick;
                         system tray + the close fork (tray.go, close.go); avatars
                         (player-head cache + /pf/avatar/ HTTP); setup export/
-                        import (.pfsetup); diagnostics bundle (redacted)
+                        import (.pfsetup); diagnostics bundle (redacted);
+                        the opt-in release check (update.go)
 internal/
   engine/               Composition root, two nested lifetimes: Run = supervisor
                         (IPC pipe + stats sampler + analytics + metrics, lives as
@@ -677,7 +678,12 @@ the "peer predates pause" state),
 port but names no local address, because the wire has no field to carry one. It must
 read "No local address", never "Server down", and Overview's one call to action must
 say to set an address rather than to start Minecraft — the two states share
-`localUp=false` and only one of them is fixed by starting a server).
+`localUp=false` and only one of them is fixed by starting a server),
+`&update=newer|none|odd|fail` (Settings → About, release check ON — the axis turns it
+on, because the shipped default is off and then the row is absent entirely: `newer` a
+newer release exists, `none` nothing published, `odd` this build's version cannot be
+ranked against a tag so the row states the tag and passes no verdict, `fail` the
+request failed; the toggle flipped by hand with no axis = up to date).
 The traffic model is deterministic functions of absolute time, so
 chart/tiles/replay all agree at any poll cadence. When you add a binding, add its stub
 here or the mock throws. Role setup mutates the mock's role, so the switcher flips the

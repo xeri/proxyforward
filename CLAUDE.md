@@ -267,6 +267,11 @@ all of these looked reasonable right up until they didn't.
   outbound calls are Mojang identity/skins (opt-out: `analytics.mojang_lookups`),
   avatar fallbacks, and the creator avatar (`players/resolver.go`, `app/avatars.go`,
   `app/credits.go`). Never add telemetry that leaves the machine.
+- The release check (`app/update.go`) is the **one** call about proxyforward itself,
+  and the one setting that ships **off** (`ui.update_check`): a daily conditional GET
+  to GitHub with a fixed User-Agent and no query, so nothing distinguishes installs
+  and nothing is downloaded. Its toggle belongs in Settings **About**, never
+  Telemetry — that section's subtitle promises nothing is sent anywhere.
 
 ## Reality check — implemented vs. advertised
 

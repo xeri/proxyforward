@@ -237,6 +237,13 @@ type UIConfig struct {
 	// TrayNoticeShown is set after the user has seen the one-time "closing
 	// minimizes to the tray" notice; it is never shown twice.
 	TrayNoticeShown bool `toml:"tray_notice_shown"`
+	// UpdateCheck permits the GUI to ask GitHub, at most daily, whether a newer
+	// release exists (app/update.go). Default false, and the zero value is that
+	// default on purpose: a document written before this field existed, or by a
+	// build that never had it, reads as off. It is the only setting in this file
+	// that makes a call about proxyforward itself, which is why it defaults the
+	// other way from every other convenience here.
+	UpdateCheck bool `toml:"update_check"`
 }
 
 // AnalyticsConfig governs the local analytics store (SQLite next to the

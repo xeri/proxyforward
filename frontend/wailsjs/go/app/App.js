@@ -34,6 +34,10 @@ export function BrowseMMDB(arg1) {
   return window['go']['app']['App']['BrowseMMDB'](arg1);
 }
 
+export function CheckForUpdate() {
+  return window['go']['app']['App']['CheckForUpdate']();
+}
+
 export function ChooseAndInspectSetupFile() {
   return window['go']['app']['App']['ChooseAndInspectSetupFile']();
 }
@@ -244,6 +248,10 @@ export function SetTheme(arg1) {
 
 export function SetTunnelGroup(arg1, arg2, arg3) {
   return window['go']['app']['App']['SetTunnelGroup'](arg1, arg2, arg3);
+}
+
+export function SetUpdateCheck(arg1) {
+  return window['go']['app']['App']['SetUpdateCheck'](arg1);
 }
 
 export function SetupAgent(arg1, arg2, arg3) {

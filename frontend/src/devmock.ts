@@ -136,6 +136,15 @@
 //                      running service usually means the GUI attached to it
 //                      instead, and &mode=attached hides this row along with
 //                      Close to tray.
+//   &update=newer|none|odd|fail
+//                    — Settings → About, with the release check ON (the axis
+//                      turns it on; without one the toggle starts off and the
+//                      row is absent, which is the shipped default). newer → a
+//                      newer release exists. none → nothing published yet. odd
+//                      → this build's version cannot be ranked against a tag,
+//                      so the row states the tag and passes no verdict. fail →
+//                      the request failed. No axis but the toggle flipped by
+//                      hand → up to date.
 
 type AnyFn = (...a: any[]) => any
 
@@ -153,6 +162,7 @@ export function installDevMock() {
   const axisStopped = params.get('engine') === 'stopped'
   const axisService = params.get('service') || '' // '' (not installed) | running | stopped
   const axisAutostart = params.get('autostart') === 'on' // the HKCU Run entry exists
+  const axisUpdate = params.get('update') || '' // '' (up to date) | newer | none | odd | fail
   const axisFresh = params.get('fresh') === '1'
   const axisAnalyticsOff = params.get('analytics') === 'off'
   const axisUnpaired = params.get('paired') === '0'
@@ -739,7 +749,8 @@ export function installDevMock() {
       MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10, MaxTunnelsPerAgent: 32},
     Metrics: {PrometheusEnabled: false, PrometheusAddr: '127.0.0.1:9464'},
     Logging: {Level: 'info', FileEnabled: true},
-    UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: axisTray !== 'off', Autostart: axisAutostart, TrayNoticeShown: axisTray !== 'notice'},
+    UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: axisTray !== 'off', Autostart: axisAutostart,
+      TrayNoticeShown: axisTray !== 'notice', UpdateCheck: axisUpdate !== ''},
     Analytics: {RetentionDays: 180, MojangLookups: true, GeoIPCityPath: '', GeoIPASNPath: ''},
   }
   // A machine that has never been paired holds no agent credentials — the
@@ -1477,6 +1488,22 @@ export function installDevMock() {
     // The real one reconciles the registry and then records the intent in the
     // config; both halves are mirrored so a later SaveSettings can't revert it.
     SetAutostart: (v: boolean) => { autostartOn = v; config.UI.Autostart = v; return ok(undefined) },
+    SetUpdateCheck: (v: boolean) => { config.UI.UpdateCheck = v; return ok(undefined) },
+    // The release check answers from the &update axis rather than the network.
+    // Off is not a failure and must not read as one: it returns enabled:false
+    // with nothing else filled in, exactly as the real binding does before it
+    // touches a socket.
+    CheckForUpdate: () => {
+      if (!config.UI.UpdateCheck) return ok({enabled: false, current: '1.4.0', latest: '', newer: false, comparable: false, url: '', checkedMs: 0})
+      if (axisUpdate === 'fail') return Promise.reject(new Error('could not reach the release list: dial tcp: lookup api.github.com: no such host'))
+      const base = {enabled: true, current: '1.4.0', url: 'https://github.com/xeri/proxyforward/releases/latest', checkedMs: Date.now() - 3 * 3600_000}
+      switch (axisUpdate) {
+        case 'newer': return ok({...base, latest: '1.5.0', newer: true, comparable: true})
+        case 'none': return ok({...base, latest: '', newer: false, comparable: false, url: ''})
+        case 'odd': return ok({...base, current: 'handbuilt', latest: '1.4.0', newer: false, comparable: false})
+        default: return ok({...base, latest: '1.4.0', newer: false, comparable: true})
+      }
+    },
     MeasureLatency: () => gated(() => new Promise(r => setTimeout(() => {
       const avg = 21 + Math.random() * 6
       r({

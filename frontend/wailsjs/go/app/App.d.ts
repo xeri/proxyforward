@@ -27,6 +27,8 @@ export function BandwidthHistory(arg1:number,arg2:number):Promise<stats.HistoryR
 
 export function BrowseMMDB(arg1:string):Promise<string>;
 
+export function CheckForUpdate():Promise<app.UpdateInfo>;
+
 export function ChooseAndInspectSetupFile():Promise<app.SetupFileInfo>;
 
 export function CreatorAvatar():Promise<string>;
@@ -132,6 +134,8 @@ export function SetPause(arg1:string,arg2:string,arg3:boolean,arg4:boolean):Prom
 export function SetTheme(arg1:string):Promise<void>;
 
 export function SetTunnelGroup(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function SetUpdateCheck(arg1:boolean):Promise<void>;
 
 export function SetupAgent(arg1:string,arg2:string,arg3:number):Promise<void>;
 

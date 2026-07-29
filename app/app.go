@@ -117,6 +117,10 @@ type App struct {
 	// avatarMu serializes creator-avatar cache reads/refreshes.
 	avatarMu sync.Mutex
 
+	// updateMu serializes release-check cache reads/refreshes (update.go), so
+	// two Settings visits in the same second make one request, not two.
+	updateMu sync.Mutex
+
 	// avatars is the player-head cache behind /pf/avatar/ (see avatars.go).
 	avatars *avatarCache
 }

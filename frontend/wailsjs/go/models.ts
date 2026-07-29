@@ -882,6 +882,30 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class UpdateInfo {
+	    enabled: boolean;
+	    current: string;
+	    latest: string;
+	    newer: boolean;
+	    comparable: boolean;
+	    url: string;
+	    checkedMs: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.newer = source["newer"];
+	        this.comparable = source["comparable"];
+	        this.url = source["url"];
+	        this.checkedMs = source["checkedMs"];
+	    }
+	}
 
 }
 
@@ -1028,6 +1052,7 @@ export namespace config {
 	    MinimizeToTray: boolean;
 	    Autostart: boolean;
 	    TrayNoticeShown: boolean;
+	    UpdateCheck: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new UIConfig(source);
@@ -1039,6 +1064,7 @@ export namespace config {
 	        this.MinimizeToTray = source["MinimizeToTray"];
 	        this.Autostart = source["Autostart"];
 	        this.TrayNoticeShown = source["TrayNoticeShown"];
+	        this.UpdateCheck = source["UpdateCheck"];
 	    }
 	}
 	export class LoggingConfig {

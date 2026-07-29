@@ -1,17 +1,17 @@
 import {ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react'
 import {
-  AutostartEnabled, BrowseMMDB, CreatorAvatar, CreatorInfo, FirewallRepair, FirewallStatus, GeoStatus, GetConfig,
+  AutostartEnabled, BrowseMMDB, CheckForUpdate, CreatorAvatar, CreatorInfo, FirewallRepair, FirewallStatus, GeoStatus, GetConfig,
   InstallService, OpenConfigDir, OpenCreatorURL, OpenExternal,
-  RestartEngine, SaveSettings, ServiceStatus, SetAutostart, SetMinimizeToTray, StartService, StopService, UninstallService,
+  RestartEngine, SaveSettings, ServiceStatus, SetAutostart, SetMinimizeToTray, SetUpdateCheck, StartService, StopService, UninstallService,
 } from '../../wailsjs/go/app/App'
-import {config, geo} from '../../wailsjs/go/models'
+import {app, config, geo} from '../../wailsjs/go/models'
 import {
   Badge, Banner, Button, Card, CopyButton, Disclosure, ErrorBanner, Field, FormRow, Modal,
   PageHeader, SegmentedControl, Select, Skeleton, Switch, TextInput, Toggle, WarnWash,
 } from '../components/ui'
 import {ExportSetupRow, ImportSetupFlow} from '../components/SetupBackup'
 import {IconExternal, IconMonitor, IconMoon, IconRefresh, IconSun} from '../components/icons'
-import {isEngineOff, runStateOf, TRANSPORT_LABEL, UIStatus} from '../state'
+import {fmtRelative, isEngineOff, runStateOf, TRANSPORT_LABEL, UIStatus} from '../state'
 import {StopEngine} from '../../wailsjs/go/app/App'
 import {ThemePref, useTheme} from '../theme'
 import {fxPref, setFxPref} from '../fx'
@@ -308,7 +308,19 @@ export function Settings({status}: {status: UIStatus}) {
             <div className="py-2"><ImportSetupFlow disabled={attached} onDone={reload} /></div>
           </Section>
 
-          <AboutSection status={status} />
+          <AboutSection
+            status={status}
+            updateOn={!!cfg.UI.UpdateCheck}
+            // Immediate, and the staged copy follows, exactly like the tray and
+            // autostart toggles above: a later Save of an unrelated field must
+            // not carry a stale value back over what this already wrote.
+            onUpdateToggle={v => {
+              const next = config.Config.createFrom(JSON.parse(JSON.stringify(cfg)))
+              next.UI.UpdateCheck = v
+              setCfg(next)
+              return SetUpdateCheck(v)
+            }}
+          />
 
           {note && !dirty && <div className="pf-fade text-sm text-[var(--good)]">{note}</div>}
         </div>
@@ -724,8 +736,16 @@ function svcDisplay(svc: string): {label: string; tone: 'good' | 'warn' | 'neutr
 }
 
 /** AboutSection: creator credit with a small GitHub avatar (weekly-cached by
- * the backend) and a link out to the profile. */
-function AboutSection({status}: {status: UIStatus}) {
+ * the backend), a link out to the profile, and the release check.
+ *
+ * The release check lives here and NOT under Telemetry, whose subtitle promises
+ * "nothing is sent anywhere" — a switch that makes an outbound call cannot sit
+ * under that sentence without making it false. About is where this build's own
+ * identity is already stated, and asking whether a newer one exists is a
+ * question about exactly that. */
+function AboutSection({status, updateOn, onUpdateToggle}: {
+  status: UIStatus; updateOn: boolean; onUpdateToggle: (v: boolean) => Promise<void>
+}) {
   const [avatar, setAvatar] = useState('')
   const [info, setInfo] = useState<{name: string; url: string}>({name: 'xeri', url: 'https://github.com/xeri'})
   useEffect(() => {
@@ -757,8 +777,88 @@ function AboutSection({status}: {status: UIStatus}) {
       <FormRow label="Version">
         <span className="select-text text-sm tabular-nums text-[var(--text-2)]">{status.version} · pid {status.pid} · {status.mode}</span>
       </FormRow>
+      <Divider />
+      <Toggle
+        checked={updateOn}
+        onChange={v => { onUpdateToggle(v).catch(() => {}) }}
+        label="Check for new releases"
+        hint="Off by default. Asks GitHub once a day whether a newer version was published — nothing about you, this machine, or your tunnels is sent, and nothing installs itself. GitHub sees only that some copy asked, from this IP address."
+      />
+      <UpdateRow on={updateOn} />
     </Section>
   )
+}
+
+/** UpdateRow: the release check's states — asking, a newer version, up to date,
+ * nothing published yet, and a failure that says so.
+ *
+ * Off renders nothing at all rather than an unknown: a row is a report, and
+ * there is nothing to report about a question that was never asked.
+ *
+ * The verdict and the fact are separated on purpose. `comparable` false means
+ * the two version strings could not be ranked (a hand-built binary, a tag
+ * shaped like nothing) — so the tag is shown as a plain fact with no badge,
+ * because "Up to date" there would be the one confident lie this feature is
+ * built to avoid. */
+function UpdateRow({on}: {on: boolean}) {
+  const [info, setInfo] = useState<app.UpdateInfo | null>(null)
+  const [err, setErr] = useState('')
+  const [asking, setAsking] = useState(false)
+
+  useEffect(() => {
+    if (!on) { setInfo(null); setErr(''); return }
+    // Guarded against a toggle flipped twice quickly: the first answer must not
+    // land after the second and describe a state that is no longer current.
+    let live = true
+    setAsking(true); setErr('')
+    CheckForUpdate()
+      .then(i => { if (live) setInfo(i) })
+      .catch(e => { if (live) setErr(String(e)) })
+      .finally(() => { if (live) setAsking(false) })
+    return () => { live = false }
+  }, [on])
+
+  if (!on) return null
+  if (asking) return <FormRow label="Releases"><Skeleton className="h-4 w-24" /></FormRow>
+  if (err) {
+    return (
+      <FormRow label="Releases" hint={err}>
+        <Badge tone="warn">Could not check</Badge>
+      </FormRow>
+    )
+  }
+  if (!info) return null
+  if (!info.latest) {
+    return <FormRow label="Releases" hint="Nothing has been published yet.">
+      <span className="text-sm text-[var(--text-3)]">—</span>
+    </FormRow>
+  }
+  const checked = `Checked ${fmtRelative(info.checkedMs)}.`
+  if (info.newer) {
+    return (
+      <FormRow label="Releases" hint={`${info.latest} is newer than this build. ${checked}`}>
+        {/* Ghost, not primary. An available update is worth saying, not worth
+            the one accent-filled call to action on a page whose real work is
+            elsewhere — and nothing here installs anything, so the button only
+            opens a page. */}
+        <Button variant="ghost" size="sm" onClick={() => OpenExternal(info.url)}>
+          View {info.latest} <IconExternal size={13} />
+        </Button>
+      </FormRow>
+    )
+  }
+  if (!info.comparable) {
+    return (
+      <FormRow label="Releases" hint={`This build's version can't be compared to a release tag, so there is no verdict here. ${checked}`}>
+        <Button variant="ghost" size="sm" onClick={() => OpenExternal(info.url)}>
+          Latest is {info.latest} <IconExternal size={13} />
+        </Button>
+      </FormRow>
+    )
+  }
+  return <FormRow label="Releases" hint={`${info.latest} is the newest published release. ${checked}`}>
+    <Badge tone="good">Up to date</Badge>
+  </FormRow>
 }
 
 /** MmdbField: a GeoLite2 database path with a Browse picker and a live status
