@@ -158,13 +158,66 @@ button { cursor: pointer; font: inherit; }
 }
 
 /* Keyboard focus blooms: a jade-or-current ring standing 3px off the control,
-   the way a lure's glow stands off its body. Mouse clicks stay clean. */
+   the way a lure's glow stands off its body. Mouse clicks stay clean.
+
+   The ring runs SOLID on --focus-ring (tokens.css) — it is not mixed into the
+   water. The old `color-mix(--accent 55%, transparent)` composited down to
+   2.0:1 against --panel-3 on dark and 1.9:1 against --bg-base on light, both
+   well under WCAG 2.2's 3:1 floor for a non-text indicator; solid measures
+   4.4:1 and 4.1:1 in those same worst cases. Character is unchanged: same
+   ramp, same hue, still 3px off the body.
+
+   Inner edges agree, they do not duplicate: a focused .pf-control also takes
+   the accent through its rim (glass.css .pf-control:focus-visible::before),
+   which is the lit body inside this ring.
+
+   KNOWN, not fixed here: outline-offset paints outside the border box, so a
+   control sitting flush against an overflow-hidden surface (.pf-card,
+   .pf-island, modal panels, the Activity log well) has the outer edge of its
+   ring clipped by that surface. The fix is per-surface — interior padding at
+   least the offset, or moving the ring onto a box-shadow each control opts
+   into — not something a base rule can reach. */
 :focus { outline: none; }
 :focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
-  border-radius: var(--r-sm);
 }
+
+/* The rounding is a FALLBACK, not an override. An outline already follows the
+   element's own border-radius, so this only has to serve elements that declare
+   none. It lives in the `base` cascade layer (Tailwind declares the order
+   `theme, base, components, utilities`) so every rounded-* utility and every
+   unlayered pf-* recipe outranks it. Unlayered — as it was — this one
+   declaration flattened every authored radius the moment an element took
+   focus: a Pill's --r-chip ring squared off to --r-sm. */
+@layer base {
+  :focus-visible { border-radius: var(--r-sm); }
+}
+
+/* Skip link: the document's first tab stop, parked above the window until it
+   takes focus, then surfacing at the top-left over the chrome. It is `fixed`,
+   so it never claims a cell of the Shell grid it leads into, and it is moved
+   rather than clipped to 1px — a full-size, real link the whole time, only
+   out of the way. The slide needs no JS gate: the reduced-motion kill switch
+   (motion.css) zeroes the duration and the link simply appears. */
+.pf-skip {
+  position: fixed;
+  top: 0;
+  left: var(--titlebar-inset);
+  z-index: 30; /* over the sidebar (10), band glow (15) and title bar (20) */
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-btn);
+  background: var(--panel-2);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.pf-skip:focus { transform: translateY(var(--titlebar-inset)); }
 
 /* Frameless window drag regions (Wails --wails-draggable). */
 .pf-drag { --wails-draggable: drag; }

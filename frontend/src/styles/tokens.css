@@ -102,6 +102,18 @@
   --mode-glow: #1c8bff;
   --mode-glow-2: #1552d0;
 
+  /* The keyboard focus ring (base.css :focus-visible). Deliberately the ramp's
+     LIT stop rather than --accent: the ring has to clear WCAG 2.2's 3:1
+     non-text floor against every surface it can land on, and --accent-hover is
+     the one step of each ramp that moves AWAY from the water in both themes —
+     brighter on the abyss, deeper in the shallows. Measured worst cases at
+     full opacity: 4.4:1 over --panel-3 (dark, gateway) and 4.1:1 over
+     --bg-base (light, agent). It rides --accent-hover rather than restating
+     four values, so retuning that token means re-measuring this floor.
+     Declared once: the role/theme blocks below remap --accent-hover on :root,
+     and this var() resolves against :root's own computed value. */
+  --focus-ring: var(--accent-hover);
+
   /* Role swatches — fixed per-role hues for surfaces that must show a role
      that is NOT the active one (wizard role cards, identity strip, emblems).
      The active role's ramp still comes from var(--accent). */

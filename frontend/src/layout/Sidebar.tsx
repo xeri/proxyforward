@@ -43,7 +43,10 @@ export function Sidebar({status, nav, onNav, onPair}: {
           control that performs that swap (RoleSwitcher). */}
       <RoleSwitcher status={status} onPair={onPair} />
 
-      <nav className="relative flex-1 px-2 pt-4">
+      {/* Named: the rail sits inside the "Sidebar" complementary landmark
+          (Shell.tsx), and Settings is a second nav below it — "navigation"
+          twice over tells a screen reader nothing. */}
+      <nav aria-label="Screens" className="relative flex-1 px-2 pt-4">
         {/* Sliding active indicator: an internal accent glow, not a solid
             pill (main rail only; Settings styles itself). */}
         <div
@@ -62,9 +65,9 @@ export function Sidebar({status, nav, onNav, onPair}: {
         </div>
       </nav>
 
-      <div className="px-2 pb-1">
+      <nav aria-label="Settings" className="px-2 pb-1">
         <NavButton item={nav_settings} on={nav === 'settings'} onNav={onNav} standalone />
-      </div>
+      </nav>
 
       <div className="pf-sep mx-2" aria-hidden />
       <div className="space-y-2 px-3 py-3 text-sub text-[var(--text-3)]">
@@ -120,6 +123,9 @@ function NavButton({item, on, onNav, standalone = false}: {
   return (
     <button
       onClick={() => onNav(item.id)}
+      // The lit lure is the only thing marking the current screen, and it is
+      // color plus a glow — neither reaches a screen reader.
+      aria-current={on ? 'page' : undefined}
       title={`${item.label} — Ctrl+${item.shortcut}`}
       style={{height: ITEM_H}}
       className={`group pf-press flex w-full items-center gap-2.5 rounded-[var(--r-btn)] px-3 text-sm transition-colors duration-200 ${

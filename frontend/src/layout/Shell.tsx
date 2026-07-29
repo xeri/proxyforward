@@ -8,6 +8,11 @@ import {useRubberBand} from '../rubberband'
 // as the design system's "underlap" (no CSS var: used in style calc below).
 const UNDERLAP = 10
 
+// The skip link's target. <main> carries it and tabIndex={-1} so focus can
+// actually land there — it is also the scroll container, so a keyboard user
+// who skips the rail can immediately page through the screen.
+const MAIN_ID = 'pf-main'
+
 /**
  * The app frame for a frameless window. The sidebar is a full-height pane of
  * heavy glass; the title bar floats beside it as a detached island inset from
@@ -17,6 +22,11 @@ const UNDERLAP = 10
  * --chrome-top, so scrolled content passes beneath the island — through the
  * visible gutters around it — and comes out diffused: the floating glass
  * visibly frosts whatever slides underneath.
+ *
+ * All three landmarks are named. A screen reader lists them by role, so three
+ * unlabelled ones read as "complementary / banner / main" with nothing to tell
+ * them apart; the labels are what the rail, the title bar and the screen are
+ * actually called out loud.
  */
 export function Shell({sidebar, titlebar, children}: {
   sidebar?: ReactNode
@@ -102,17 +112,32 @@ export function Shell({sidebar, titlebar, children}: {
         gridTemplateColumns: sidebar ? 'var(--sidebar-w) 1fr' : '1fr',
       }}
     >
+      {/* First tab stop in the document, and out of flow (base.css .pf-skip is
+          fixed) so it claims no grid cell. preventDefault + focus() rather than
+          letting the hash navigate: the frameless window has no address bar to
+          show a URL, and nothing else in the app writes location. */}
+      <a
+        className="pf-skip"
+        href={`#${MAIN_ID}`}
+        onClick={e => {
+          e.preventDefault()
+          document.getElementById(MAIN_ID)?.focus()
+        }}
+      >
+        Skip to main content
+      </a>
       {/* The swarm layer: fixed and first, so everything else paints over it
           and the trench glass smears it (base.css atmosphere stack). */}
       <Plankton />
       {sidebar && (
-        <aside className="pf-sheet relative z-10 row-span-2 min-h-0">
+        <aside aria-label="Sidebar" className="pf-sheet relative z-10 row-span-2 min-h-0">
           {sidebar}
         </aside>
       )}
       {/* The strip itself ignores the pointer so content scrolling through
           the gutters stays interactive; only the island is live. */}
       <header
+        aria-label="Title bar"
         className="pointer-events-none relative z-20 flex"
         style={{
           gridRow: 1,
@@ -133,6 +158,9 @@ export function Shell({sidebar, titlebar, children}: {
           the standard way these ship visibly broken. It changes no ownership: ownerFor
           breaks at the page before it reads overscroll-behavior. */}
       <main
+        id={MAIN_ID}
+        tabIndex={-1}
+        aria-label="Main content"
         className="relative min-h-0 min-w-0 overflow-y-auto overscroll-y-none"
         style={{
           gridRow: '1 / span 2',
