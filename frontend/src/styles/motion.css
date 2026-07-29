@@ -240,9 +240,20 @@
   50% { opacity: 1; }
 }
 .pf-skeleton {
-  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--panel-2) 75%, var(--panel-3));
   animation: pf-skeleton-breathe 1.6s ease-in-out infinite;
+}
+
+/* The rounding is a DEFAULT, not part of the material — same split, and the
+   same reason, as the :focus-visible radius in base.css. Unlayered it beat
+   every `rounded-*` utility on the element wearing it, so all 35 authored
+   skeleton radii across Agents/Analytics/Players/Settings/Tunnels/GroupsPanel
+   computed to --r-sm: an avatar placeholder asking to be a circle came out a
+   rounded square, and the row bars asking to be pills came out bars. A
+   skeleton's job is to match the geometry of the thing it stands in for, so
+   the consumer has to win. */
+@layer base {
+  .pf-skeleton { border-radius: var(--r-sm); }
 }
 
 /* -----------------------------------------------------------------------
