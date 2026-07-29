@@ -1,23 +1,39 @@
 import {useEffect, useMemo, useRef, useState} from 'react'
 import {ExportDiagnostics, LogsSince} from '../../wailsjs/go/app/App'
 import {logging} from '../../wailsjs/go/models'
-import {Badge, Button, Checkbox, EmptyState, PageHeader, Select, TextInput, copyText} from '../components/ui'
+import {Badge, Button, Checkbox, EmptyState, PageHeader, Select, Skeleton, TextInput, copyText} from '../components/ui'
 import {IconExternal, IconLogs, IconTerminal} from '../components/icons'
 
 type Entry = logging.Entry
 const CAP = 2000
 const LEVELS = ['debug', 'info', 'warn', 'error']
 
+// How far off the bottom still counts as "at the tail". A scroll measurement,
+// so it is px and deliberately does NOT ride --ui-scale; it only has to absorb
+// the sub-pixel remainder a fractional device-pixel scrollHeight leaves behind.
+const TAIL_SLACK = 8
+
 /** Activity: a live tail of the engine's log ring, filterable by level and
  * text, with copy and one-click diagnostics export. */
 export function Activity({attached}: {attached: boolean}) {
   const [entries, setEntries] = useState<Entry[]>([])
+  // An empty ring and an unanswered first poll look identical from `entries`
+  // alone, and the poll is 250 ms away — without this flag the well opens on
+  // "No log lines" and then contradicts itself.
+  const [loaded, setLoaded] = useState(false)
   const [level, setLevel] = useState('info')
   const [query, setQuery] = useState('')
   const [follow, setFollow] = useState(true)
   const [exportMsg, setExportMsg] = useState('')
   const lastSeq = useRef(0)
   const bodyRef = useRef<HTMLDivElement>(null)
+  // Whether the reader is parked at the tail. Kept in a ref, not state: it is
+  // read by an effect and written on every scroll frame, and re-rendering the
+  // whole log that often is exactly what the well cannot afford. Two writers,
+  // deliberately: the poll (authoritative, see below) and the scroll handler,
+  // which keeps it fresh for the renders no poll drives — a level or filter
+  // change while nothing is arriving.
+  const atTail = useRef(true)
 
   // Poll the ring for new lines at 4 Hz.
   useEffect(() => {
@@ -26,10 +42,22 @@ export function Activity({attached}: {attached: boolean}) {
       try {
         const fresh = await LogsSince(lastSeq.current)
         if (alive && fresh.length) {
+          // Where the reader stands, read BEFORE the new lines land: once they
+          // are in the DOM the distance from the bottom already counts them,
+          // and the scroll handler alone loses the race (a scroll event is
+          // dispatched a frame later, so a poll landing in that gap would read
+          // a stale "at the tail" and yank the reader back).
+          const el = bodyRef.current
+          atTail.current = !el || el.scrollHeight - el.scrollTop - el.clientHeight <= TAIL_SLACK
           lastSeq.current = fresh[fresh.length - 1].seq
           setEntries(prev => [...prev, ...fresh].slice(-CAP))
         }
       } catch { /* engine may be mid-restart */ }
+      // Answered or refused, the first poll has landed — an engine that is
+      // mid-restart must still retire the skeleton, or it never comes back.
+      // Re-setting an unchanged `true` every 250 ms is a React bail-out, not
+      // a render.
+      finally { if (alive) setLoaded(true) }
     }
     pull()
     const t = setInterval(pull, 250)
@@ -47,10 +75,18 @@ export function Activity({attached}: {attached: boolean}) {
     })
   }, [entries, level, query])
 
-  // Auto-scroll to newest when following.
+  // Auto-scroll to newest when following — but only from the tail. Chasing it
+  // unconditionally means a reader who scrolled up into history is yanked back
+  // to the bottom every 250 ms, which makes the log unreadable by keyboard.
+  // The gate is where the reader stood before this batch (atTail), never a
+  // measurement taken here: by now the new lines are laid out, so "distance
+  // from the bottom" has already grown for someone who never moved. Ticking
+  // Follow re-arms it, so the checkbox still means "take me to the end".
   useEffect(() => {
-    if (follow && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
-  }, [filtered, follow])
+    const el = bodyRef.current
+    if (!loaded || !follow || !el || !atTail.current) return
+    el.scrollTop = el.scrollHeight
+  }, [filtered, follow, loaded])
 
   const copyAll = () => copyText(filtered.map(fmtLine).join('\n'))
   const doExport = async () => {
@@ -82,7 +118,7 @@ export function Activity({attached}: {attached: boolean}) {
             ...LEVELS.map(l => ({value: l, label: l[0].toUpperCase() + l.slice(1)})),
           ]} /></div>
           <div className="min-w-40 flex-1"><TextInput value={query} onChange={setQuery} placeholder="Filter messages…" /></div>
-          <Checkbox checked={follow} onChange={setFollow} label="Follow" />
+          <Checkbox checked={follow} onChange={v => { setFollow(v); if (v) atTail.current = true }} label="Follow" />
           <Button variant="ghost" size="sm" onClick={copyAll}>Copy</Button>
           <span className="ml-1 hidden text-xs tabular-nums text-[var(--text-3)] sm:inline">
             {filtered.length} of {entries.length}
@@ -92,15 +128,30 @@ export function Activity({attached}: {attached: boolean}) {
         {/* The well bounces at its ends; the glow is its sibling so it neither
             scrolls nor rides the band's transform (rubberband.ts). */}
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <div ref={bodyRef} className="pf-well-flush relative min-h-0 flex-1 select-text overflow-y-auto overscroll-y-contain px-3 py-2 font-mono text-body leading-relaxed">
+          {/* role="log": the well is an append-only record, so a screen reader
+              announces arriving lines politely instead of re-reading the ring.
+              onScroll records where the reader left off (see the follow gate). */}
+          <div
+            ref={bodyRef}
+            role="log"
+            aria-label="Engine log"
+            aria-busy={!loaded}
+            onScroll={() => {
+              const el = bodyRef.current
+              if (el) atTail.current = el.scrollHeight - el.scrollTop - el.clientHeight <= TAIL_SLACK
+            }}
+            className="pf-well-flush relative min-h-0 flex-1 select-text overflow-y-auto overscroll-y-contain px-3 py-2 font-mono text-body leading-relaxed"
+          >
             <div data-band-content>
-              {filtered.length === 0
-                ? (attached && entries.length === 0
-                  ? <EmptyState icon={<IconTerminal size={26} />} title="The service keeps its own logs"
-                      hint="This window views a background service, which logs to its own files. Export diagnostics to collect them." />
-                  : <EmptyState icon={<IconLogs size={26} />} title="No log lines"
-                      hint="Activity streams here as the engine runs." />)
-                : filtered.map(e => <LogLine key={e.seq} e={e} />)}
+              {!loaded
+                ? <LogSkeleton />
+                : filtered.length === 0
+                  ? (attached && entries.length === 0
+                    ? <EmptyState icon={<IconTerminal size={26} />} title="The service keeps its own logs"
+                        hint="This window views a background service, which logs to its own files. Export diagnostics to collect them." />
+                    : <EmptyState icon={<IconLogs size={26} />} title="No log lines"
+                        hint="Activity streams here as the engine runs." />)
+                  : filtered.map(e => <LogLine key={e.seq} e={e} />)}
             </div>
           </div>
           <div className="pf-band-glow absolute inset-0 z-10" data-band-glow aria-hidden />
@@ -128,6 +179,41 @@ function LogLine({e}: {e: Entry}) {
         {e.msg}
         {e.attrs && <span className="text-[var(--text-3)]"> {e.attrs}</span>}
       </span>
+    </div>
+  )
+}
+
+// Message-bar widths, as a fraction of the message column. Irregular on
+// purpose: equal bars read as a comb, not as sediment settling.
+const SKELETON_BARS = [
+  '58%', '81%', '43%', '92%', '36%', '70%', '64%',
+  '88%', '49%', '77%', '33%', '85%', '55%', '73%',
+  '40%', '95%', '61%', '46%', '79%', '52%',
+]
+
+/** LogSkeleton: the well before the first poll answers — LogLine's geometry,
+ * to the row. Same flex box and py-0.5; a time column of 8 mono glyphs (ch, so
+ * it is exactly the width of "12:34:56" in this face); the level chip at its
+ * real 1rem × 3rem box and --r-xs corners; a flex-1 message bar.
+ *
+ * The row height is one line box of the well's own type — 1lh resolves against
+ * the inherited text-body × leading-relaxed — plus py-0.5, which is what a real
+ * LogLine measures (the chip's shorter box sits inside it, so the text line is
+ * what sets the height). Relative units throughout, so --ui-scale carries it
+ * and the rows never shift when the real lines land.
+ *
+ * The chip radius has to be an inline style: .pf-skeleton (motion.css) sets its
+ * own --r-sm unlayered, which outranks a rounded-* utility. */
+function LogSkeleton() {
+  return (
+    <div aria-hidden>
+      {SKELETON_BARS.map((w, i) => (
+        <div key={i} className="flex h-[calc(1lh+0.25rem)] items-center gap-2 py-0.5">
+          <Skeleton className="h-2.5 w-[8ch] shrink-0" />
+          <Skeleton className="h-4 w-12 shrink-0" style={{borderRadius: 'var(--r-xs)'}} />
+          <div className="min-w-0 flex-1"><Skeleton className="h-2.5" style={{width: w}} /></div>
+        </div>
+      ))}
     </div>
   )
 }
