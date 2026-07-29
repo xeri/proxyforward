@@ -74,8 +74,8 @@ flowchart LR
 ```
 
 One `proxyforward.exe` runs in **either role** — as a WebView2 desktop app (Wails + React
-19), a `--headless` console process, or a Windows service. Nothing on the Minecraft
-machine's router changes; only the gateway forwards ports.
+19), a console process, or a Windows service. Nothing on the Minecraft machine's router
+changes; only the gateway forwards ports.
 
 ## Download
 
