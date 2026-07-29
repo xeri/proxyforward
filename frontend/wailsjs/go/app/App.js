@@ -22,6 +22,10 @@ export function ApproveGatewayProposal(arg1) {
   return window['go']['app']['App']['ApproveGatewayProposal'](arg1);
 }
 
+export function AutostartEnabled() {
+  return window['go']['app']['App']['AutostartEnabled']();
+}
+
 export function BandwidthHistory(arg1, arg2) {
   return window['go']['app']['App']['BandwidthHistory'](arg1, arg2);
 }
@@ -220,6 +224,10 @@ export function Sessions(arg1) {
 
 export function SetAgentScope(arg1, arg2, arg3) {
   return window['go']['app']['App']['SetAgentScope'](arg1, arg2, arg3);
+}
+
+export function SetAutostart(arg1) {
+  return window['go']['app']['App']['SetAutostart'](arg1);
 }
 
 export function SetMinimizeToTray(arg1) {

@@ -21,6 +21,8 @@ export function ApproveAgentProposal(arg1:string,arg2:string):Promise<void>;
 
 export function ApproveGatewayProposal(arg1:string):Promise<void>;
 
+export function AutostartEnabled():Promise<boolean>;
+
 export function BandwidthHistory(arg1:number,arg2:number):Promise<stats.HistoryResult>;
 
 export function BrowseMMDB(arg1:string):Promise<string>;
@@ -120,6 +122,8 @@ export function SessionTimeline(arg1:number):Promise<analytics.SessionTimeline>;
 export function Sessions(arg1:analytics.SessionsQuery):Promise<analytics.SessionsPage>;
 
 export function SetAgentScope(arg1:string,arg2:Array<number>,arg3:Array<string>):Promise<void>;
+
+export function SetAutostart(arg1:boolean):Promise<void>;
 
 export function SetMinimizeToTray(arg1:boolean):Promise<void>;
 

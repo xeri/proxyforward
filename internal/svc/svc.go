@@ -1,6 +1,7 @@
 // Package svc owns proxyforward's Windows integration surface: firewall
 // rule management, the elevation helper that runs single privileged tasks in
-// a scoped child process, and (see service.go) Windows service mode.
+// a scoped child process, sign-in autostart (see autostart_windows.go), and
+// (see service.go) Windows service mode.
 package svc
 
 import "errors"
@@ -9,6 +10,11 @@ import "errors"
 // by program (not port) means tunnel port changes never need another UAC
 // prompt.
 const FirewallRuleName = "proxyforward"
+
+// AutostartValueName is our value under the per-user Run key, and it is also
+// the entry's identity: reconciling only ever touches this one name, so a Run
+// key full of other people's programs is never disturbed.
+const AutostartValueName = "proxyforward"
 
 // ErrUnsupported is returned by Windows-only operations on other platforms.
 var ErrUnsupported = errors.New("svc: only supported on Windows")

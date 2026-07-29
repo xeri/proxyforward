@@ -11,19 +11,6 @@
 
 Ordered by user-visible impact. "Fix" describes the smallest on-system change.
 
-## Honesty (UI promises > backend truth)
-
-1. **Stub controls promise unimplemented behavior** — the top item; see CLAUDE.md
-   "Reality check" for the full inventory. Down to one after the honesty pass wired
-   Offline MOTD, the bandwidth cap, Prometheus, and the Transport selector, the
-   tray shipped for real ("Close to tray" in Settings is honest now), and the
-   tunnel Protocol picker became real when udp tunnels landed (it was a one-option
-   Select with a no-op onChange):
-   - Autostart ("Start on login") — stored (`config.go Autostart`), consumed by
-     nothing; the honesty pass removed its toggle, so today the promise is absence.
-   - Fix: implement it (registry Run key or startup-folder shortcut), or delete the
-     config field. Decide with the human (scope call — escalation trigger).
-
 ## Small judgment calls
 
 16. **The analytics DB is role-blind, and the sidebar can now switch roles**

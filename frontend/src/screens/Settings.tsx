@@ -1,8 +1,8 @@
 import {ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react'
 import {
-  BrowseMMDB, CreatorAvatar, CreatorInfo, FirewallRepair, FirewallStatus, GeoStatus, GetConfig,
+  AutostartEnabled, BrowseMMDB, CreatorAvatar, CreatorInfo, FirewallRepair, FirewallStatus, GeoStatus, GetConfig,
   InstallService, OpenConfigDir, OpenCreatorURL, OpenExternal,
-  RestartEngine, SaveSettings, ServiceStatus, SetMinimizeToTray, StartService, StopService, UninstallService,
+  RestartEngine, SaveSettings, ServiceStatus, SetAutostart, SetMinimizeToTray, StartService, StopService, UninstallService,
 } from '../../wailsjs/go/app/App'
 import {config, geo} from '../../wailsjs/go/models'
 import {
@@ -288,6 +288,17 @@ export function Settings({status}: {status: UIStatus}) {
               setCfg(next)
               SetMinimizeToTray(v).catch(e => setErr(String(e)))
             }}
+            // Immediate, and the staged copy follows for the same reason the
+            // tray one does — with teeth here: SaveSettings reconciles the Run
+            // key from this document, so a stale staged value would undo the
+            // toggle on the next unrelated save. The promise is returned so the
+            // section can show the failure beside the control that caused it.
+            onAutostartToggle={v => {
+              const next = config.Config.createFrom(JSON.parse(JSON.stringify(cfg)))
+              next.UI.Autostart = v
+              setCfg(next)
+              return SetAutostart(v)
+            }}
           />
 
           <Section id="backup" title="Backup" subtitle="Move this setup to another machine — pairing, tunnels, keys, and statistics travel in one file.">
@@ -542,17 +553,23 @@ function ForceStopRow({status}: {status: UIStatus}) {
 }
 
 /** SystemSection: Windows integration + the config file + build identity. */
-function SystemSection({status, trayOn, onTrayToggle}: {
+function SystemSection({status, trayOn, onTrayToggle, onAutostartToggle}: {
   status: UIStatus; trayOn: boolean; onTrayToggle: (v: boolean) => void
+  onAutostartToggle: (v: boolean) => Promise<void>
 }) {
   const [fw, setFw] = useState<boolean | null>(null)
   const [svc, setSvc] = useState<string>('…')
+  // The startup entry is read from the registry, not from the config document:
+  // it is shared state an uninstaller or another install can change, so the
+  // machine answers for it. undefined = still asking, null = could not read.
+  const [auto, setAuto] = useState<boolean | null | undefined>(undefined)
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
 
   const refresh = () => {
     FirewallStatus().then(setFw).catch(() => setFw(null))
     ServiceStatus().then(setSvc).catch(() => setSvc('unknown'))
+    AutostartEnabled().then(setAuto).catch(() => setAuto(null))
   }
   useEffect(() => { refresh() }, [])
 
@@ -562,6 +579,13 @@ function SystemSection({status, trayOn, onTrayToggle}: {
     finally { setBusy(''); refresh() }
   }
   const s = svcDisplay(svc)
+
+  // Optimistic, then confirmed: the switch answers the pointer immediately and
+  // the re-read puts it back if the registry refused.
+  const toggleAuto = (v: boolean) => {
+    setAuto(v); setErr('')
+    onAutostartToggle(v).catch(e => setErr(String(e))).finally(refresh)
+  }
 
   return (
     <Section id="system" title="System" subtitle="Windows integration and where this install lives.">
@@ -603,11 +627,31 @@ function SystemSection({status, trayOn, onTrayToggle}: {
           </Banner>
         </div>
       )}
-      {/* The tray preference lives with the other Windows integration, and
-          only where a tray can exist: an attached viewer's close never touches
-          the daemon's run, so there is nothing to prefer. */}
+      {/* Both preferences below live with the other Windows integration, and
+          only where this process owns the run: an attached viewer's close never
+          touches the daemon, and a daemon someone else starts needs no sign-in
+          from us — so neither is a preference this window gets to hold.
+
+          Start on login sits directly under the service because they answer the
+          same question — what brings proxyforward up without a person launching
+          it — and the service is the better answer: it starts at boot, with
+          nobody signed in, and survives logout. So when the service is
+          installed this says so rather than quietly offering a second launch.
+          It stays operable while it is ON, though: someone who already has both
+          must be able to turn this one off, and a disabled switch would trap
+          them in the overlap it is warning about. */}
       {status.mode !== 'attached' && (
         <>
+          <Divider />
+          <WarnWash on={s.installed && auto === true}>
+            <Toggle
+              checked={auto === true}
+              onChange={toggleAuto}
+              disabled={auto == null || (s.installed && auto === false)}
+              label="Start on login"
+              hint={autostartHint(auto, s.installed)}
+            />
+          </WarnWash>
           <Divider />
           <Toggle
             checked={trayOn}
@@ -645,6 +689,23 @@ function SystemSection({status, trayOn, onTrayToggle}: {
       {err && <div className="mt-2"><ErrorBanner message={err} onDismiss={() => setErr('')} /></div>}
     </Section>
   )
+}
+
+/** autostartHint writes the four states of the sign-in-launch row: still
+ * asking, unreadable, overlapping the Windows service (on or off), and the
+ * plain case. The overlap wording is deliberately concrete about what the
+ * second launch actually does — it does not start a second tunnel, it opens a
+ * window that attaches to the running one — because "conflict" would send
+ * people hunting for a problem the pipe already solved. */
+function autostartHint(auto: boolean | null | undefined, serviceInstalled: boolean): string {
+  if (auto === undefined) return 'Checking the Windows startup entry…'
+  if (auto === null) return 'The Windows startup entry could not be read, so this cannot be changed here.'
+  if (serviceInstalled) {
+    return auto
+      ? 'The Windows service already starts the tunnel at boot, with nobody signed in — this only adds a window that attaches to it. Turn it off, or uninstall the service.'
+      : 'Not needed: the Windows service already starts the tunnel at boot, with nobody signed in.'
+  }
+  return 'Signing in to Windows launches proxyforward, and the tunnel starts with it.'
 }
 
 /** svcDisplay normalizes the backend's raw service state ("running",

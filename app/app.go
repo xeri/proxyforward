@@ -877,7 +877,23 @@ func (a *App) SaveSettings(cfg config.Config) error {
 		return err
 	}
 	*a.cfg = cfg
-	return a.cfg.Save(a.configPath)
+	if err := a.cfg.Save(a.configPath); err != nil {
+		return err
+	}
+	// Autostart is the one setting whose effect lives outside this file, so the
+	// save is only half of it. Reconciling here (not only from the toggle) is
+	// what makes the promise durable: a Run entry an uninstaller removed, or an
+	// install that moved, is repaired the next time the user saves anything,
+	// instead of a toggle that reads "on" and does nothing. It writes only when
+	// the registry actually disagrees, so the usual cost is one read.
+	//
+	// A failure is logged rather than returned: the document IS saved, and
+	// reporting the save as failed would be the less true of the two answers.
+	// ErrUnsupported is the non-Windows build saying so, not a fault.
+	if _, err := svc.SetAutostart(a.cfg.UI.Autostart); err != nil && !errors.Is(err, svc.ErrUnsupported) {
+		a.logger.Warn("could not reconcile the windows startup entry", "err", err)
+	}
+	return nil
 }
 
 // SetMinimizeToTray persists the close-to-tray preference. Like SetTheme it
@@ -1183,6 +1199,31 @@ func (a *App) FirewallRepair() error {
 // ServiceStatus reports the Windows service state.
 func (a *App) ServiceStatus() (string, error) {
 	return svc.ServiceStatus()
+}
+
+// AutostartEnabled reports whether signing in launches proxyforward, read from
+// the registry rather than from the config document. The Run key is shared
+// state — an uninstaller can remove the value, another install can overwrite it
+// — so the machine, not our memory of it, is what the toggle shows.
+func (a *App) AutostartEnabled() (bool, error) {
+	return svc.AutostartEnabled()
+}
+
+// SetAutostart records the sign-in-launch preference and reconciles the Run key
+// with it. No elevation: the entry lives in the user's own hive, which is the
+// whole reason this exists beside the Windows service rather than inside it.
+//
+// Registry first, config second. The config field is a record of what the
+// registry was made to say; writing it before the write that might fail would
+// record a promise the machine never took.
+func (a *App) SetAutostart(on bool) error {
+	if _, err := svc.SetAutostart(on); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfg.UI.Autostart = on
+	return a.cfg.Save(a.configPath)
 }
 
 // InstallService installs the Windows service via the elevation helper. The

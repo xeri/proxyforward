@@ -120,6 +120,22 @@
 //                      with players shows the disconnect confirm, without them
 //                      it quits. notice → the notice hasn't been seen, so an
 //                      uneventful X shows the one-time tray notice instead.
+//   &service=running|stopped
+//                    — the Windows service is installed and in that state.
+//                      No axis → not installed. Install/Start/Stop/Uninstall
+//                      mutate it live, so the badge and the
+//                      installed-but-stopped warning follow the buttons.
+//   &autostart=on    — the HKCU Run entry exists, so Settings → System reads
+//                      "Start on login" as on. No axis → off. Compose with
+//                      &service to reach the overlap the row has to explain:
+//                      &service=stopped alone → the row is disabled (the
+//                      service already answers this question); with
+//                      &autostart=on → both are on, so the row warn-washes and
+//                      stays operable so it can be turned back off. Either
+//                      service state reaches those here; on a real machine a
+//                      running service usually means the GUI attached to it
+//                      instead, and &mode=attached hides this row along with
+//                      Close to tray.
 
 type AnyFn = (...a: any[]) => any
 
@@ -136,6 +152,7 @@ export function installDevMock() {
   const axisFatal = params.get('fatal') === '1'
   const axisStopped = params.get('engine') === 'stopped'
   const axisService = params.get('service') || '' // '' (not installed) | running | stopped
+  const axisAutostart = params.get('autostart') === 'on' // the HKCU Run entry exists
   const axisFresh = params.get('fresh') === '1'
   const axisAnalyticsOff = params.get('analytics') === 'off'
   const axisUnpaired = params.get('paired') === '0'
@@ -722,7 +739,7 @@ export function installDevMock() {
       MaxConnsGlobal: 4096, MaxConnsPerIP: 32, AuthAttemptsPerMin: 10, MaxTunnelsPerAgent: 32},
     Metrics: {PrometheusEnabled: false, PrometheusAddr: '127.0.0.1:9464'},
     Logging: {Level: 'info', FileEnabled: true},
-    UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: axisTray !== 'off', Autostart: false, TrayNoticeShown: axisTray !== 'notice'},
+    UI: {Theme: localStorage.getItem('pf-theme') || 'dark', MinimizeToTray: axisTray !== 'off', Autostart: axisAutostart, TrayNoticeShown: axisTray !== 'notice'},
     Analytics: {RetentionDays: 180, MojangLookups: true, GeoIPCityPath: '', GeoIPASNPath: ''},
   }
   // A machine that has never been paired holds no agent credentials — the
@@ -1205,6 +1222,10 @@ export function installDevMock() {
   let serviceState = axisService === 'running' ? 'running'
     : axisService === 'stopped' ? 'stopped'
       : 'not-installed'
+  // Mutable startup-entry state. The real binding reads the registry, not the
+  // config document, so the mock keeps its own bit and the toggle round-trips
+  // through it — write, then re-read, exactly like the real refresh does.
+  let autostartOn = axisAutostart
 
   const ok = <T,>(v: T) => Promise.resolve(v)
   // Attached mode: a service owns the engine — gated bindings reject exactly
@@ -1452,6 +1473,10 @@ export function installDevMock() {
     UninstallService: () => { serviceState = 'not-installed'; return ok(undefined) },
     StartService: () => { serviceState = 'running'; return ok(undefined) },
     StopService: () => { serviceState = 'stopped'; return ok(undefined) },
+    AutostartEnabled: () => ok(autostartOn),
+    // The real one reconciles the registry and then records the intent in the
+    // config; both halves are mirrored so a later SaveSettings can't revert it.
+    SetAutostart: (v: boolean) => { autostartOn = v; config.UI.Autostart = v; return ok(undefined) },
     MeasureLatency: () => gated(() => new Promise(r => setTimeout(() => {
       const avg = 21 + Math.random() * 6
       r({

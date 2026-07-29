@@ -226,7 +226,14 @@ type LoggingConfig struct {
 type UIConfig struct {
 	Theme          string `toml:"theme"` // dark|light|system
 	MinimizeToTray bool   `toml:"minimize_to_tray"`
-	Autostart      bool   `toml:"autostart"`
+	// Autostart asks Windows to launch proxyforward when this user signs in.
+	// This field is the recorded intent; its effect is a single value under
+	// HKCU's Run key, which the GUI reconciles against this field on every
+	// settings save (app.go SetAutostart / SaveSettings → svc.SetAutostart).
+	// The registry is what actually starts anything, so the two can disagree
+	// between saves — and the reconcile, not a remembered "already on", is what
+	// settles it.
+	Autostart bool `toml:"autostart"`
 	// TrayNoticeShown is set after the user has seen the one-time "closing
 	// minimizes to the tray" notice; it is never shown twice.
 	TrayNoticeShown bool `toml:"tray_notice_shown"`

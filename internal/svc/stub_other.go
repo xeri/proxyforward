@@ -15,3 +15,7 @@ func FirewallRulePresent() (bool, error) { return false, ErrUnsupported }
 func AddFirewallRule() error { return ErrUnsupported }
 
 func RemoveFirewallRule() error { return ErrUnsupported }
+
+func AutostartEnabled() (bool, error) { return false, ErrUnsupported }
+
+func SetAutostart(want bool) (bool, error) { return false, ErrUnsupported }
