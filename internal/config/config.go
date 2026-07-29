@@ -75,14 +75,19 @@ const (
 )
 
 type Config struct {
-	Role      Role            `toml:"role"`
-	Agent     AgentConfig     `toml:"agent"`
-	Gateway   GatewayConfig   `toml:"gateway"`
-	Engine    EngineConfig    `toml:"engine"`
-	Metrics   MetricsConfig   `toml:"metrics"`
-	Logging   LoggingConfig   `toml:"logging"`
-	UI        UIConfig        `toml:"ui"`
-	Analytics AnalyticsConfig `toml:"analytics"`
+	// SchemaVersion is the shape of this document, stamped by Save. A file
+	// written before this field existed carries no key and reads 0; Load treats
+	// that as the unversioned original and climbs it, and refuses anything
+	// numbered above what this build understands.
+	SchemaVersion int             `toml:"schema_version"`
+	Role          Role            `toml:"role"`
+	Agent         AgentConfig     `toml:"agent"`
+	Gateway       GatewayConfig   `toml:"gateway"`
+	Engine        EngineConfig    `toml:"engine"`
+	Metrics       MetricsConfig   `toml:"metrics"`
+	Logging       LoggingConfig   `toml:"logging"`
+	UI            UIConfig        `toml:"ui"`
+	Analytics     AnalyticsConfig `toml:"analytics"`
 }
 
 type AgentConfig struct {
@@ -246,10 +251,52 @@ const (
 	DefaultPublicPort  = 25565
 )
 
+// CurrentSchemaVersion is the document shape this build writes and understands.
+// Shape 1 is the config as it stands today. A file written before the version
+// field existed reads 0: the same shape without the stamp, which is why climbing
+// 0 to 1 needs no rung on the ladder below.
+//
+// Raise it only in the same commit as the migration that earns it. The number is
+// a promise that Load can turn any lower document into this one.
+const CurrentSchemaVersion = 1
+
+// configMigrations is the config's schema ladder: the entry keyed v upgrades a
+// document at version v to v+1, in memory, before it is validated. Append only,
+// never edit an applied entry. That is the rule internal/analytics/schema.go
+// lives by, for the same reason: a machine that already climbed a rung will
+// never climb it again, so an edit rewrites history only for the machines that
+// have not.
+//
+// It is empty, and nothing is missing. Every field added so far has been
+// additive, and Load decodes over Default(), so a document written by an older
+// build already reads as intended (TestLoadKeepsDefaultsForAbsentKeys). A rung
+// is needed only when a field changes meaning, or when a default already written
+// to disk must change. The first one lands here, with CurrentSchemaVersion
+// raised in the same commit.
+var configMigrations = map[int]func(*Config){}
+
+// migrate climbs the ladder in memory and stamps the result. A version with no
+// entry is a shape that did not change (0 to 1 is exactly that), so it is a
+// no-op rather than an error.
+//
+// Nothing is written here on purpose: the migrated fields and the version that
+// describes them reach disk together, in the caller's next Save, whose
+// temp+rename makes that one atomic unit. A stamp landing without the change it
+// claims would be the one failure a ladder exists to prevent.
+func (c *Config) migrate() {
+	for v := c.SchemaVersion; v < CurrentSchemaVersion; v++ {
+		if up := configMigrations[v]; up != nil {
+			up(c)
+		}
+	}
+	c.SchemaVersion = CurrentSchemaVersion
+}
+
 // Default returns a config with every field at its documented default.
 // Role is unset; the wizard or CLI decides it.
 func Default() *Config {
 	return &Config{
+		SchemaVersion: CurrentSchemaVersion,
 		Agent: AgentConfig{
 			GatewayPort: DefaultControlPort,
 			Transport:   TransportAuto,
@@ -292,9 +339,9 @@ func NewID() string {
 }
 
 // Load reads the config at path. A missing file returns Default() and no
-// error so first runs work without setup; any other failure (bad TOML,
-// failed validation) is returned to the caller rather than silently
-// replaced with defaults.
+// error so first runs work without setup; any other failure (bad TOML, a
+// schema version this build does not understand, failed validation) is
+// returned to the caller rather than silently replaced with defaults.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -307,6 +354,16 @@ func Load(path string) (*Config, error) {
 	if err := toml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	// The version gate runs before Validate, because a document from a future
+	// build is likely to fail today's validation for reasons that are only
+	// symptoms (an enum value this build has never heard of), and "your
+	// proxyforward is older than this file" is the one message the user can act
+	// on. Refusing also protects the file: an old build that loaded it would
+	// drop every key it does not know on the next Save.
+	if cfg.SchemaVersion > CurrentSchemaVersion {
+		return nil, fmt.Errorf("config %s was written by a newer proxyforward (schema version %d, this build understands %d); install that version, or move the file aside to start fresh", path, cfg.SchemaVersion, CurrentSchemaVersion)
+	}
+	cfg.migrate()
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config %s: %w", path, err)
 	}
@@ -319,6 +376,10 @@ func (c *Config) Save(path string) error {
 	if err := c.Validate(); err != nil {
 		return fmt.Errorf("refusing to save invalid config: %w", err)
 	}
+	// Stamp the shape being written, so the version on disk and the fields
+	// beside it are always the same write: a document can never claim a version
+	// its contents do not match.
+	c.SchemaVersion = CurrentSchemaVersion
 	data, err := toml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)

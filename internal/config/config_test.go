@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,6 +109,79 @@ func TestLoadKeepsDefaultsForAbsentKeys(t *testing.T) {
 	}
 	if cfg.Agent.PoolSize != 0 {
 		t.Errorf("an explicit pool_size = 0 read as %d: pooling cannot be turned off", cfg.Agent.PoolSize)
+	}
+}
+
+// TestSchemaVersionIsStampedOnSave: the document on disk carries the shape that
+// wrote it, which is the whole point of the field — a build that finds a number
+// it does not know can say so instead of guessing. A config assembled in memory
+// (or read from a legacy file) is stamped by Save, not left at whatever it held.
+func TestSchemaVersionIsStampedOnSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg := validAgentConfig()
+	cfg.SchemaVersion = 0 // as an unversioned file would have arrived
+	if err := cfg.Save(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("schema_version = %d", CurrentSchemaVersion)
+	if !strings.Contains(string(raw), want) {
+		t.Errorf("saved config does not contain %q:\n%s", want, raw)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.SchemaVersion != CurrentSchemaVersion {
+		t.Errorf("schema version round-tripped as %d, want %d", got.SchemaVersion, CurrentSchemaVersion)
+	}
+}
+
+// TestLoadRefusesFutureSchema: the mirror of internal/analytics/db.go migrate's
+// downgrade check. The refusal must name both numbers, and it must win over
+// validation — a future document is likely to trip today's validators for
+// reasons that are only symptoms of its age.
+func TestLoadRefusesFutureSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	future := CurrentSchemaVersion + 1
+	body := fmt.Sprintf("schema_version = %d\nrole = \"hovercraft\"\n", future)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected a config from a newer build to be refused, got nil")
+	}
+	want := fmt.Sprintf("(schema version %d, this build understands %d)", future, CurrentSchemaVersion)
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not name both versions as %q", err, want)
+	}
+	if strings.Contains(err.Error(), "role:") {
+		t.Errorf("version refusal lost to a validation symptom: %v", err)
+	}
+}
+
+// TestLoadAcceptsUnversionedConfig: version 0 is every config written before the
+// field existed. It is not an error and never has been a different shape, so it
+// loads and is carried to the current version in memory, ready for the next Save
+// to stamp.
+func TestLoadAcceptsUnversionedConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("role = \"gateway\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("a config with no schema_version must load: %v", err)
+	}
+	if cfg.Role != RoleGateway {
+		t.Errorf("role: got %q want %q", cfg.Role, RoleGateway)
+	}
+	if cfg.SchemaVersion != CurrentSchemaVersion {
+		t.Errorf("unversioned config loaded at version %d, want it carried to %d", cfg.SchemaVersion, CurrentSchemaVersion)
 	}
 }
 
