@@ -14,6 +14,13 @@ import (
 // variable rather than a local one so the compiler cannot fold the fault away.
 var nilPtr *int
 
+// nilMap is written to by another. It is a package-level variable for the same
+// reason as nilPtr, and for one more: staticcheck's SA5000 rejects a write to a
+// map it can prove is nil, and a `var m map[string]int` one line above the write
+// is exactly that proof. Reaching the fault through a variable it cannot follow
+// keeps the case a real runtime panic rather than a lint suppression.
+var nilMap map[string]int
+
 // syncBuf is a writer the guard's logger and the test goroutine may both touch:
 // the panic is logged on the server goroutine and read here.
 type syncBuf struct {
@@ -102,7 +109,7 @@ func TestConnContainsAPanicToOneConnection(t *testing.T) {
 	}{
 		{"explicit panic", func() { panic("handler exploded") }},
 		{"nil pointer dereference", func() { _ = *nilPtr }},
-		{"nil map write", func() { var m map[string]int; m["x"] = 1 }},
+		{"nil map write", func() { nilMap["x"] = 1 }},
 		{"index out of range", func() { s := make([]int, 1); i := len(s) + 1; _ = s[i] }},
 	}
 	for _, tc := range cases {
