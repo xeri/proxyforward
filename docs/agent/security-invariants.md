@@ -49,6 +49,17 @@ nonce in one click (`RevokeInvite`), and revoking a code never disconnects the
 agents it already enrolled, because each holds its own key by then. Contrast the
 shared token this replaced, whose rotation severed the whole fleet at once.
 
+**The identity key is unencrypted at rest, and that is a stated property.** The
+Ed25519 private key is written to the config dir under a Unix mode Windows does
+not enforce (`link/cred.go`), so what actually protects it is the `secureio` ACL
+on the directory — the same three principals the IPC pipe grants. There is no
+passphrase, because there is no UX for one that a service-mode daemon could
+answer at boot. The consequence is worth naming rather than leaving implicit:
+**host compromise is agent-identity compromise.** What makes that acceptable is
+that the identity is per-agent and revocable in one click — the gateway drops it,
+the live session is evicted, and no other agent is touched. Contrast a shared
+secret, where the same event severs the fleet.
+
 **Identity is the only authenticator** (`gateway/auth.go identityValidator`).
 The legacy fleet-wide shared token is gone, and with it its residual risk: a
 self-asserted `agentID` no longer exists on any path, so supersede, scope,

@@ -73,7 +73,10 @@ Private configs keep your real setup untouched (`docs/agent/reasoning.md` step 0
   (`eol=lf`) — without it a Windows checkout is CRLF and gofmt rejects every file.
   Don't mass-reformat in an unrelated change.
 - `golangci-lint run ./...` (`.golangci.yml`, curated: govet/staticcheck/ineffassign/
-  unused/misspell) is a CI gate. `errcheck` is deliberately off — see the config header.
+  unused/misspell/errcheck) is a CI gate. `errcheck` is **on**: every ignored error is
+  written `_ = call()`, and the config names each type whose `Close` error is genuinely
+  not actionable rather than blanket-excluding `.*Close` — the exclusion that once hid a
+  corrupt support bundle being reported as written.
 - **windowsgui has no stderr**: startup failures land in
   `%APPDATA%\proxyforward\logs\crash.log` and `wails.log` (`main.go installCrashLog`);
   a silent non-appearing window means *look there*, not "add prints".
