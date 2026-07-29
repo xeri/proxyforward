@@ -95,7 +95,7 @@ func TestStopPersistsAcrossRelaunch(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// First launch: configured, running, then stopped.
-	a1 := New(cfgPath, testAgentConfig(), nil, logger)
+	a1 := New(cfgPath, testAgentConfig(), nil, logger, nil)
 	if err := a1.StartEngine(); err != nil {
 		t.Fatalf("StartEngine: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestStopPersistsAcrossRelaunch(t *testing.T) {
 	}
 
 	// Second launch reads it: supervisor up (mode engine), run held down.
-	a2 := New(cfgPath, reloaded, nil, logger)
+	a2 := New(cfgPath, reloaded, nil, logger, nil)
 	a2.mu.Lock()
 	a2.startEngineLocked()
 	a2.mu.Unlock()

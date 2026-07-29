@@ -107,6 +107,12 @@
 //                      CrashProbe (components/ErrorBoundary.tsx) — the mock
 //                      cannot reach React, so the throw comes from a component;
 //                      both halves are dropped from production builds.
+//   &config=broken   — the config on disk would not load, so the running document
+//                      is a substituted default. Composes with (and outranks)
+//                      every scenario including wizard: the point of the axis is
+//                      that the fault surface stands in FRONT of the wizard,
+//                      whose completion would save over the file. "Set this
+//                      machine up again" is the only way past it.
 //   &tray=off|notice — the close fork (X button). Default: the tray preference
 //                      is on and the one-time notice was already seen, so X
 //                      with players shows the Minimize/Quit fork and X without
@@ -155,6 +161,7 @@ export function installDevMock() {
   // must never read as "server down" — that sends the operator to restart a
   // machine that was never the problem.
   const axisLocal = params.get('local') || '' // '' (a named, reachable server) | unset
+  const axisConfigBroken = params.get('config') === 'broken' // the file on disk would not load
   // Pause bits, mutable via the SetPause stub: mine/theirs per the default
   // tunnel, allMine the gateway's per-agent bit. &consent=off doubles as the
   // "peer predates pause" state (pauseSupported false on the roster).
@@ -804,6 +811,11 @@ export function installDevMock() {
     // A real Windows path, escaped once — the config-file row is sized against
     // exactly this string, so an over-escaped mock would flatter it.
     version: '0.1.0-dev', hostname: 'DESKTOP-DEV', pid: 4242, configPath: 'C:\\Users\\you\\AppData\\Roaming\\proxyforward\\config.toml',
+    // Composes with any scenario, and outranks all of them: the fault surface
+    // stands in front of the wizard, which is the whole point of the axis.
+    configLoadError: axisConfigBroken
+      ? 'invalid config C:\\Users\\you\\AppData\\Roaming\\proxyforward\\config.toml: agent.gateway_host: required (pair with a gateway first)'
+      : '',
     linkUp: state.linkUp, rttMillis: state.linkUp ? state.rtt : 0, agentConnected: state.agentConnected,
     transport: !isWizard && !gw && state.linkUp ? 'quic' : '',
     jitterMillis: jitter,

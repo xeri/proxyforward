@@ -811,6 +811,7 @@ export namespace app {
 	    connectionsTruncated?: boolean;
 	    connectionsTotal?: number;
 	    engineFatal?: string;
+	    configLoadError?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new UIStatus(source);
@@ -860,6 +861,7 @@ export namespace app {
 	        this.connectionsTruncated = source["connectionsTruncated"];
 	        this.connectionsTotal = source["connectionsTotal"];
 	        this.engineFatal = source["engineFatal"];
+	        this.configLoadError = source["configLoadError"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1108,6 +1110,7 @@ export namespace config {
 	    }
 	}
 	export class Config {
+	    SchemaVersion: number;
 	    Role: string;
 	    Agent: AgentConfig;
 	    Gateway: GatewayConfig;
@@ -1123,6 +1126,7 @@ export namespace config {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.SchemaVersion = source["SchemaVersion"];
 	        this.Role = source["Role"];
 	        this.Agent = this.convertValues(source["Agent"], AgentConfig);
 	        this.Gateway = this.convertValues(source["Gateway"], GatewayConfig);

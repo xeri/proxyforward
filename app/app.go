@@ -75,6 +75,14 @@ type App struct {
 	// engineFatal holds the engine's terminal error until the next start,
 	// so every status tick (not just the one that drained done) reports it.
 	engineFatal string
+	// configLoadErr is why the config on disk could not be read, when the caller
+	// fell back to defaults so the window could still open. Immutable after New:
+	// the document it describes is the one this process started with, and the only
+	// way out is a restart or an explicit overwrite the user asks for. It is a
+	// field of its own rather than a fourth Mode for the reason RunState is a
+	// second axis — the config being unreadable is orthogonal to who owns the
+	// engine, and an attached GUI reads a daemon's config, not this one.
+	configLoadErr string
 	// pendingDeepLink holds a pxf:// pairing link delivered by the OS before the
 	// frontend was ready to receive the event (a cold start via the protocol
 	// handler); the frontend drains it once on mount via TakePendingDeepLink.
@@ -113,10 +121,16 @@ type App struct {
 	avatars *avatarCache
 }
 
-func New(configPath string, cfg *config.Config, ring *logging.Ring, logger *slog.Logger) *App {
+// New builds the GUI's App. loadErr is the error config.Load returned, or nil:
+// the caller substitutes defaults so the window can still open, and this is how
+// the frontend learns those defaults are a stand-in rather than a first run. It
+// is carried rather than logged because the two are indistinguishable on screen —
+// an empty document with RoleUnset presents the setup wizard, and finishing that
+// wizard saves over the file the user still wants.
+func New(configPath string, cfg *config.Config, ring *logging.Ring, logger *slog.Logger, loadErr error) *App {
 	hn, _ := os.Hostname()
 	configDir := filepath.Dir(configPath)
-	return &App{
+	a := &App{
 		configPath: configPath,
 		configDir:  configDir,
 		hostname:   hn,
@@ -126,6 +140,10 @@ func New(configPath string, cfg *config.Config, ring *logging.Ring, logger *slog
 		mode:       ModeWizard,
 		avatars:    newAvatarCache(filepath.Join(configDir, "avatars"), logger),
 	}
+	if loadErr != nil {
+		a.configLoadErr = loadErr.Error()
+	}
+	return a
 }
 
 // AdoptClient hands Startup an already-verified daemon connection. runGUI
@@ -427,6 +445,12 @@ type UIStatus struct {
 	// EngineFatal carries the engine's terminal error (bad token etc.) so
 	// the dashboard can show it instead of a silent dead link.
 	EngineFatal string `json:"engineFatal,omitempty"`
+
+	// ConfigLoadError is why the config on disk could not be read. Non-empty
+	// means the running document is a substituted default and the real file is
+	// still there — so the frontend must show the fault and never the setup
+	// wizard, whose completion would save over it.
+	ConfigLoadError string `json:"configLoadError,omitempty"`
 }
 
 // TunnelUI is one tunnel's live state for the frontend.
@@ -592,6 +616,10 @@ func (a *App) statusLocked() UIStatus {
 	st.Hostname = a.hostname
 	st.ConfigPath = a.configPath
 	st.Role = string(a.cfg.Role)
+	// Assigned before the mode switch on purpose: applyIPCStatus overwrites most
+	// of this struct from a daemon snapshot, and this fact is about *this*
+	// process's config file, not the peer's.
+	st.ConfigLoadError = a.configLoadErr
 	// Defaults for the "no live link" case; applyIPCStatus overwrites them.
 	st.JitterMillis = -1
 	st.PacketLossPct = -1

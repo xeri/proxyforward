@@ -327,6 +327,69 @@ func TestSaveRefusesInvalid(t *testing.T) {
 	}
 }
 
+// TestQuarantinePreservesAnUnreadableConfig: an unreadable config takes the GUI
+// down its defaults path, which presents the first-run wizard; finishing that
+// wizard saves, and the atomic rename would otherwise destroy a document the user
+// never chose to discard. The copy is the floor under the config-error surface.
+func TestQuarantinePreservesAnUnreadableConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	const wreckage = "role = \"agent\"\nthis is not toml\n"
+	if err := os.WriteFile(path, []byte(wreckage), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !quarantineUnreadableNow(path) {
+		t.Fatal("an unreadable config was not copied aside")
+	}
+	got, err := os.ReadFile(path + ".corrupt")
+	if err != nil {
+		t.Fatalf("read quarantined copy: %v", err)
+	}
+	if string(got) != wreckage {
+		t.Errorf("quarantined copy = %q, want the original bytes %q", got, wreckage)
+	}
+
+	// The first casualty wins: a second, emptier wreck must not overwrite it.
+	if err := os.WriteFile(path, []byte("also broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if quarantineUnreadableNow(path) {
+		t.Error("a second quarantine overwrote the first copy")
+	}
+	if got, _ := os.ReadFile(path + ".corrupt"); string(got) != wreckage {
+		t.Errorf("first copy was clobbered: %q", got)
+	}
+}
+
+// TestQuarantineLeavesAGoodConfigAlone: the common path is a config that loads,
+// and Save runs on every narrow write (a theme toggle, a pause bit). It must cost
+// nothing visible and leave no litter.
+func TestQuarantineLeavesAGoodConfigAlone(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := validAgentConfig().Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if quarantineUnreadableNow(path) {
+		t.Error("a readable config was copied aside")
+	}
+	if _, err := os.Stat(path + ".corrupt"); !os.IsNotExist(err) {
+		t.Error("quarantine left a copy beside a healthy config")
+	}
+}
+
+// TestQuarantineIsSilentOnAFirstRun: no file at all is a genuine first run, not
+// wreckage — Load returns Default() for it and there is nothing to preserve.
+func TestQuarantineIsSilentOnAFirstRun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if quarantineUnreadableNow(path) {
+		t.Error("a missing config was treated as wreckage")
+	}
+	if _, err := os.Stat(path + ".corrupt"); !os.IsNotExist(err) {
+		t.Error("quarantine invented a copy of a file that never existed")
+	}
+}
+
 func TestIDsAreUnique(t *testing.T) {
 	if a, b := NewID(), NewID(); a == b {
 		t.Error("NewID returned duplicates")

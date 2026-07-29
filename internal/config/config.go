@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	toml "github.com/pelletier/go-toml/v2"
 	"proxyforward/internal/secureio"
@@ -371,7 +372,10 @@ func Load(path string) (*Config, error) {
 }
 
 // Save validates and atomically writes the config: marshal to a temp file in
-// the target directory, then rename over the destination.
+// the target directory, then rename over the destination. Before the first such
+// replacement in this process it copies aside a config it could not load, so a
+// write is never the thing that makes an unreadable document unrecoverable
+// (quarantineUnreadable).
 func (c *Config) Save(path string) error {
 	if err := c.Validate(); err != nil {
 		return fmt.Errorf("refusing to save invalid config: %w", err)
@@ -390,6 +394,7 @@ func (c *Config) Save(path string) error {
 	if err := secureio.MkdirAll(dir); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
+	quarantineUnreadable(path)
 	tmp, err := os.CreateTemp(dir, ".config-*.toml.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp config: %w", err)
@@ -411,6 +416,52 @@ func (c *Config) Save(path string) error {
 		return fmt.Errorf("replace config: %w", err)
 	}
 	return nil
+}
+
+// quarantinedOnce bounds the quarantine below to one attempt per process. Save
+// runs on every narrow write — a theme toggle, a persisted pause bit, an
+// enrollment — so re-reading and re-parsing the file on each call would buy one
+// answer we already have at a cost paid forever.
+var quarantinedOnce sync.Once
+
+// quarantineUnreadable copies an existing config aside before the first Save of
+// this process replaces it, but only when the file cannot be loaded.
+//
+// The case it exists for: a config that fails to parse or validate takes the GUI
+// down its defaults path, which presents the first-run wizard; finishing that
+// wizard calls Save, and the atomic rename below then destroys a document the
+// user never chose to discard — the gateway address, every tunnel, the scope. The
+// blocking config-error surface is the real fix; this is the floor under it, so
+// even a version of that surface with a bug cannot make the file unrecoverable.
+//
+// Deliberately silent and best-effort. It runs on the way to a Save the caller
+// asked for, and a failure to preserve the old file is not a reason to refuse the
+// new one — the alternative is a GUI that cannot save because of a file the user
+// already cannot use. A readable config is left alone: the common path costs one
+// read and one parse, once.
+func quarantineUnreadable(path string) {
+	quarantinedOnce.Do(func() { quarantineUnreadableNow(path) })
+}
+
+// quarantineUnreadableNow is the policy without the latch, so a test can run it
+// more than once per binary. Reports whether it wrote a copy.
+func quarantineUnreadableNow(path string) bool {
+	if _, err := Load(path); err == nil {
+		return false // loads fine: nothing to preserve, and nothing was lost
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false // missing (a genuine first run) or unreadable; nothing to copy
+	}
+	// A fixed suffix, not a timestamp: the point is that one copy survives, and a
+	// stamp per launch would grow a directory nobody prunes. The first unreadable
+	// config wins — a later one is the wreckage of an already-quarantined original,
+	// and overwriting the good copy with it is the one outcome worth preventing.
+	aside := path + ".corrupt"
+	if _, err := os.Stat(aside); err == nil {
+		return false
+	}
+	return os.WriteFile(aside, data, 0o600) == nil
 }
 
 // Clone returns a deep copy: every slice gets its own backing array, so the two

@@ -14,6 +14,7 @@ import {Settings} from './screens/Settings'
 import {Tunnels} from './screens/Tunnels'
 import {Wizard} from './screens/Wizard'
 import {CloseDialog} from './components/CloseDialog'
+import {ConfigFault} from './components/ConfigFault'
 import {CommandPalette} from './components/CommandPalette'
 import {Spinner} from './components/ui'
 import {announce, Announcer} from './components/Announcer'
@@ -220,6 +221,10 @@ function Console() {
   // live handshake) can play; it hands over via onDone with a view transition.
   const backendWizard = !!status && (status.mode === 'wizard' || status.role === '')
   const [wizardHold, setWizardHold] = useState(false)
+  // Set only by the config-fault surface's "set this machine up again": it is the
+  // acknowledgement that replacing the unreadable file is the intent, so the
+  // fault stops standing in front of the wizard for the rest of this session.
+  const [configOverride, setConfigOverride] = useState(false)
   useEffect(() => {
     if (backendWizard) setWizardHold(true)
   }, [backendWizard])
@@ -263,6 +268,26 @@ function Console() {
         {tick.overdue
           ? <EngineSilent reason={tick.error} onRetry={tick.retry} />
           : <div className="flex h-full items-center justify-center text-[var(--text-3)]"><Spinner size={22} /></div>}
+        <CloseDialog />
+      </Shell>
+    )
+  }
+
+  // Ahead of the wizard on purpose, and the ordering is the whole fix: a config
+  // that could not be read leaves this process on a substituted default, whose
+  // empty role reads as a first run. The wizard would then present — and saving
+  // it replaces a file the user never chose to discard. `configOverride` is the
+  // one way past, so setting up again is something asked for rather than walked
+  // into. (An attached GUI reads a daemon's config, not this one, so the signal
+  // is only ever set outside that mode.)
+  if (status.configLoadError && !configOverride) {
+    return (
+      <Shell titlebar={<TitleBar brand />}>
+        <ConfigFault
+          reason={status.configLoadError}
+          configPath={status.configPath}
+          onStartOver={() => { setConfigOverride(true); setWizardHold(true) }}
+        />
         <CloseDialog />
       </Shell>
     )

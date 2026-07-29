@@ -442,8 +442,11 @@ func runGUI(deepLink string) error {
 	configPath := config.DefaultPath(false)
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		// The GUI must still open on a broken config so the user can fix it;
-		// start from defaults and surface the load error in the UI later.
+		// The GUI must still open on a broken config — it is the only surface the
+		// user has for fixing one. Defaults stand in so the window can paint, and
+		// the error travels to app.New, which puts it on every status tick. It must
+		// travel: an empty document reads as a first run, and the wizard that
+		// presents saves over the file the user is trying to recover.
 		cfg = config.Default()
 	}
 	ring := logging.NewRing(2000)
@@ -464,7 +467,7 @@ func runGUI(deepLink string) error {
 		logger.Error("config failed to load; using defaults", "err", err)
 	}
 
-	a := app.New(configPath, cfg, ring, logger)
+	a := app.New(configPath, cfg, ring, logger, err)
 	// One probe decides engine-vs-attached before the window exists: the tray
 	// below must register on the main thread before wails.Run (its window is
 	// serviced by Wails' message pump), and whether a tray belongs at all

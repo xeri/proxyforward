@@ -26,7 +26,7 @@ func init() {
 func newTestAppDir(t *testing.T, cfg *config.Config) *App {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(filepath.Join(t.TempDir(), "config.toml"), cfg, nil, logger)
+	return New(filepath.Join(t.TempDir(), "config.toml"), cfg, nil, logger, nil)
 }
 
 func testAgentConfig() *config.Config {

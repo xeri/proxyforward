@@ -13,7 +13,7 @@ import (
 
 func newTestApp() *App {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New("config.toml", config.Default(), nil, logger)
+	return New("config.toml", config.Default(), nil, logger, nil)
 }
 
 // simulateEngineDeath puts the app in engine mode with a done channel that
