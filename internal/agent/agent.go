@@ -27,6 +27,7 @@ import (
 	"proxyforward/internal/mcsniff"
 	"proxyforward/internal/netid"
 	"proxyforward/internal/netnotify"
+	"proxyforward/internal/panicguard"
 	"proxyforward/internal/proxyproto"
 	"proxyforward/internal/relay"
 	"proxyforward/internal/stats"
@@ -1342,6 +1343,14 @@ func readOpenConn(st relay.Conn, timeout time.Duration) (*control.OpenConn, erro
 // acquired — a mux stream, a dial-back, or a connection that was parked at the
 // gateway long before this player existed.
 func (s *session) serveOpenConn(st relay.Conn, oc *control.OpenConn) {
+	// Outermost defer: a panic serving one player ends that player's connection
+	// rather than the session, its tunnels, and every other player on them.
+	// Guarding here rather than one frame up is what makes it cover all three
+	// ways a leg arrives — and the parked path has a second reason for it: it
+	// reports its pool slot freed BEFORE calling this (connpool.go parkAndServe),
+	// so a guard above that call would have to decide whether to report again.
+	defer panicguard.Conn(s.agent.logger, st, "tunnel_id", oc.TunnelID, "client", oc.ClientAddr, "conn_id", oc.ConnID)
+
 	tun := s.agent.enabledTunnelByID(oc.TunnelID)
 	if tun == nil {
 		// Unknown or not enabled — either way this agent does not serve it, and the

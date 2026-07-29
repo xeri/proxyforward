@@ -31,6 +31,7 @@ import (
 	"proxyforward/internal/mc"
 	"proxyforward/internal/mcsniff"
 	"proxyforward/internal/netid"
+	"proxyforward/internal/panicguard"
 	"proxyforward/internal/relay"
 	"proxyforward/internal/stats"
 	"proxyforward/internal/tcpinfo"
@@ -131,9 +132,8 @@ type Gateway struct {
 	// unreliable one or a flow's stream. Shared by every flow; nothing branches
 	// on it.
 	flowStats relay.FlowStats
-
-	wg     sync.WaitGroup
-	cancel context.CancelFunc
+	wg        sync.WaitGroup
+	cancel    context.CancelFunc
 }
 
 func New(cfg *config.Config, dir string, logger *slog.Logger) *Gateway {
@@ -2239,6 +2239,11 @@ func (g *Gateway) adoptProposal(sess *agentSession, proposed []control.TunnelSpe
 // MOTD (when configured) instead of dropping the connection.
 func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 	sess, spec := pl.owner, pl.spec
+	// Outermost defer, ahead of every other: a panic below unwinds the gate
+	// release, the conntrack entry and the data leg first, then ends as one
+	// closed player connection instead of taking every agent and every tunnel on
+	// this gateway with it (see panicguard for which goroutines do NOT get this).
+	defer panicguard.Conn(sess.logger, clientConn, "tunnel", spec.Name, "client", clientConn.RemoteAddr().String())
 	defer clientConn.Close()
 	ip := remoteIP(clientConn)
 	// A UDP session was already admitted by its listener — the first datagram
@@ -2373,6 +2378,11 @@ func (g *Gateway) handleClient(pl *publicListener, clientConn net.Conn) {
 // data leg won't open; when no member is eligible or both picks fail, the group's
 // offline responder answers.
 func (g *Gateway) handleGroupClient(gl *groupListener, clientConn net.Conn) {
+	// Outermost defer, exactly as in handleClient: a group's shared port is the
+	// second way a player reaches a splice, and the rule is about the goroutine,
+	// not about which listener accepted it. The member pick below runs under the
+	// guard too — a panic there is still one player's.
+	defer panicguard.Conn(g.logger, clientConn, "group", gl.spec.Name, "client", clientConn.RemoteAddr().String())
 	defer clientConn.Close()
 	ip := remoteIP(clientConn)
 	// Abuse limits sit on the accept path ahead of the pick, exactly as for a solo
