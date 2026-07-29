@@ -1,6 +1,7 @@
-import {ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react'
+import {ReactNode, useEffect, useId, useLayoutEffect, useRef, useState} from 'react'
 import {createPortal} from 'react-dom'
 import {ClipboardSetText} from '../../wailsjs/runtime/runtime'
+import {useMotion} from '../motion'
 import {IconAlert, IconCheck, IconChevronDown, IconCopy, IconEye, IconEyeOff, IconInfo, IconClose} from './icons'
 
 type State = 'good' | 'warn' | 'bad' | 'unknown'
@@ -798,7 +799,10 @@ export function Kbd({children, className = ''}: {children: string; className?: s
           key={i}
           // px-locked on purpose: the 18px chip box doesn't ride --ui-scale,
           // so the glyph size can't either or it outgrows the chip at 1.33×.
-          className="pf-control relative inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[var(--r-chip)] bg-[var(--panel-2)] px-1 font-sans text-[10.5px] font-medium text-[var(--text-3)]"
+          // Ink is --text-2, not the silt --text-3 the rest of the chrome uses:
+          // at 10.5px this is small text, and --text-3 on --panel-2 measures
+          // 4.14:1 — under the 4.5:1 AA floor. --text-2 clears it at 6.0:1.
+          className="pf-control relative inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[var(--r-chip)] bg-[var(--panel-2)] px-1 font-sans text-[10.5px] font-medium text-[var(--text-2)]"
         >{k}</kbd>
       ))}
     </span>
@@ -1059,9 +1063,23 @@ export function CopyIcon({text, title = 'Copy'}: {text: string; title?: string})
   )
 }
 
-export function Spinner({size = 16}: {size?: number}) {
+/** Spinner: an indeterminate wait. It carries its own accessible name because
+ * it is sometimes the *entire* content of a screen (App's pre-first-tick boot),
+ * and a nameless graphic there leaves nothing to read at all. Callers with
+ * their own adjacent wording should name it for what is being waited on.
+ *
+ * The rotation gates on prefersReduced() like every other scripted motion: the
+ * ring is the signal, the spin is only reassurance, and under reduced motion
+ * the sea goes still. (The CSS kill switch would freeze it mid-turn anyway —
+ * this stops it at rest instead of at a random angle.) */
+export function Spinner({size = 16, label = 'loading'}: {size?: number; label?: string}) {
+  const {reduced} = useMotion()
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className="animate-spin" fill="none">
+    <svg
+      width={size} height={size} viewBox="0 0 24 24" fill="none"
+      role="img" aria-label={label}
+      className={reduced ? '' : 'animate-spin'}
+    >
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.2" />
       <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
@@ -1091,8 +1109,139 @@ export function EmptyState({icon, title, hint, action, size = 'md'}: {
   )
 }
 
+/** Everything the browser will move focus to with Tab. Deliberately narrow:
+ * anything exotic enough to miss this list is exotic enough to carry an
+ * explicit tabindex. */
+const FOCUSABLE =
+  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+
+/** Visible tab stops, in tab order. Two filters the selector cannot express:
+ * `tabIndex >= 0` (the selector's `button` arm happily matches a
+ * `tabindex="-1"` button — the command palette's options are exactly that, and
+ * trapping against one parks the boundary on an element Tab will never reach),
+ * and getClientRects() as the "is it rendered" test — not offsetParent, which
+ * lies about fixed-position elements. */
+function focusables(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)]
+    .filter(el => el.tabIndex >= 0 && el.getClientRects().length > 0)
+}
+
+/**
+ * useDialog: the half of a dialog that isn't drawn — ARIA identity, a focus
+ * trap, initial focus, focus restored to whatever opened it, Escape, and a
+ * backdrop dismiss that survives a text-selection drag. `Modal` and the
+ * command palette share exactly this and nothing else; their chrome,
+ * placement and motion are different surfaces on purpose.
+ *
+ * Three things are load-bearing:
+ *
+ * - **Escape listens on `window`, not `document`.** `Select` and `Menu` close
+ *   themselves from `document` listeners that stopPropagation(), and document
+ *   precedes window on the bubble path — so a Select open inside a dialog
+ *   swallows the first Escape and the dialog stays put. Move this to
+ *   `document` and one Escape closes both.
+ * - **The trap only intercepts Tab.** Tab is the only way out: the scrim
+ *   covers the viewport and dismisses on click. A focusin-based trap would
+ *   also yank focus back out of `Select`'s portalled list, which lives outside
+ *   the panel by design.
+ * - **Initial focus goes to `initialFocus`, else to whatever autoFocus
+ *   already took, else to the panel** — which announces the dialog and its
+ *   title rather than the close button. The chosen element is remembered so a
+ *   re-run of this effect reproduces it: React fires autoFocus once, in the
+ *   commit phase, and StrictMode remounts effects while leaving the DOM in
+ *   place, so without the memo dev and production would disagree about where
+ *   an autoFocus dialog starts.
+ */
+export function useDialog({onDismiss, label, labelledBy, initialFocus}: {
+  onDismiss: () => void
+  label?: string
+  labelledBy?: string
+  initialFocus?: React.RefObject<HTMLElement | null>
+}) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  const dismissRef = useRef(onDismiss)
+  dismissRef.current = onDismiss
+  const wantRef = useRef(initialFocus)
+  wantRef.current = initialFocus
+  const downOutside = useRef(false)
+
+  // The opener is read during the first render, not in the effect below:
+  // React runs a child's autoFocus in the commit phase, so by the time any
+  // effect here runs the dialog's own field is already the active element and
+  // "restore" would restore focus to a node about to be destroyed.
+  const opener = useRef<HTMLElement | null | undefined>(undefined)
+  if (opener.current === undefined) opener.current = document.activeElement as HTMLElement | null
+
+  const placed = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    const panel = panelRef.current
+    const inside = (el: Element | null | undefined): el is HTMLElement => !!el && !!panel?.contains(el)
+    const want = [wantRef.current?.current, placed.current, document.activeElement].find(inside)
+    if (want) { placed.current = want; want.focus({preventScroll: true}) }
+    else panel?.focus({preventScroll: true})
+
+    const onKey = (e: KeyboardEvent) => {
+      const el = panelRef.current
+      if (!el) return
+      if (e.key === 'Escape') { dismissRef.current(); return }
+      if (e.key !== 'Tab') return
+      const items = focusables(el)
+      if (items.length === 0) { e.preventDefault(); el.focus({preventScroll: true}); return }
+      const active = document.activeElement
+      const within = el.contains(active)
+      if (e.shiftKey) {
+        // The panel itself is tabindex=-1 and sits before its contents, so
+        // Shift+Tab from it would step out of the dialog entirely.
+        if (!within || active === items[0] || active === el) {
+          e.preventDefault()
+          items[items.length - 1].focus()
+        }
+      } else if (!within || active === items[items.length - 1]) {
+        e.preventDefault()
+        items[0].focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      const active = document.activeElement
+      // Only reclaim focus if it is still ours to give: a command that ran on
+      // the way out may have focused something deliberately.
+      const ours = !active || active === document.body || !!panel?.contains(active)
+      if (ours && opener.current?.isConnected) opener.current.focus({preventScroll: true})
+    }
+  }, [])
+
+  const outside = (e: React.MouseEvent) => !panelRef.current?.contains(e.target as Node)
+
+  return {
+    panelRef,
+    dialogProps: {
+      role: 'dialog' as const,
+      'aria-modal': true,
+      'aria-label': label,
+      'aria-labelledby': labelledBy,
+      tabIndex: -1,
+    },
+    // Dismiss only when the press AND the release both land off the panel:
+    // a selection dragged out of a dialog is a drag, not a click on the scrim.
+    backdropProps: {
+      onMouseDown: (e: React.MouseEvent) => { downOutside.current = outside(e) },
+      onMouseUp: (e: React.MouseEvent) => {
+        const dismiss = downOutside.current && outside(e)
+        downOutside.current = false
+        if (dismiss) dismissRef.current()
+      },
+    },
+  }
+}
+
 /** Modal: centered glass dialog with a scrim; Esc / backdrop-click closes.
  * Exits animate — [data-closing] runs the mirrored keyframes, then unmounts.
+ * It is a real dialog, not a picture of one: `useDialog` owns the semantics,
+ * the focus trap and the restore, so all of its call sites get them at once.
  *
  * It renders through a portal for the same reason Select's list does: every
  * .pf-card is a backdrop-filter surface, which makes it a containing block for
@@ -1105,28 +1254,32 @@ export function Modal({title, onClose, children, footer, wide}: {
   const [closing, setClosing] = useState(false)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+  const closingRef = useRef(false)
+  // Latched: Escape and a backdrop release can both arrive, and two exit
+  // timers would call onClose twice.
   const begin = () => {
+    if (closingRef.current) return
+    closingRef.current = true
     setClosing(true)
     window.setTimeout(() => closeRef.current(), 170)
   }
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') begin() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [])
+  const titleId = useId()
+  const {panelRef, dialogProps, backdropProps} = useDialog({onDismiss: begin, labelledBy: titleId})
+
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-6"
       data-closing={closing || undefined}
-      onMouseDown={begin}
+      {...backdropProps}
     >
       <div className="pf-scrim absolute inset-0 bg-black/50" />
       <div
-        onMouseDown={e => e.stopPropagation()}
-        className={`pf-pop pf-glass relative w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-[85vh] overflow-hidden rounded-[var(--r-bloom)]`}
+        ref={panelRef}
+        {...dialogProps}
+        className={`pf-pop pf-glass relative w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-[85vh] overflow-hidden rounded-[var(--r-bloom)] outline-none`}
       >
         <div className="flex items-center justify-between px-5 py-3.5">
-          <h2 className="font-display text-title font-bold text-[var(--text)]">{title}</h2>
+          <h2 id={titleId} className="font-display text-title font-bold text-[var(--text)]">{title}</h2>
           <IconButton title="Close" onClick={begin}><IconClose size={16} /></IconButton>
         </div>
         <div className="pf-sep" aria-hidden />
