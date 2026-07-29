@@ -132,8 +132,13 @@ type Gateway struct {
 	// unreliable one or a flow's stream. Shared by every flow; nothing branches
 	// on it.
 	flowStats relay.FlowStats
-	wg        sync.WaitGroup
-	cancel    context.CancelFunc
+	// refusals counts every branch that turns something away or fails to bind —
+	// the half of the picture no happy-path series shows. Shared by the limiters,
+	// the actor and the rebind retry (counters.go); nothing branches on it. A
+	// plain field, not built by Start, so Refusals() works before and after a run.
+	refusals RefusalCounters
+	wg       sync.WaitGroup
+	cancel   context.CancelFunc
 }
 
 func New(cfg *config.Config, dir string, logger *slog.Logger) *Gateway {
@@ -227,6 +232,12 @@ func (g *Gateway) Start(ctx context.Context) error {
 	g.preAuth = newPreAuthGate(g.cfg.Gateway.MaxConnsGlobal + preAuthHeadroom)
 	g.validator = identityValidator{store: g.agents, now: time.Now}
 	a := newActor(g.logger)
+	// One counters instance for the whole gateway, handed out here rather than
+	// taken as a constructor argument: the counters are observability, and every
+	// unit test that builds a limiter or an actor by hand must keep working
+	// without one (the increments are nil-safe for exactly that reason). Set
+	// before the actor is published or any accept loop runs.
+	g.authLim.counters, g.gate.counters, g.preAuth.counters, a.counters = &g.refusals, &g.refusals, &g.refusals, &g.refusals
 	g.actor.Store(a)
 	g.wg.Add(2)
 	go func() {

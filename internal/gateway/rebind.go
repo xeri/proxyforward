@@ -80,6 +80,7 @@ func (g *Gateway) retryFailedGroups(a *actor) bool {
 			continue
 		}
 		recovered = true
+		g.refusals.groupRecovered()
 		a.do(func() {
 			a.recordEvent(GatewayEvent{
 				Kind:       EventGroupRecovered,
@@ -118,6 +119,10 @@ func (g *Gateway) retrySessionBinds(a *actor, sess *agentSession) {
 	if len(recovered) == 0 {
 		return
 	}
+	// Recoveries are the other half of the bind-failure counters: a gateway that
+	// fails binds and recovers them is riding out a boot race, one that only
+	// fails them has a squatter nobody has cleared.
+	g.refusals.tunnelsRecovered(len(recovered))
 	a.do(func() {
 		for _, o := range recovered {
 			a.recordEvent(GatewayEvent{

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"proxyforward/internal/gateway"
 	"proxyforward/internal/ipc"
 )
 
@@ -52,7 +53,7 @@ func (e *Engine) serveMetrics(ctx context.Context) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		writeMetrics(w, e.Status(), e.conns().PlayerCount())
+		writeMetrics(w, e.Status(), e.conns().PlayerCount(), e.gatewayRefusals())
 	})
 	srv := &http.Server{
 		Handler:      mux,
@@ -99,12 +100,28 @@ func warnIfMetricsPublic(logger *slog.Logger, addr string) {
 	logger.Warn("metrics: endpoint is not loopback-only; it exposes traffic and player counts — bind to 127.0.0.1 or firewall it", "addr", addr)
 }
 
+// gatewayRefusals snapshots the gateway's refusal counters, or nil on an agent —
+// which has no gateway, so those series are absent rather than a row of zeroes.
+// Zeroes would read as "nothing is being refused" on a process that cannot
+// refuse anything, the same lie the -1 gauges are omitted to avoid.
+func (e *Engine) gatewayRefusals() *gateway.RefusalCounts {
+	if e.Gateway == nil {
+		return nil
+	}
+	c := e.Gateway.Refusals()
+	return &c
+}
+
 // writeMetrics renders the engine status as Prometheus text-format metrics. All
-// series come from a single Status snapshot (plus the player count), so a scrape
-// adds no work to the data path. Unknown gauges (-1 sentinels) are omitted
-// entirely rather than exported as 0, preserving the honest-unknown contract.
-// No player names or peer IPs appear as labels (privacy charter).
-func writeMetrics(w io.Writer, st ipc.Status, players int) {
+// series come from a single Status snapshot (plus the player count and, on a
+// gateway, its refusal counters), so a scrape adds no work to the data path.
+// Unknown gauges (-1 sentinels) are omitted entirely rather than exported as 0,
+// preserving the honest-unknown contract. No player names or peer IPs appear as
+// labels (privacy charter) — which is why the refusal counters are totals with
+// coarse reason labels and never per-source series.
+//
+// refusals is nil for a role that has no gateway.
+func writeMetrics(w io.Writer, st ipc.Status, players int, refusals *gateway.RefusalCounts) {
 	linkUp := 0
 	if st.LinkUp || st.AgentConnected {
 		linkUp = 1
@@ -144,6 +161,8 @@ func writeMetrics(w io.Writer, st ipc.Status, players int) {
 			"proxyforward_link_loss_pct "+formatFloat(st.PacketLossPct))
 	}
 
+	writeRefusalMetrics(w, refusals)
+
 	// Per-tunnel backend health, only when known (unknown stays absent).
 	printed := false
 	for _, t := range st.Tunnels {
@@ -160,6 +179,38 @@ func writeMetrics(w io.Writer, st ipc.Status, players int) {
 		}
 		fmt.Fprintf(w, "proxyforward_tunnel_local_up{tunnel_id=%q,name=%q} %d\n", escapeLabel(t.ID), escapeLabel(t.Name), up)
 	}
+}
+
+// writeRefusalMetrics renders the gateway's refusal and bind-failure counters —
+// the only series here that describe harm rather than health, and the ones an
+// operator alerts on. Nothing is rendered for c == nil (an agent): a gateway
+// with nothing to refuse and a process incapable of refusing must not look the
+// same on a dashboard.
+//
+// Reasons are labels on one metric per family, not a metric each, so a rate()
+// over the family is a single query and a new reason breaks nobody's dashboard.
+// Every label is a fixed word from this file: a reason label built from a peer's
+// address would be both unbounded cardinality and the privacy leak the charter
+// forbids.
+func writeRefusalMetrics(w io.Writer, c *gateway.RefusalCounts) {
+	if c == nil {
+		return
+	}
+	metric(w, "proxyforward_gateway_auth_failures_total", "counter", "Failed authentication attempts charged to a source network's budget.",
+		fmt.Sprintf("proxyforward_gateway_auth_failures_total %d", c.AuthFailures))
+	metric(w, "proxyforward_gateway_conns_refused_total", "counter", "Public connections refused by the connection gate, by the cap that was hit.",
+		fmt.Sprintf("proxyforward_gateway_conns_refused_total{reason=\"global_cap\"} %d\nproxyforward_gateway_conns_refused_total{reason=\"per_ip_cap\"} %d",
+			c.ConnsGlobalCap, c.ConnsPerIPCap))
+	metric(w, "proxyforward_gateway_preauth_refused_total", "counter", "Connections refused because the unauthenticated set was full.",
+		fmt.Sprintf("proxyforward_gateway_preauth_refused_total %d", c.PreAuthFull))
+	metric(w, "proxyforward_gateway_bind_failures_total", "counter", "Public listeners that could not be bound, by reason; each leaves a tunnel down.",
+		fmt.Sprintf("proxyforward_gateway_bind_failures_total{reason=\"tunnel_cap\"} %d\nproxyforward_gateway_bind_failures_total{reason=\"no_free_port\"} %d\nproxyforward_gateway_bind_failures_total{reason=\"port_in_use\"} %d\nproxyforward_gateway_bind_failures_total{reason=\"listen_failed\"} %d",
+			c.BindTunnelCap, c.BindNoFreePort, c.BindPortInUse, c.BindListenFailed))
+	metric(w, "proxyforward_gateway_port_reassignments_total", "counter", "Tunnels bound to a port other than the one requested because it was in use.",
+		fmt.Sprintf("proxyforward_gateway_port_reassignments_total %d", c.PortsReassigned))
+	metric(w, "proxyforward_gateway_binds_recovered_total", "counter", "Listeners the rebind retry brought back after an earlier failure, by scope.",
+		fmt.Sprintf("proxyforward_gateway_binds_recovered_total{scope=\"tunnel\"} %d\nproxyforward_gateway_binds_recovered_total{scope=\"group\"} %d",
+			c.TunnelsRecovered, c.GroupsRecovered))
 }
 
 // metric writes a HELP/TYPE header followed by one or more pre-rendered series

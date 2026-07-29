@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"proxyforward/internal/config"
+	"proxyforward/internal/gateway"
 	"proxyforward/internal/ipc"
 )
 
@@ -39,8 +40,21 @@ func TestWriteMetricsFormat(t *testing.T) {
 			{ID: "xyz", Name: "pending", LocalKnown: false}, // unknown → omitted
 		},
 	}
+	refusals := &gateway.RefusalCounts{
+		AuthFailures:     7,
+		ConnsGlobalCap:   11,
+		ConnsPerIPCap:    13,
+		PreAuthFull:      17,
+		BindTunnelCap:    19,
+		BindNoFreePort:   23,
+		BindPortInUse:    29,
+		BindListenFailed: 31,
+		PortsReassigned:  37,
+		TunnelsRecovered: 41,
+		GroupsRecovered:  43,
+	}
 	var buf bytes.Buffer
-	writeMetrics(&buf, st, 4)
+	writeMetrics(&buf, st, 4, refusals)
 	out := buf.String()
 
 	for _, want := range []string{
@@ -58,6 +72,21 @@ func TestWriteMetricsFormat(t *testing.T) {
 		`proxyforward_tunnel_local_up{tunnel_id="abc",name="mc"} 1`,
 		"# TYPE proxyforward_bytes_total counter",
 		"# TYPE proxyforward_connections gauge",
+		// The harm series: every refusal branch, every bind outcome that is not a
+		// clean success, and the recoveries that tell a boot race from a squatter.
+		"proxyforward_gateway_auth_failures_total 7",
+		`proxyforward_gateway_conns_refused_total{reason="global_cap"} 11`,
+		`proxyforward_gateway_conns_refused_total{reason="per_ip_cap"} 13`,
+		"proxyforward_gateway_preauth_refused_total 17",
+		`proxyforward_gateway_bind_failures_total{reason="tunnel_cap"} 19`,
+		`proxyforward_gateway_bind_failures_total{reason="no_free_port"} 23`,
+		`proxyforward_gateway_bind_failures_total{reason="port_in_use"} 29`,
+		`proxyforward_gateway_bind_failures_total{reason="listen_failed"} 31`,
+		"proxyforward_gateway_port_reassignments_total 37",
+		`proxyforward_gateway_binds_recovered_total{scope="tunnel"} 41`,
+		`proxyforward_gateway_binds_recovered_total{scope="group"} 43`,
+		"# TYPE proxyforward_gateway_conns_refused_total counter",
+		"# HELP proxyforward_gateway_bind_failures_total ",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing series %q\n--- output ---\n%s", want, out)
@@ -87,7 +116,7 @@ func TestWriteMetricsAgentSentinels(t *testing.T) {
 		PacketLossPct: -1,
 	}
 	var buf bytes.Buffer
-	writeMetrics(&buf, st, 0)
+	writeMetrics(&buf, st, 0, nil) // an agent has no gateway
 	out := buf.String()
 	if !strings.Contains(out, "proxyforward_link_up 1") {
 		t.Errorf("agent link should be up\n%s", out)
@@ -97,6 +126,31 @@ func TestWriteMetricsAgentSentinels(t *testing.T) {
 	}
 	if strings.Contains(out, "proxyforward_link_jitter_ms") || strings.Contains(out, "proxyforward_link_loss_pct") {
 		t.Errorf("unknown jitter/loss should be omitted\n%s", out)
+	}
+	// Same contract as the -1 gauges: a process that cannot refuse anything must
+	// not export a row of zeroes that reads as "refusing nothing".
+	if strings.Contains(out, "proxyforward_gateway_") {
+		t.Errorf("gateway refusal series must be absent on an agent\n%s", out)
+	}
+}
+
+// TestWriteMetricsZeroRefusalsStillRender is the other half of the omit rule: a
+// gateway that has refused nothing knows that it has refused nothing, so its
+// counters are exported as 0 rather than omitted. Absent means "no gateway";
+// zero means "nothing yet", and a dashboard has to be able to tell them apart.
+func TestWriteMetricsZeroRefusalsStillRender(t *testing.T) {
+	var buf bytes.Buffer
+	writeMetrics(&buf, ipc.Status{Role: "gateway", RTTMillis: -1, JitterMillis: -1, PacketLossPct: -1}, 0, &gateway.RefusalCounts{})
+	out := buf.String()
+	for _, want := range []string{
+		"proxyforward_gateway_auth_failures_total 0",
+		`proxyforward_gateway_conns_refused_total{reason="global_cap"} 0`,
+		`proxyforward_gateway_bind_failures_total{reason="listen_failed"} 0`,
+		"proxyforward_gateway_binds_recovered_total{scope=\"group\"} 0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing zero series %q\n--- output ---\n%s", want, out)
+		}
 	}
 }
 

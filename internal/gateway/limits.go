@@ -73,6 +73,9 @@ type authLimiter struct {
 	lru    *list.List // *authBudget, most recently touched at the front
 	at     map[string]*list.Element
 	now    func() time.Time
+	// counters is the gateway's shared refusal accounting; may be nil. Nothing
+	// here branches on it.
+	counters *RefusalCounters
 }
 
 // authBudget is one network's token bucket: it holds the failures still
@@ -121,6 +124,11 @@ func (l *authLimiter) allow(ip string) bool {
 
 // fail charges one failed attempt to ip's network.
 func (l *authLimiter) fail(ip string) {
+	// Counted here rather than on allow's refusal: a failure is what precedes a
+	// block, so this rises while an attack is still being answered, where allow
+	// only moves once a network is already locked out. The count is of attempts,
+	// not of networks — a scanner is one source and thousands of failures.
+	l.counters.authFailed()
 	key := sourceNet(ip)
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -176,6 +184,9 @@ type connGate struct {
 	maxPerIP  int
 	global    int
 	perNet    map[string]int
+	// counters is the gateway's shared refusal accounting; may be nil. Nothing
+	// here branches on it.
+	counters *RefusalCounters
 }
 
 func newConnGate(maxGlobal, maxPerIP int) *connGate {
@@ -189,7 +200,19 @@ func (g *connGate) admit(ip string) bool {
 	key := sourceNet(ip)
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.global >= g.maxGlobal || g.perNet[key] >= g.maxPerIP {
+	// Two branches where one condition would do, because the two refusals are
+	// different incidents: the global cap means the gateway is full and every
+	// player is affected, the per-network cap means one source is taking more
+	// than its share and everyone else is fine. An operator's response differs,
+	// so the counters must too. Refusals are counted in here, not at the callers
+	// — udp.go's listener refuses silently (no log, no error), and a call-site
+	// scheme would have left that path uncounted forever.
+	if g.global >= g.maxGlobal {
+		g.counters.connRefusedGlobal()
+		return false
+	}
+	if g.perNet[key] >= g.maxPerIP {
+		g.counters.connRefusedPerIP()
 		return false
 	}
 	g.global++
@@ -233,6 +256,9 @@ const preAuthHeadroom = 256
 // one loose enough not to would not be a cap.
 type preAuthGate struct {
 	slots chan struct{}
+	// counters is the gateway's shared refusal accounting; may be nil. Nothing
+	// here branches on it.
+	counters *RefusalCounters
 }
 
 func newPreAuthGate(max int) *preAuthGate {
@@ -245,6 +271,11 @@ func (p *preAuthGate) admit() bool {
 	case p.slots <- struct{}{}:
 		return true
 	default:
+		// This gate is sized so no legitimate load can reach it (preAuthHeadroom
+		// above the public cap), so a nonzero count is a finding on its own: it
+		// means the unauthenticated set filled, which is a flood or a descriptor
+		// leak, never a busy evening.
+		p.counters.preAuthRefused()
 		return false
 	}
 }

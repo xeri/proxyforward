@@ -379,6 +379,9 @@ type actor struct {
 	// events is the ring of notable auto-fixes/conflicts (port reassign, suspected
 	// clone) the GUI event log polls. Written on this goroutine, read via do().
 	events *eventRing
+	// counters is the gateway's shared refusal accounting; may be nil (an actor
+	// built without a Gateway). Nothing on this goroutine branches on it.
+	counters *RefusalCounters
 
 	clientWG sync.WaitGroup // tracks handleClient goroutines across all agents
 }
@@ -622,6 +625,7 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, pol bind
 	// connections with it. Counted after the same-ID replacement above: re-binding
 	// a tunnel that already exists is not growth, and must still work at the cap.
 	if pol.maxTunnels > 0 && len(subtree) >= pol.maxTunnels {
+		a.counters.bindTunnelCap()
 		return 0, fmt.Errorf("tunnel %q: %w (%d; gateway.max_tunnels_per_agent)", spec.Name, errTooManyListeners, pol.maxTunnels)
 	}
 	// A udp tunnel needs a gate to bind at all (bindPolicy.gate). Refusing here
@@ -639,6 +643,7 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, pol bind
 		// allowed just by asking for 0, and could repeat it per invented tunnel id.
 		ln = bindFirstFree(spec, pol, allowedPorts(sess.scope, pol.allowlist), a.logger)
 		if ln == nil {
+			a.counters.bindNoFreePort()
 			return 0, fmt.Errorf("tunnel %q: no public port this agent is allowed to bind is free", spec.Name)
 		}
 	} else {
@@ -646,6 +651,7 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, pol bind
 		ln, err = bindPort(spec, pol, spec.PublicPort, a.logger)
 		if err != nil {
 			if !portowner.IsAddrInUse(err) {
+				a.counters.bindListenFailed()
 				return 0, portowner.DecorateBindError(spec.PublicPort, err)
 			}
 			// The requested port is taken. Bind a policy-valid alternative instead of
@@ -654,8 +660,12 @@ func (a *actor) bindLocked(sess *agentSession, spec control.TunnelSpec, pol bind
 			// reassigned port stays put rather than re-contending on every sync.
 			reln := bindFirstFree(spec, pol, reassignCandidates(spec.PublicPort, sess.scope, pol.allowlist), a.logger)
 			if reln == nil {
+				a.counters.bindPortInUse()
 				return 0, portowner.DecorateBindError(spec.PublicPort, err)
 			}
+			// Serving, but not where anyone asked — counted apart from the failures
+			// above so "0 bind failures" cannot hide a fleet on the wrong ports.
+			a.counters.portReassigned()
 			actual := listenerPort(reln)
 			a.recordEvent(GatewayEvent{
 				Kind:          EventPortReassigned,

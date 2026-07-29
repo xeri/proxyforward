@@ -219,3 +219,89 @@ func TestConnGateCapsIPv6PerPrefix(t *testing.T) {
 		t.Fatalf("counters leak: global=%d perNet=%v", g.global, g.perNet)
 	}
 }
+
+// TestRefusalCountersMoveOnRefusal drives every limiter refusal and checks the
+// counter behind it. These are what an operator alerts on, so a branch that
+// stops counting is a monitoring outage that looks exactly like a quiet night.
+// The two connGate reasons are asserted apart on purpose: "the gateway is full"
+// and "one network is hogging it" are different incidents.
+func TestRefusalCountersMoveOnRefusal(t *testing.T) {
+	var c RefusalCounters
+
+	// Auth: charged per failed attempt, never per blocked network — a scanner is
+	// one source and many failures.
+	l := newAuthLimiter(2)
+	l.counters = &c
+	l.fail("1.2.3.4")
+	l.fail("1.2.3.4")
+	l.fail("1.2.3.4")
+	if got := c.AuthFailures.Load(); got != 3 {
+		t.Errorf("AuthFailures = %d, want 3", got)
+	}
+
+	// Per-IP cap: one address, one slot, second attempt refused.
+	g := newConnGate(4, 1)
+	g.counters = &c
+	if !g.admit("1.2.3.4") {
+		t.Fatal("first conn refused")
+	}
+	if g.admit("1.2.3.4") {
+		t.Fatal("second conn from the same address admitted past the per-IP cap of 1")
+	}
+	if got := c.ConnsPerIPCap.Load(); got != 1 {
+		t.Errorf("ConnsPerIPCap = %d, want 1", got)
+	}
+	if got := c.ConnsGlobalCap.Load(); got != 0 {
+		t.Errorf("a per-IP refusal was miscounted as a global one (ConnsGlobalCap = %d)", got)
+	}
+
+	// Global cap: distinct addresses, so only the global ceiling can refuse.
+	for i := range 3 {
+		if !g.admit(fmt.Sprintf("10.0.0.%d", i)) {
+			t.Fatalf("conn %d refused below the global cap of 4", i)
+		}
+	}
+	if g.admit("10.0.0.99") {
+		t.Fatal("conn admitted past the global cap of 4")
+	}
+	if got := c.ConnsGlobalCap.Load(); got != 1 {
+		t.Errorf("ConnsGlobalCap = %d, want 1", got)
+	}
+	if got := c.ConnsPerIPCap.Load(); got != 1 {
+		t.Errorf("a global refusal was miscounted as a per-IP one (ConnsPerIPCap = %d)", got)
+	}
+
+	// Pre-auth gate: full means refused, and a released slot admits again
+	// without counting anything.
+	p := newPreAuthGate(1)
+	p.counters = &c
+	if !p.admit() {
+		t.Fatal("first pre-auth slot refused")
+	}
+	if p.admit() {
+		t.Fatal("second pre-auth slot admitted past a gate of 1")
+	}
+	p.release()
+	if !p.admit() {
+		t.Fatal("released slot not reusable")
+	}
+	if got := c.PreAuthFull.Load(); got != 1 {
+		t.Errorf("PreAuthFull = %d, want 1", got)
+	}
+}
+
+// TestRefusalCountersAreNilSafe: the counters are observability, so a limiter
+// built without a Gateway (every unit test above) must refuse exactly as it
+// always did rather than panic on the way.
+func TestRefusalCountersAreNilSafe(t *testing.T) {
+	l := newAuthLimiter(1)
+	l.fail("1.2.3.4")
+	g := newConnGate(1, 1)
+	if !g.admit("1.2.3.4") || g.admit("5.6.7.8") {
+		t.Fatal("connGate stopped enforcing its caps without counters")
+	}
+	p := newPreAuthGate(1)
+	if !p.admit() || p.admit() {
+		t.Fatal("preAuthGate stopped enforcing its cap without counters")
+	}
+}
