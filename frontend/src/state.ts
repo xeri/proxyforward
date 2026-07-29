@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react'
+import {useCallback, useEffect, useRef, useState} from 'react'
 import {EventsOn} from '../wailsjs/runtime/runtime'
 import {Status} from '../wailsjs/go/app/App'
 import {app} from '../wailsjs/go/models'
@@ -20,16 +20,66 @@ export function isEngineOff(s: UIStatus): boolean {
   return runStateOf(s) === 'stopped' && !s.engineFatal
 }
 
-/** useTick subscribes to the Go side's 2 Hz status snapshots. */
-export function useTick(): UIStatus | null {
+/** How long the app waits for its *first* status snapshot before it stops
+ * showing a spinner and says so instead. Long enough that a busy startup never
+ * trips it; short enough that nobody sits in front of a spinner wondering
+ * whether anything is behind it. Rendered as seconds by `EngineSilent`. */
+export const FIRST_TICK_MS = 5000
+
+/** What `useTick` knows: the snapshot, and — when there isn't one — why. */
+export type Tick = {
+  status: UIStatus | null
+  /** The rejected `Status()` call's message, verbatim. Empty while the call is
+   *  merely outstanding: silence has no reason, and inventing one is worse. */
+  error: string
+  /** True once FIRST_TICK_MS have passed with no snapshot at all. Only
+   *  meaningful while `status` is null — `useTickStale` owns every case after
+   *  a first tick has landed, and cannot describe a session that never began. */
+  overdue: boolean
+  /** Re-run the first fetch and re-arm the deadline. */
+  retry: () => void
+}
+
+/**
+ * useTick subscribes to the Go side's 2 Hz status snapshots.
+ *
+ * The `Status()` rejection is recorded rather than swallowed: it is the one
+ * thing that can explain a window with nothing in it, and an empty `.catch`
+ * turned that explanation into a spinner with no exit. Both routes to "no
+ * snapshot" — a rejected call and an event stream that never fires — end in the
+ * same `overdue` flag, because from the user's side they are the same fault.
+ */
+export function useTick(): Tick {
   const [status, setStatus] = useState<UIStatus | null>(null)
+  const [error, setError] = useState('')
+  const [overdue, setOverdue] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+
   useEffect(() => {
     let mounted = true
-    Status().then(s => { if (mounted) setStatus(s) }).catch(() => {})
+    Status()
+      .then(s => { if (mounted) { setStatus(s); setError('') } })
+      // Wails rejects with an Error; the dev mock sometimes with a bare string.
+      .catch((e: unknown) => { if (mounted) setError((e instanceof Error ? e.message : String(e ?? '')).trim()) })
     const off = EventsOn('tick', (s: UIStatus) => setStatus(s))
     return () => { mounted = false; off() }
+  }, [attempt])
+
+  // The deadline is armed only while nothing has ever arrived; the first
+  // snapshot disarms it for good, so the 2 Hz stream never re-runs this.
+  useEffect(() => {
+    if (status) return
+    const t = window.setTimeout(() => setOverdue(true), FIRST_TICK_MS)
+    return () => window.clearTimeout(t)
+  }, [status, attempt])
+
+  const retry = useCallback(() => {
+    setError('')
+    setOverdue(false)
+    setAttempt(a => a + 1)
   }, [])
-  return status
+
+  return {status, error, overdue, retry}
 }
 
 /** True when the 2 Hz snapshots go quiet (>2.5 s) — the backend is busy or

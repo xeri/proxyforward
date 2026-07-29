@@ -85,6 +85,28 @@
 //                      an MOTD. empty → the server answered but omitted its
 //                      player counts, so they must render "—" and not 0/0.
 //                      No axis → the tcp probe: no report, no reading shown.
+//   &tick=silent|reject|late
+//                    — the FIRST status snapshot, which is the one App has no
+//                      other instrument for (useTickStale only works after one
+//                      has landed). Both Status() and the tick emitter are gated
+//                      together, because the deadline is only reached when both
+//                      are quiet. silent → Status() never settles and no ticks
+//                      are emitted: the deadline state with no reason to show.
+//                      reject → the same, but Status() rejects, so the state
+//                      must print the reason verbatim. late → the first snapshot
+//                      lands after ~9s, so the deadline state has to clear
+//                      itself when it finally does. Retry re-runs the call, so
+//                      silent/reject show the spinner→deadline loop again.
+//   &crash=screen|shell
+//                    — a deliberate render throw, for the two error boundaries.
+//                      screen → the keyed screen switch throws: the inner
+//                      boundary answers, Shell/sidebar/title bar stay alive, and
+//                      navigating away resets it. shell → the console throws
+//                      above the inner boundary: the outer boundary answers with
+//                      its own minimal frame (no Shell to borrow). Read by
+//                      CrashProbe (components/ErrorBoundary.tsx) — the mock
+//                      cannot reach React, so the throw comes from a component;
+//                      both halves are dropped from production builds.
 //   &tray=off|notice — the close fork (X button). Default: the tray preference
 //                      is on and the one-time notice was already seen, so X
 //                      with players shows the Minimize/Quit fork and X without
@@ -122,6 +144,12 @@ export function installDevMock() {
   const axisTray = params.get('tray') || '' // '' (on, notice seen) | off | notice
   const axisPause = params.get('pause') || '' // '' | mine | theirs | both
   const axisMCStatus = params.get('mcstatus') || '' // '' (tcp probe, no report) | on | empty
+  const axisTick = params.get('tick') || '' // '' | silent | reject | late
+  const TICK_LATE_MS = 9_000 // &tick=late: comfortably past App's FIRST_TICK_MS
+  // The &crash axis is not a binding, so it cannot live in the App stub below:
+  // the throw has to happen inside React. CrashProbe reads this flag; it and
+  // this line are both dev-only, so neither reaches a shipped build.
+  w.__pfCrash = params.get('crash') || '' // '' | screen | shell
   // &local=unset is the tunnel the gateway created by id: it holds a public port
   // but names no local address, because the wire has no field to carry one. It
   // must never read as "server down" — that sends the operator to restart a
@@ -825,7 +853,7 @@ export function installDevMock() {
   pushLog('INFO', 'agent connected', 'id=agt_5w7d2k9rq3v8xj4m rtt=24ms')
   pushLog('WARN', 'local server is down', 'tunnel=Minecraft local_addr=127.0.0.1:25565')
 
-  if (!isWizard) setInterval(() => {
+  const startTicks = () => setInterval(() => {
     // Integrate the same rate functions the history serves, so the header
     // readout, tiles, and chart all agree. A downed link moves no traffic.
     if (state.linkUp) {
@@ -841,6 +869,12 @@ export function installDevMock() {
     }
     emit('tick', status())
   }, 500)
+  // &tick gates the stream, not just Status(): App's first-tick deadline is only
+  // reachable when BOTH are quiet, so silencing one of them would prove nothing.
+  if (!isWizard && axisTick !== 'silent' && axisTick !== 'reject') {
+    if (axisTick === 'late') setTimeout(startTicks, TICK_LATE_MS)
+    else startTicks()
+  }
 
   // ---- players & sessions (analytics mock) ----
   // Deterministic wall of players derived from the same hash noise as the
@@ -1168,7 +1202,15 @@ export function installDevMock() {
       ? Promise.reject(new Error('the engine runs in another process (service or headless run)'))
       : Promise.resolve(v())
   const App: Record<string, AnyFn> = {
-    Status: () => ok(status()),
+    // The first snapshot, and the three ways it can fail to be one (&tick).
+    // A never-settling promise is the honest model of a dead pipe: Wails leaves
+    // the call outstanding rather than rejecting it.
+    Status: () => {
+      if (axisTick === 'silent') return new Promise(() => {})
+      if (axisTick === 'reject') return Promise.reject(new Error('the engine is not answering on \\\\.\\pipe\\proxyforward'))
+      if (axisTick === 'late') return new Promise(r => setTimeout(() => r(status()), TICK_LATE_MS))
+      return ok(status())
+    },
     BandwidthHistory: (windowMs: number, maxBuckets: number) => ok(bandwidthHistory(windowMs, maxBuckets)),
     AgentBandwidthHistory: (agentId: string, windowMs: number, maxBuckets: number) => ok(agentBandwidth(agentId, windowMs, maxBuckets)),
     PeerStats: () => ok(isWizard || axisFresh ? [] : peerStats()),
