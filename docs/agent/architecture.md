@@ -679,6 +679,10 @@ port but names no local address, because the wire has no field to carry one. It 
 read "No local address", never "Server down", and Overview's one call to action must
 say to set an address rather than to start Minecraft — the two states share
 `localUp=false` and only one of them is fixed by starting a server),
+`&autostart=on` (the HKCU Run entry exists, so Settings → System reads "Start on login"
+as on; compose with `&service` for the overlap the row has to explain — the service
+answers the same question better, so with no entry the row is disabled and says why,
+and with one it warn-washes but stays operable so it can be turned off),
 `&update=newer|none|odd|fail` (Settings → About, release check ON — the axis turns it
 on, because the shipped default is off and then the row is absent entirely: `newer` a
 newer release exists, `none` nothing published, `odd` this build's version cannot be
