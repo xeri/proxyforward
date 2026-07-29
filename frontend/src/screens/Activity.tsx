@@ -202,8 +202,10 @@ const SKELETON_BARS = [
  * what sets the height). Relative units throughout, so --ui-scale carries it
  * and the rows never shift when the real lines land.
  *
- * The chip radius has to be an inline style: .pf-skeleton (motion.css) sets its
- * own --r-sm unlayered, which outranks a rounded-* utility. */
+ * The chip radius is an inline style. It no longer has to be — .pf-skeleton's
+ * radius lives in @layer base now, so a rounded-* utility would win — but it
+ * still says exactly which token this chip owes its shape to, which is the
+ * point at 4px. */
 function LogSkeleton() {
   return (
     <div aria-hidden>

@@ -72,9 +72,9 @@ export function GroupsPanel({status, roster, onChanged}: {
 
       {groups === null ? (
         <div className="grid grid-cols-1 gap-[var(--grid-gap)] @min-[52rem]:grid-cols-2 @min-[92rem]:grid-cols-3">
-          <Skeleton className="h-40 rounded-[var(--r-card)]" />
-          <Skeleton className="h-40 rounded-[var(--r-card)]" />
-          <Skeleton className="h-40 rounded-[var(--r-card)]" />
+          <Skeleton className="h-40 rounded-[var(--r-lg)]" />
+          <Skeleton className="h-40 rounded-[var(--r-lg)]" />
+          <Skeleton className="h-40 rounded-[var(--r-lg)]" />
         </div>
       ) : groups.length === 0 ? (
         <Card>
