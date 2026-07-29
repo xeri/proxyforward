@@ -116,6 +116,13 @@ func newRootCmd(deepLink string) *cobra.Command {
 		newServiceCmd(),
 		newFirewallCmd(),
 		newElevatedTaskCmd(),
+		// The IPC client group (cli.go): these drive a daemon that is already
+		// running rather than starting one, so an operator with no desktop has
+		// the same control surface the GUI does.
+		newStatusCmd(),
+		newAgentsCmd(),
+		newRunCmd(),
+		newPauseCmd(),
 	)
 	return root
 }
@@ -185,6 +192,11 @@ func newPairCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "", "path to config.toml (default: %APPDATA%\\proxyforward\\config.toml)")
 	cmd.Flags().StringVar(&localAddr, "local", "127.0.0.1:25565", "local Minecraft server address for the default tunnel")
 	cmd.Flags().IntVar(&publicPort, "public-port", config.DefaultPublicPort, "public port to request on the gateway for the default tunnel")
+	// The other end of the same act: `pair issue` mints on the gateway what
+	// `pair <code>` consumes on the agent. Cobra routes a first argument that
+	// names no child straight to the RunE above, so a pxf:// code is never
+	// mistaken for a verb and this command's own form is unchanged.
+	cmd.AddCommand(newPairIssueCmd())
 	return cmd
 }
 

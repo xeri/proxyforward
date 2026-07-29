@@ -10,6 +10,10 @@
 ```
 main.go                 CLI (cobra): GUI default | agent|gateway headless | pair |
                         service | firewall | elevated-task; crash.log setup
+cli.go / cliview.go     The IPC client group — status | agents | pair issue |
+                        run | pause: subcommands that drive an already-running
+                        daemon over the pipe instead of starting one. cliview.go
+                        is the only renderer (tables, sentinels, clamped counts)
 app/                    Wails-bound layer: App methods = the whole JS API; 2 Hz tick;
                         system tray + the close fork (tray.go, close.go); avatars
                         (player-head cache + /pf/avatar/ HTTP); setup export/
@@ -578,6 +582,43 @@ counterpart: `AvatarImg` re-asks on a short backoff until the long-lived render
 lands (`components/AvatarImg.tsx`). In browser dev the asset server doesn't exist —
 `avatarUrl` falls back to mc-heads / inline SVG (`avatars.ts`).
 
+## CLI client group (`cli.go`, `cliview.go`)
+
+`status`, `agents list|revoke|rename`, `pair issue`, `run start|stop`, `pause on|off` —
+subcommands that drive an already-running daemon instead of starting one, so a gateway
+on a desktop-less VPS has the control surface the GUI has. This matters most for
+`pair issue`: `RunStarted` (`internal/gateway/gateway.go`) prints a bootstrap code only
+while the roster is empty, so without it the *second* agent can never be enrolled from
+that box.
+
+Mechanics and the rules that are easy to lose:
+
+- **One transport, no new IPC surface.** Everything rides `ipc.Client.Analytics`, which
+  despite its name is the generic op call — `internal/engine/analytics_api.go analyticsOp`
+  routes lifecycle, pause and agent-admin ops *before* the analytics-store check, so
+  these commands answer on a daemon whose DB failed to open. Nothing is added to
+  `internal/ipc`, because every method there must be mirrored in `ipc/stub_other.go`
+  for the linux/darwin builds CI compiles.
+- **Request/result shapes are anonymous structs with json tags at the call site**
+  (`app/agents.go IssuePairingCode` is the same pattern). The two sides never share a
+  type; the tags are the contract.
+- **Read errors surface and exit non-zero** — the inverse of the GUI, which swallows a
+  failed read into an empty state because it polls again in half a second. A CLI prints
+  once: an empty table and exit 0 would report the fleet as empty.
+- **`ok:false` is not an error** ("no such agent", "cannot land now"): prose, exit 0.
+  A `*ipc.OpError` is a *served* refusal — the daemon ran the op and said no, so its
+  message is printed as-is; anything else is transport and gets a different diagnostic,
+  including `ipc.ErrUntrustedServer`, which means something is squatting the pipe.
+- **The roster is paged.** `list_agents` answers ≤64 rows with an `afterAgentId` cursor;
+  the walk carries `app.ListAgents`'s legacy guard (a page starting at an id already
+  held means a daemon that ignores the cursor — stop, don't append forever).
+- **`stop_run` ignores its Force field and always forces** (`engine.lifecycleOp`), so no
+  graceful stop is advertised and there is no `--wait` flag to add.
+- `cliview.go` is the only renderer: sentinels (RTT 0, jitter/loss/uptime -1) print as
+  `—`, and every clamped list prints the daemon's `*Total`, never `len()`.
+- `--json` is on every command and passes the daemon's own bytes through
+  (`json.Indent`), so a field a newer daemon added is not silently dropped.
+
 ## Frontend data layers
 
 | Layer | Source | Cadence | Cache |
@@ -657,7 +698,9 @@ whole app live in the browser with no Go running.
 - Port conflicts: `GetExtendedTcpTable` → "in use by java.exe (PID 1234)"
   (`portowner/`).
 - Console attach for windowsgui builds: `wincon.AttachParent()` at the top of every
-  CLI subcommand — new subcommands must call it too.
+  CLI subcommand — new subcommands must call it too. It is the *first* statement of
+  the `RunE`, before any dial or validation, or the diagnostic those produce has
+  nowhere to print.
 - System tray: energye/systray registers on the main goroutine in `runGUI` *before*
   `wails.Run` (its `init()` locks the main thread; the tray window is created on the
   registering thread and Wails' message pump services it — `OnStartup` runs in a

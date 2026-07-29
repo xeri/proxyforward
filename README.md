@@ -461,14 +461,43 @@ server-side can fix that. So:
 
 ## CLI
 
+Running a role, and one-time setup:
+
 ```
-proxyforward                      # GUI (attaches to a running service, else runs the engine)
-proxyforward gateway --headless   # run the gateway in the console
-proxyforward agent   --headless   # run the agent in the console
+proxyforward                      # GUI (attaches to a running daemon, else runs the engine)
+proxyforward gateway              # run the gateway in the console (no GUI)
+proxyforward agent                # run the agent in the console (no GUI)
 proxyforward pair <code>          # configure this machine as an agent from a pairing code
 proxyforward firewall <status|add|remove>
-proxyforward service <install|uninstall|start|stop> --role gateway
+proxyforward service <install|uninstall|start|stop|run>
 ```
+
+`--config <path>` points any of these at a config file other than the default
+(`%APPDATA%\proxyforward\config.toml`, or `%ProgramData%\proxyforward` for the service).
+
+### Driving a daemon that is already running
+
+Every command below talks to the engine serving the named pipe — a console run, the
+Windows service, or the GUI's own engine. This is the whole control surface on a box
+with no desktop:
+
+```
+proxyforward status                              # role, link quality, tunnels, traffic
+proxyforward agents list                         # the gateway's enrolled agents
+proxyforward agents revoke <agent-id>            # off the allowlist, session evicted
+proxyforward agents rename <agent-id> <name>
+proxyforward pair issue [--reusable] [--ttl 24h] [--label vps]
+proxyforward run <start|stop>                    # the tunnel run; the pipe keeps serving
+proxyforward pause <on|off> [--agent A] [--tunnel T] [--disconnect]
+```
+
+Add `--json` to any of them to get the daemon's reply as JSON instead of a table.
+
+`pair issue` is the important one on a headless gateway: the bootstrap pairing code is
+printed at startup **only while no agent is enrolled**, so once the first one is paired,
+this is how you mint the next code. `pause off` clears only this side's pause — if the
+other end paused too, the tunnel stays paused until they resume. `run stop` drops live
+players immediately; there is no graceful variant.
 
 When installed as a Windows service the engine runs headless (config in
 `%ProgramData%\proxyforward`) and the GUI attaches to it over the named pipe as a thin

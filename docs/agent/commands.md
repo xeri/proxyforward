@@ -44,6 +44,38 @@ go run . pair <code> --config <tmp>\ag.toml
 go run . agent --config <tmp>\ag.toml
 ```
 
+## Driving a running daemon (`cli.go`)
+
+These talk to whatever engine is serving `\\.\pipe\proxyforward` — a headless run, the
+service, or a GUI's in-process engine. They never start one; if none answers they say
+so and exit 1.
+
+```
+proxyforward status                         # role, link quality, tunnels, traffic
+proxyforward agents list                    # the gateway's roster (paged behind the scenes)
+proxyforward agents revoke <agent-id>       # allowlist removal + session eviction
+proxyforward agents rename <agent-id> <name>
+proxyforward pair issue [--reusable] [--ttl 24h] [--label vps]   # mint a pairing code
+proxyforward run stop | run start           # the tunnel run; the pipe keeps serving
+proxyforward pause on|off [--agent A] [--tunnel T] [--disconnect]
+```
+
+`--json` works on every one of them and emits the daemon's own reply.
+
+`pair issue` is the reason this group exists: the gateway prints a bootstrap code only
+while its roster is empty, so on a headless VPS this is how every code after the first
+is minted. Verified 2026-07-29 against `go run . gateway --config <tmp>\gw.toml`.
+
+Notes that bite:
+
+- `pause` on a **gateway** needs `--agent`; on an agent it is ignored. `pause off`
+  clears only this side's bit — if the peer also paused, the tunnel stays paused.
+- `run stop` always forces (live players are dropped now); there is no graceful variant.
+- "no such agent" prints as prose and exits **0** — it is a true answer. A refusal the
+  daemon served (wrong role, bad argument) exits 1 with the daemon's own message.
+- Only one process may serve the pipe, so a gateway and an agent cannot both run on one
+  machine — a two-process repro needs two boxes (or two VMs).
+
 ## Service lifecycle (Windows, elevation-gated)
 
 ```
