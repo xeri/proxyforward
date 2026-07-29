@@ -206,7 +206,6 @@ func newRoleCmd(role config.Role, short string) *cobra.Command {
 	var (
 		configPath string
 		logLevel   string
-		headless   bool
 	)
 	cmd := &cobra.Command{
 		Use:   string(role),
@@ -272,7 +271,6 @@ func newRoleCmd(role config.Role, short string) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "path to config.toml (default: %APPDATA%\\proxyforward\\config.toml)")
 	cmd.Flags().StringVar(&logLevel, "log-level", "", "override log level (debug|info|warn|error)")
-	cmd.Flags().BoolVar(&headless, "headless", true, "run without GUI (always true for this subcommand)")
 	return cmd
 }
 
