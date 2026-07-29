@@ -71,6 +71,13 @@ func ParsePairingCode(s string) (PairingCode, error) {
 		return PairingCode{}, fmt.Errorf("not a valid pairing code: %w", err)
 	}
 	if u.Scheme != pairingScheme {
+		// No scheme at all is the common paste error — a fragment of the code, or
+		// the wrong clipboard entirely. url.Parse reports that as an empty scheme,
+		// and quoting "" back at someone who typed something is a riddle, not a
+		// diagnosis. Name the shape they need instead.
+		if u.Scheme == "" {
+			return PairingCode{}, fmt.Errorf("that does not look like a pairing code — paste the whole %s://… line the gateway printed", pairingScheme)
+		}
 		return PairingCode{}, fmt.Errorf("not a proxyforward pairing code (expected %s://, got %q)", pairingScheme, u.Scheme)
 	}
 	token, err := tokenFromV1Path(u.Path)
