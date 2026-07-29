@@ -403,26 +403,21 @@ function HealthPanel({status}: {status: UIStatus}) {
       <div className="flex flex-col">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-4 p-5">
           <div className="flex items-center gap-3">
+            {/* Same chip as the pipeline's stations (PipeNode): border, tint,
+                state glow. It used to carry a catch-light of its own as a 1px
+                padding-box band — but a straight band across a 48px box with a
+                14px radius is cut by the corners and dead-ends on the arc,
+                which read as broken glass. The tile is too small for an edge
+                treatment; the light lives on the card around it. */}
             <span
               className="grid h-12 w-12 place-items-center rounded-[var(--r-lg)] border transition-all duration-500"
               style={{
                 color: c,
                 borderColor: `color-mix(in srgb, ${c} 40%, var(--border))`,
-                // Catch-light as a padding-box band; an `inset 0 1px 0` specks
-                // at the corners (glass.css, the rim primitive). backgroundImage,
-                // not the `background` shorthand — React warns when a style
-                // object updates a shorthand next to a longhand it subsumes
-                // (backgroundClip), and this tile re-tints as health changes.
-                backgroundImage: [
-                  `linear-gradient(180deg, ${score !== 'unknown'
-                    ? 'color-mix(in srgb, var(--bevel-top) 55%, white)'
-                    : 'var(--bevel-top)'} 0 1px, transparent 1px)`,
-                  `linear-gradient(color-mix(in srgb, ${c} 10%, transparent), color-mix(in srgb, ${c} 10%, transparent))`,
-                ].join(', '),
-                backgroundClip: 'padding-box, border-box',
+                background: `color-mix(in srgb, ${c} 9%, transparent)`,
                 boxShadow: score !== 'unknown'
                   ? `0 0 24px -6px color-mix(in srgb, ${c} 60%, transparent)`
-                  : undefined,
+                  : 'none',
               }}
             >
               <IconActivity size={22} />
