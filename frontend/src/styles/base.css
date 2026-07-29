@@ -177,7 +177,21 @@ button { cursor: pointer; font: inherit; }
    ring clipped by that surface. The fix is per-surface — interior padding at
    least the offset, or moving the ring onto a box-shadow each control opts
    into — not something a base rule can reach. */
-:focus { outline: none; }
+/* The COLOUR is set on everything at rest, not only on :focus-visible, so the
+   ring has no colour to animate into. Tailwind v4's `transition-colors`
+   includes outline-color, and an outline's resting colour is currentColor — so
+   any of this app's 34 `transition-colors` controls faded its ring in from its
+   own ink over that element's duration. At the usual 150ms nobody sees it; on
+   the sidebar's role switcher, which runs 500ms, the ring visibly arrives as
+   pale body text and turns jade — the one control where the ring is largest and
+   most looked at. Declaring the colour up front makes :focus-visible a pure
+   style + width change, and neither of those is animatable, so no future
+   `transition-colors` can reintroduce this.
+
+   `:focus` therefore clears the STYLE, not the shorthand: `outline: none` would
+   reset outline-color back to currentColor and undo all of the above. */
+*, ::before, ::after { outline-color: var(--focus-ring); }
+:focus { outline-style: none; }
 :focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
