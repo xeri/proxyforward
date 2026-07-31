@@ -26,7 +26,7 @@ attacker who can produce a second certificate agreeing on every pinned bit owns
 the connection. The gateway generates its own certificate and nothing an attacker
 sends influences it, so that is a fixed-target preimage — 2^(8n) trials, each a
 P-256 keygen and a self-sign — not a birthday collision. `pinMatches` refuses
-anything under `minPinBytes` outright rather than comparing it, because a short
+anything under `MinPinBytes` outright rather than comparing it, because a short
 pin is not a weaker pin, it is a forgeable one, and accepting one would let a
 pasted code downgrade the trust root from the outside
 (`TestPinIsWideEnoughToBeUnforgeable`).

@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"proxyforward/internal/secureio"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,7 +40,7 @@ func Pin(der []byte, n int) string {
 	return "sha256:" + hex.EncodeToString(sum[:n])
 }
 
-// minPinBytes is the shortest prefix of a certificate hash this code will trust,
+// MinPinBytes is the shortest prefix of a certificate hash this code will trust,
 // and it is a security parameter rather than a formatting choice. A pin is what
 // stands in for the whole certificate, so an attacker who can produce a *second*
 // certificate agreeing with the gateway's on every pinned bit owns the connection.
@@ -50,12 +51,12 @@ func Pin(der []byte, n int) string {
 // pinMatches refuses outright: a short pin is not a weaker pin, it is a pin that
 // can be forged, and accepting one would let a truncated pairing code downgrade
 // the trust root from the outside.
-const minPinBytes = 10
+const MinPinBytes = 10
 
 // pinMatches reports whether a certificate's full fingerprint begins with the
 // pinned prefix, in constant time. A full-length pin is the ordinary case and
 // compares whole; a truncated one (from a v2 pairing code) compares over its own
-// width, floored at minPinBytes.
+// width, floored at MinPinBytes.
 func pinMatches(full, pin string) bool {
 	const scheme = "sha256:"
 	full, pin = strings.ToLower(full), strings.ToLower(pin)
@@ -63,7 +64,7 @@ func pinMatches(full, pin string) bool {
 		return false
 	}
 	nibbles := len(pin) - len(scheme)
-	if nibbles%2 != 0 || nibbles < minPinBytes*2 || len(pin) > len(full) {
+	if nibbles%2 != 0 || nibbles < MinPinBytes*2 || len(pin) > len(full) {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(full[:len(pin)]), []byte(pin)) == 1
@@ -151,24 +152,70 @@ func GatewayTLSConfig(cert tls.Certificate) *tls.Config {
 	}
 }
 
-// AgentTLSConfig trusts exactly one certificate: the one whose SHA-256
-// fingerprint begins with the pin delivered out-of-band in the pairing code.
-// Standard chain verification is disabled (self-signed) and replaced by the pin.
+// PinnedPeer is one agent's view of one gateway's identity: the pin it was paired
+// with, and the whole fingerprint the first handshake proved. It exists because
+// those are not always the same string — a v2 pairing code carries a prefix — and
+// the agent must sign the *whole* one to prove possession to the gateway
+// (AgentAuthMessage), which knows only its own full fingerprint.
+//
+// Learning is one-way and first-write-wins: once a certificate has been accepted,
+// every later handshake must present that exact certificate, not merely one
+// agreeing with the pin. So the prefix is the trust root for a single moment — the
+// pairing act — and the whole hash for every moment after it, within the process
+// and (once persisted) beyond it.
+type PinnedPeer struct {
+	pin  string
+	full atomic.Pointer[string]
+}
+
+// NewPinnedPeer starts from the pin a pairing code delivered, which may be the
+// whole fingerprint (a v1 code, or an agent that has already connected once) or a
+// prefix of it (a v2 code, before first contact).
+func NewPinnedPeer(pin string) *PinnedPeer { return &PinnedPeer{pin: pin} }
+
+// Fingerprint is the whole fingerprint a handshake proved, or "" before any has.
+func (p *PinnedPeer) Fingerprint() string {
+	if s := p.full.Load(); s != nil {
+		return *s
+	}
+	return ""
+}
+
+func (p *PinnedPeer) verify(rawCerts [][]byte) error {
+	if len(rawCerts) == 0 {
+		return errors.New("gateway presented no certificate")
+	}
+	got := Fingerprint(rawCerts[0])
+	if known := p.Fingerprint(); known != "" {
+		if !pinMatches(got, known) {
+			return fmt.Errorf("gateway presented a different certificate than the one this session pinned: expected %s, got %s", known, got)
+		}
+		return nil
+	}
+	if !pinMatches(got, p.pin) {
+		return fmt.Errorf("gateway certificate does not match the pinned one: expected %s, got %s (re-pair if the gateway was reinstalled)", p.pin, got)
+	}
+	// Two first handshakes can race; whoever loses re-checks against the winner's
+	// certificate rather than assuming its own was the one that landed.
+	if !p.full.CompareAndSwap(nil, &got) && !pinMatches(got, p.Fingerprint()) {
+		return fmt.Errorf("gateway presented a different certificate than the one this session pinned: expected %s, got %s", p.Fingerprint(), got)
+	}
+	return nil
+}
+
+// TLSConfig trusts exactly one certificate: the one whose SHA-256 fingerprint
+// begins with the pin delivered out-of-band in the pairing code. Standard chain
+// verification is disabled (self-signed) and replaced by the pin.
 // CurvePreferences is left unset so the X25519MLKEM768 PQ hybrid is negotiated
 // (see GatewayTLSConfig; asserted by pq_test.go).
-func AgentTLSConfig(pin string) *tls.Config {
+func (p *PinnedPeer) TLSConfig() *tls.Config {
 	return &tls.Config{
-		MinVersion:         tls.VersionTLS13,
-		InsecureSkipVerify: true, // verification happens against the pin below
-		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			if len(rawCerts) == 0 {
-				return errors.New("gateway presented no certificate")
-			}
-			got := Fingerprint(rawCerts[0])
-			if !pinMatches(got, pin) {
-				return fmt.Errorf("gateway certificate does not match the pinned one: expected %s, got %s (re-pair if the gateway was reinstalled)", pin, got)
-			}
-			return nil
-		},
+		MinVersion:            tls.VersionTLS13,
+		InsecureSkipVerify:    true, // verification happens against the pin below
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error { return p.verify(rawCerts) },
 	}
 }
+
+// AgentTLSConfig is the pin check for a caller that has no use for the learned
+// fingerprint — tests, and any dial whose identity is already settled.
+func AgentTLSConfig(pin string) *tls.Config { return NewPinnedPeer(pin).TLSConfig() }

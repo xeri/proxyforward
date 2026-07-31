@@ -166,6 +166,13 @@ type Agent struct {
 	// resumed ones, so trust is preserved.
 	sessionCache tls.ClientSessionCache
 
+	// pinned is the gateway's identity as this agent knows it: the pin it was
+	// paired with, plus the whole fingerprint the first handshake proved. A v2
+	// pairing code carries only a prefix, and the proof-of-possession signature
+	// must be over the whole hash — the gateway has nothing else to check it
+	// against. Process-lifetime, shared by the control conn and every data conn.
+	pinned *link.PinnedPeer
+
 	// dir is the config directory; the agent's long-term Ed25519 identity key
 	// (agent_identity.key) lives here. identOnce guards a one-time load of it.
 	dir       string
@@ -343,6 +350,7 @@ func New(cfg *config.Config, dir string, logger *slog.Logger) *Agent {
 		bwLimiters:        bwcap.NewRegistry(),
 		sessionCache:      tls.NewLRUClientSessionCache(0),
 		transportCooldown: map[string]time.Time{},
+		pinned:            link.NewPinnedPeer(cfg.Agent.CertFingerprint),
 	}
 }
 
@@ -366,8 +374,16 @@ func (a *Agent) authFields() (pub, sig []byte, ticket string, err error) {
 		return nil, nil, "", fmt.Errorf("%w: %v", ErrNoIdentity, err)
 	}
 	a.cfgMu.RLock()
-	fp, ticket := a.cfg.Agent.CertFingerprint, a.cfg.Agent.EnrollTicket
+	ticket = a.cfg.Agent.EnrollTicket
+	fp := a.cfg.Agent.CertFingerprint
 	a.cfgMu.RUnlock()
+	// Sign what the handshake proved, not what config stored: a v2 pairing code
+	// carries a prefix of the fingerprint, and the gateway checks this signature
+	// against the whole one. Every caller reaches here after a handshake, so the
+	// stored value is a fallback for the case where it is already the whole hash.
+	if proved := a.pinned.Fingerprint(); proved != "" {
+		fp = proved
+	}
 	return pubKey, link.SignAgentAuth(priv, fp), ticket, nil
 }
 
@@ -564,9 +580,18 @@ func (a *Agent) dialGateway(ctx context.Context) (*tls.Conn, error) {
 	if tcp, ok := rawConn.(*net.TCPConn); ok {
 		_ = tcp.SetNoDelay(true)
 	}
-	cfg := link.AgentTLSConfig(a.cfg.Agent.CertFingerprint)
+	cfg := a.pinned.TLSConfig()
 	cfg.ClientSessionCache = a.sessionCache
-	return tls.Client(rawConn, cfg), nil
+	conn := tls.Client(rawConn, cfg)
+	// Handshake here rather than letting the first write drive it: the hello
+	// carries a signature over the fingerprint this handshake proves, so it has to
+	// have happened before the hello is built. A failure closes the socket the
+	// caller would otherwise have to unwind.
+	if err := conn.HandshakeContext(ctx); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("tls handshake with gateway %s: %w", addr, err)
+	}
+	return conn, nil
 }
 
 // runSession performs one full connect → serve cycle and returns why the
@@ -803,7 +828,9 @@ func (a *Agent) dialGatewayQUIC(ctx context.Context, sessCounters *stats.LinkCou
 		return nil, fmt.Errorf("quic local socket: %w", err)
 	}
 	addr := net.JoinHostPort(a.cfg.Agent.GatewayHost, strconv.Itoa(a.cfg.Agent.GatewayPort))
-	return transport.DialQUIC(ctx, udp, addr, link.AgentTLSConfig(a.cfg.Agent.CertFingerprint), &a.linkTotals, sessCounters)
+	// DialQUIC completes the handshake before it returns, so the fingerprint is
+	// proved by the time the hello is built on the control stream.
+	return transport.DialQUIC(ctx, udp, addr, a.pinned.TLSConfig(), &a.linkTotals, sessCounters)
 }
 
 // helloConn is the minimal surface the hello exchange needs: it reads and writes

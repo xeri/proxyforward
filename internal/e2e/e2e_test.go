@@ -25,6 +25,7 @@ import (
 	"proxyforward/internal/config"
 	"proxyforward/internal/control"
 	"proxyforward/internal/gateway"
+	"proxyforward/internal/link"
 )
 
 // syncOnlyOffer is the capability offer of an agent build that predates
@@ -349,6 +350,35 @@ func TestPerConnRoundTrip(t *testing.T) {
 	in, out := h.agent.LinkTotalBytes()
 	t.Fatalf("per-conn data bytes not counted: in delta %d, out delta %d, want ≥ %d each",
 		in-beforeIn, out-beforeOut, len(payload))
+}
+
+// TestTruncatedPinPairsAndConnects: an agent paired from a v2 code holds only a
+// prefix of the gateway's certificate fingerprint, and must still get all the way
+// through. That exercises the two places the whole fingerprint used to be assumed:
+// the TLS pin check, which now compares a prefix, and the proof-of-possession
+// signature, which the gateway verifies against its own full fingerprint — so the
+// agent has to sign what the handshake proved rather than what config stored.
+// Both transports, because each builds its hello on a differently-established
+// connection. (identity)
+func TestTruncatedPinPairsAndConnects(t *testing.T) {
+	for _, transport := range []string{config.TransportMux, config.TransportQUIC} {
+		t.Run(transport, func(t *testing.T) {
+			echoAddr, closeEcho := echoServer(t)
+			defer closeEcho()
+			h := newHarnessWith(t, echoAddr, harnessOpts{
+				transport: transport,
+				tweakAgent: func(c *config.Config) {
+					full := c.Agent.CertFingerprint
+					c.Agent.CertFingerprint = full[:len("sha256:")+link.MinPinBytes*2]
+					if c.Agent.CertFingerprint == full {
+						t.Fatalf("fingerprint %q was already at the pin width; the test proves nothing", full)
+					}
+				},
+			})
+			addr := h.waitPublicPort()
+			roundTrip(t, addr, []byte("paired from a short code"))
+		})
+	}
 }
 
 // TestQUICRoundTrip: the QUIC transport moves bytes end to end over a single

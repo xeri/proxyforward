@@ -117,7 +117,7 @@ all of these looked reasonable right up until they didn't.
   fingerprint in the pairing code, out-of-band. **No CA, ever.** The pairing code
   carries a *prefix* of that hash, so pin width is a security parameter: it is the
   cost of forging a second cert that answers to it, floored where that stops being
-  purchasable and compared in constant time (`link/cert.go pinMatches minPinBytes`,
+  purchasable and compared in constant time (`link/cert.go pinMatches MinPinBytes`,
   `crypto/subtle`).
 - **Per-agent identity is the trust model**: an Ed25519 key the gateway allowlists,
   its derived `agentID` scoped and revocable. Revocation *and* a scope change evict
