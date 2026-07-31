@@ -324,33 +324,30 @@
   --halo-gap: var(--sp-3);
 
   /* The Overview pipeline is the app's one deliberate grid break (DESIGN.md
-     rule 7): the hero runs out past the content column's edges. Two limits
-     bound it, because two different windows ask two different questions.
+     rule 7): the hero runs out past the content column's edges. It spends most
+     of its life NOT breaking out — flush with every other card — because a
+     window that is merely wide enough has no room to spare, and a hero that
+     eats the page padding at every size reads as a card that failed to line up
+     rather than one that meant to.
 
-     --hero-gutter is the closest the hero ever comes to the window edge, and
-     the ramp reaches it well before the app's own minimum size (MinWidth in
-     main.go), so inside the app the gutter is simply LOCKED there. The ramp
-     used to still be climbing at that minimum, so the last stretch of
-     shrinking pushed the hero back off the edge again — the card looked like
-     it had stopped tracking the window. The ramp survives only below the
-     narrowest window the app can open, where it eases the bleed to 0 rather
-     than snapping, for the browser mock.
+     What earns the break is the page pulling away from the window. Below
+     --content-max the column still grows with the window, the cards sit
+     --page-pad from the edge, and the hero sits with them (bleed 0). Past it
+     the column stops growing and centres, so the cards start drifting inward;
+     the hero spends that centring slack — and only the part of it past
+     --hero-cutoff, so the cards are visibly ahead before the hero moves at
+     all, never a break that appears the instant the cap is crossed.
 
-     Past --content-max the column stops growing and centres, so the gutter is
-     no longer what bounds the hero: there it takes a sliver of that centring
-     slack instead. The slack's own floor keeps the sliver clear of the
-     scrollbar (100vw counts it, the column's width does not), so the hero can
-     never provoke a horizontal scroll, and the sliver is 0 for every window
-     that has not yet hit the cap.
-
-     Uses cqw, so it tracks the CONTENT column (App.tsx's @container), not the
-     viewport — the sidebar's width is already accounted for. */
+     --hero-gutter is what the break may never spend: the bleed stops that far
+     short of --page-pad, so the hero always stays inside the column's border
+     box and can never provoke a horizontal scroll. That also makes the
+     scrollbar harmless in the slack — 100vw counts it and the column's width
+     does not, so the slack reads a few px generous and the ramp starts a touch
+     early, which costs nothing. */
   --hero-gutter: 10px;
+  --hero-cutoff: var(--sp-6);
   --hero-slack: max(0px, (100vw - var(--sidebar-w) - var(--content-max)) / 2);
-  --hero-bleed: calc(
-    clamp(0px, (100cqw - 560px) * 0.12, var(--page-pad) - var(--hero-gutter))
-    + min(6px, max(0px, var(--hero-slack) - 26px))
-  );
+  --hero-bleed: clamp(0px, var(--hero-slack) - var(--hero-cutoff), var(--page-pad) - var(--hero-gutter));
 
   /* Motion — water physics. The current ease carries arrivals, hovers, and
      glow; propulsion carries presses and toggles (a push through water, small
