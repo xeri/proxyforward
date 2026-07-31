@@ -18,7 +18,18 @@ P-256 cert, pinned by SHA-256 fingerprint carried out-of-band in the pairing cod
 `cert.go GatewayTLSConfig`/`AgentTLSConfig`). `pxf` doubles as the OS deep-link
 scheme; `/v1/pair/` is a format-version + role marker so a wrong-kind link fails
 loudly rather than half-working. The pinned fingerprint compares in constant time
-(`crypto/subtle` — `cert.go fingerprintEqual`).
+(`crypto/subtle` — `cert.go pinMatches`).
+
+**A pin is only as good as it is wide.** The code carries a prefix of the hash,
+not the whole one, so the prefix *is* the trust root for the pairing act: an
+attacker who can produce a second certificate agreeing on every pinned bit owns
+the connection. The gateway generates its own certificate and nothing an attacker
+sends influences it, so that is a fixed-target preimage — 2^(8n) trials, each a
+P-256 keygen and a self-sign — not a birthday collision. `pinMatches` refuses
+anything under `minPinBytes` outright rather than comparing it, because a short
+pin is not a weaker pin, it is a forgeable one, and accepting one would let a
+pasted code downgrade the trust root from the outside
+(`TestPinIsWideEnoughToBeUnforgeable`).
 
 **Per-agent identity is the trust model.** Each agent proves possession of a
 long-term Ed25519 key the gateway allowlists. Its derived `agentID` (`agt_…`) is

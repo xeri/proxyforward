@@ -114,8 +114,11 @@ The rule and its symbol are here; the **why**, and the bug that proved each one,
 all of these looked reasonable right up until they didn't.
 
 - TLS 1.3 only, both sides; trust = the gateway's self-signed cert pinned by SHA-256
-  fingerprint in the pairing code, out-of-band. **No CA, ever.** The fingerprint
-  compares in constant time (`link/cert.go fingerprintEqual`, `crypto/subtle`).
+  fingerprint in the pairing code, out-of-band. **No CA, ever.** The pairing code
+  carries a *prefix* of that hash, so pin width is a security parameter: it is the
+  cost of forging a second cert that answers to it, floored where that stops being
+  purchasable and compared in constant time (`link/cert.go pinMatches minPinBytes`,
+  `crypto/subtle`).
 - **Per-agent identity is the trust model**: an Ed25519 key the gateway allowlists,
   its derived `agentID` scoped and revocable. Revocation *and* a scope change evict
   the live session — a session captures its scope at admission (`gateway.go

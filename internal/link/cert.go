@@ -31,9 +31,42 @@ func Fingerprint(der []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// fingerprintEqual compares fingerprints in constant time.
-func fingerprintEqual(a, b string) bool {
-	return subtle.ConstantTimeCompare([]byte(strings.ToLower(a)), []byte(strings.ToLower(b))) == 1
+// Pin returns the first n bytes of a certificate's fingerprint, in the same
+// "sha256:<hex>" spelling — the form a pairing code carries and an agent stores
+// until its first handshake teaches it the whole hash.
+func Pin(der []byte, n int) string {
+	sum := sha256.Sum256(der)
+	return "sha256:" + hex.EncodeToString(sum[:n])
+}
+
+// minPinBytes is the shortest prefix of a certificate hash this code will trust,
+// and it is a security parameter rather than a formatting choice. A pin is what
+// stands in for the whole certificate, so an attacker who can produce a *second*
+// certificate agreeing with the gateway's on every pinned bit owns the connection.
+// The gateway generates its own certificate and nothing an attacker sends
+// influences it, so that search is a fixed-target preimage — 2^(8n) trials, each
+// one a P-256 keygen and a self-sign, not a bare hash. At 10 bytes that is 2^80,
+// the same bar agentFingerprintBytes is held to and for the same reason. Below it
+// pinMatches refuses outright: a short pin is not a weaker pin, it is a pin that
+// can be forged, and accepting one would let a truncated pairing code downgrade
+// the trust root from the outside.
+const minPinBytes = 10
+
+// pinMatches reports whether a certificate's full fingerprint begins with the
+// pinned prefix, in constant time. A full-length pin is the ordinary case and
+// compares whole; a truncated one (from a v2 pairing code) compares over its own
+// width, floored at minPinBytes.
+func pinMatches(full, pin string) bool {
+	const scheme = "sha256:"
+	full, pin = strings.ToLower(full), strings.ToLower(pin)
+	if !strings.HasPrefix(full, scheme) || !strings.HasPrefix(pin, scheme) {
+		return false
+	}
+	nibbles := len(pin) - len(scheme)
+	if nibbles%2 != 0 || nibbles < minPinBytes*2 || len(pin) > len(full) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(full[:len(pin)]), []byte(pin)) == 1
 }
 
 // LoadOrCreateCert returns the gateway's TLS certificate, generating a
@@ -119,11 +152,11 @@ func GatewayTLSConfig(cert tls.Certificate) *tls.Config {
 }
 
 // AgentTLSConfig trusts exactly one certificate: the one whose SHA-256
-// fingerprint was delivered out-of-band in the pairing code. Standard chain
-// verification is disabled (self-signed) and replaced by the pin.
+// fingerprint begins with the pin delivered out-of-band in the pairing code.
+// Standard chain verification is disabled (self-signed) and replaced by the pin.
 // CurvePreferences is left unset so the X25519MLKEM768 PQ hybrid is negotiated
 // (see GatewayTLSConfig; asserted by pq_test.go).
-func AgentTLSConfig(pinnedFingerprint string) *tls.Config {
+func AgentTLSConfig(pin string) *tls.Config {
 	return &tls.Config{
 		MinVersion:         tls.VersionTLS13,
 		InsecureSkipVerify: true, // verification happens against the pin below
@@ -132,8 +165,8 @@ func AgentTLSConfig(pinnedFingerprint string) *tls.Config {
 				return errors.New("gateway presented no certificate")
 			}
 			got := Fingerprint(rawCerts[0])
-			if !fingerprintEqual(got, pinnedFingerprint) {
-				return fmt.Errorf("gateway certificate fingerprint mismatch: expected %s, got %s (re-pair if the gateway was reinstalled)", pinnedFingerprint, got)
+			if !pinMatches(got, pin) {
+				return fmt.Errorf("gateway certificate does not match the pinned one: expected %s, got %s (re-pair if the gateway was reinstalled)", pin, got)
 			}
 			return nil
 		},

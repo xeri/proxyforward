@@ -397,8 +397,57 @@ func TestPinnedTLSHandshake(t *testing.T) {
 	wrong := "sha256:" + strings.Repeat("00", 32)
 	if err := dial(wrong); err == nil {
 		t.Fatal("handshake with wrong pin must fail")
-	} else if !strings.Contains(err.Error(), "fingerprint mismatch") {
-		t.Fatalf("expected fingerprint mismatch error, got: %v", err)
+	} else if !strings.Contains(err.Error(), "does not match the pinned one") {
+		t.Fatalf("expected a pin mismatch error, got: %v", err)
+	}
+
+	// A v2 pairing code carries a prefix of the hash, so the prefix must be enough
+	// to connect — and a prefix of the wrong certificate must still not be.
+	if err := dial(fp[:len("sha256:")+minPinBytes*2]); err != nil {
+		t.Fatalf("handshake with a truncated pin failed: %v", err)
+	}
+	if err := dial(wrong[:len("sha256:")+minPinBytes*2]); err == nil {
+		t.Fatal("handshake with a truncated wrong pin must fail")
+	}
+	// And a pin narrower than the floor is refused rather than trusted, so no
+	// pairing code can talk the agent into a forgeable trust root.
+	if err := dial(fp[:len("sha256:")+(minPinBytes-1)*2]); err == nil {
+		t.Fatal("handshake with a pin below the width floor must fail")
+	}
+}
+
+// TestPinIsWideEnoughToBeUnforgeable pins the pin's width as the security parameter
+// it is: it stands in for the whole certificate, so its width is the cost of
+// producing a second certificate that answers to it. The gateway generates its own
+// cert, so the search is a fixed-target preimage — anything under 80 bits puts that
+// within a rented machine's reach. Asserts the floor and that pinMatches enforces
+// it, not the exact spelling. (identity)
+func TestPinIsWideEnoughToBeUnforgeable(t *testing.T) {
+	if bits := minPinBytes * 8; bits < 80 {
+		t.Fatalf("the pin floor is %d bits; below 80 a second certificate is purchasable", bits)
+	}
+	full := "sha256:" + strings.Repeat("ab", 32)
+	cases := map[string]struct {
+		pin  string
+		want bool
+	}{
+		"the whole hash":       {full, true},
+		"floor-width prefix":   {full[:len("sha256:")+minPinBytes*2], true},
+		"one byte under":       {full[:len("sha256:")+(minPinBytes-1)*2], false},
+		"half a byte":          {full[:len("sha256:")+minPinBytes*2+1], false},
+		"a different cert":     {"sha256:" + strings.Repeat("cd", 32), false},
+		"prefix of another":    {"sha256:" + strings.Repeat("cd", minPinBytes), false},
+		"longer than the hash": {full + "ab", false},
+		"empty":                {"", false},
+		"no algorithm":         {strings.Repeat("ab", 32), false},
+		"upper case":           {strings.ToUpper(full[:len("sha256:")+minPinBytes*2]), true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := pinMatches(full, tc.pin); got != tc.want {
+				t.Fatalf("pinMatches(full, %q) = %v, want %v", tc.pin, got, tc.want)
+			}
+		})
 	}
 }
 
