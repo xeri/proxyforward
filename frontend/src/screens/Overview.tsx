@@ -242,12 +242,11 @@ export function Overview({status, onNavigate}: {status: UIStatus; onNavigate: (i
         {/* The identity surface: the traffic path as three machined stations
             on Signal Glass, flow streaming between them when live. It breaks
             the content grid once — running past the column edges — so the
-            pipeline reads as the page's sculpture. The bleed GROWS with the
-            container (--hero-bleed, tokens.css) rather than switching on at a
-            breakpoint: the old binary @7xl variant snapped the gutters from
-            28px to 8px the moment the window crossed ~1080px, which is what
-            read as the card resizing and then clipping. A warn/bad link leaks
-            tone-colored light from behind the glass. */}
+            pipeline reads as the page's sculpture. The bleed is locked to a
+            fixed gutter across every window the app can open (--hero-bleed,
+            tokens.css), so resizing moves the hero's edges with the window and
+            never away from it. A warn/bad link leaks tone-colored light from
+            behind the glass. */}
         <div className="mx-[calc(-1*var(--hero-bleed))]">
         <Bleed
           color={linkState === 'bad' ? 'var(--bad)' : linkState === 'warn' ? 'var(--warn)' : null}

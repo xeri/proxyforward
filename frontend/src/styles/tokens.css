@@ -324,16 +324,33 @@
   --halo-gap: var(--sp-3);
 
   /* The Overview pipeline is the app's one deliberate grid break (DESIGN.md
-     rule 7): the hero runs out past the content column's edges. That bleed is
-     CONTINUOUS — it grows with the container instead of snapping on at a
-     breakpoint, which is what made the card appear to "resize, then clip" as
-     the window crossed the old @7xl switch. Floor: no bleed at all on a narrow
-     window, where 8px gutters against 28px everywhere else read as a mistake
-     rather than a statement. Ceiling: --page-pad − 8px, so however wide the
-     window gets, the hero never comes closer than 8px to the window edge.
+     rule 7): the hero runs out past the content column's edges. Two limits
+     bound it, because two different windows ask two different questions.
+
+     --hero-gutter is the closest the hero ever comes to the window edge, and
+     the ramp reaches it well before the app's own minimum size (MinWidth in
+     main.go), so inside the app the gutter is simply LOCKED there. The ramp
+     used to still be climbing at that minimum, so the last stretch of
+     shrinking pushed the hero back off the edge again — the card looked like
+     it had stopped tracking the window. The ramp survives only below the
+     narrowest window the app can open, where it eases the bleed to 0 rather
+     than snapping, for the browser mock.
+
+     Past --content-max the column stops growing and centres, so the gutter is
+     no longer what bounds the hero: there it takes a sliver of that centring
+     slack instead. The slack's own floor keeps the sliver clear of the
+     scrollbar (100vw counts it, the column's width does not), so the hero can
+     never provoke a horizontal scroll, and the sliver is 0 for every window
+     that has not yet hit the cap.
+
      Uses cqw, so it tracks the CONTENT column (App.tsx's @container), not the
      viewport — the sidebar's width is already accounted for. */
-  --hero-bleed: clamp(0px, (100cqw - 640px) * 0.0455, var(--page-pad) - 8px);
+  --hero-gutter: 10px;
+  --hero-slack: max(0px, (100vw - var(--sidebar-w) - var(--content-max)) / 2);
+  --hero-bleed: calc(
+    clamp(0px, (100cqw - 560px) * 0.12, var(--page-pad) - var(--hero-gutter))
+    + min(6px, max(0px, var(--hero-slack) - 26px))
+  );
 
   /* Motion — water physics. The current ease carries arrivals, hovers, and
      glow; propulsion carries presses and toggles (a push through water, small
