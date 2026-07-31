@@ -20,6 +20,16 @@ func FuzzParsePairingCode(f *testing.F) {
 	f.Add("pxf://a%20b:8474/v1/pair/t%2Fok#" + fp)
 	f.Add("not-a-url")
 	f.Add("")
+	// v2: one grouped payload, no fragment. The seeds cover a valid code, the same
+	// code as a human might retype it, and one with a character damaged — the three
+	// shapes the parser must tell apart.
+	v2 := PairingCode{Host: "gw.example.com", Port: 8474,
+		Fingerprint: "sha256:" + strings.Repeat("1c", v2PinBytes),
+		Token:       "tkt_" + strings.Repeat("a5", v2TicketBytes)}.String()
+	f.Add(v2)
+	f.Add(strings.ToUpper(v2))
+	f.Add(strings.ReplaceAll(v2, "-", ""))
+	f.Add(v2[:len(v2)-1] + "q")
 	f.Fuzz(func(t *testing.T, s string) {
 		pc, err := ParsePairingCode(s)
 		if err != nil {
@@ -34,7 +44,10 @@ func FuzzParsePairingCode(f *testing.F) {
 		if pc.Token == "" || strings.Contains(pc.Token, "/") {
 			t.Fatalf("accepted bad token %q from %q", pc.Token, s)
 		}
-		if !strings.HasPrefix(pc.Fingerprint, "sha256:") || len(pc.Fingerprint) != len("sha256:")+64 {
+		// A v1 code carries the whole hash; a v2 code carries the pin the payload
+		// packs. Anything else means the parser invented a width.
+		if !strings.HasPrefix(pc.Fingerprint, "sha256:") ||
+			(len(pc.Fingerprint) != len("sha256:")+64 && len(pc.Fingerprint) != len("sha256:")+v2PinBytes*2) {
 			t.Fatalf("accepted bad fingerprint %q from %q", pc.Fingerprint, s)
 		}
 		got, err := ParsePairingCode(pc.String())

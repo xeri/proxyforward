@@ -67,7 +67,7 @@ func TestPairingParsesPxfV1(t *testing.T) {
 func TestPairingRejectsPxfShape(t *testing.T) {
 	fp := "sha256:" + strings.Repeat("ab", 32)
 	bad := map[string]string{
-		"unknown version": "pxf://gw:8474/v2/pair/tok#" + fp,
+		"unknown version": "pxf://gw:8474/v9/pair/tok#" + fp,
 		"unknown kind":    "pxf://gw:8474/v1/join/tok#" + fp,
 		"missing kind":    "pxf://gw:8474/v1/tok#" + fp,
 		"missing token":   "pxf://gw:8474/v1/pair/#" + fp,
@@ -158,6 +158,151 @@ func TestPairingParseRejects(t *testing.T) {
 		if _, err := ParsePairingCode(s); err == nil {
 			t.Errorf("%s: expected error for %q", name, s)
 		}
+	}
+}
+
+// v2fixture is a code whose parts are exactly the widths v2 packs, so String emits
+// the v2 shape. The bytes are arbitrary but fixed: the checksum sweep below depends
+// on this exact code.
+func v2fixture(host string) PairingCode {
+	return PairingCode{
+		Host:        host,
+		Port:        8474,
+		Fingerprint: "sha256:" + strings.Repeat("1c", v2PinBytes),
+		Token:       "tkt_" + strings.Repeat("a5", v2TicketBytes),
+	}
+}
+
+// TestPairingV2RoundTrip is the shape contract: one grouped payload, no fragment,
+// six groups of five, and a value that survives being re-emitted.
+func TestPairingV2RoundTrip(t *testing.T) {
+	for _, host := range []string{"gw.example.com", "203.0.113.7", "2001:db8::1", "gw"} {
+		t.Run(host, func(t *testing.T) {
+			in := v2fixture(host)
+			s := in.String()
+			if !strings.Contains(s, "/v2/pair/") {
+				t.Errorf("v2 parts must emit the v2 shape, got %q", s)
+			}
+			if strings.Contains(s, "#") {
+				t.Errorf("v2 carries the pin in the payload, not a fragment: %q", s)
+			}
+			payload := s[strings.Index(s, "/v2/pair/")+len("/v2/pair/"):]
+			groups := strings.Split(payload, "-")
+			if len(groups) != v2Symbols/v2GroupLen {
+				t.Errorf("payload %q has %d groups, want %d", payload, len(groups), v2Symbols/v2GroupLen)
+			}
+			for _, g := range groups {
+				if len(g) != v2GroupLen {
+					t.Errorf("group %q is %d characters, want %d", g, len(g), v2GroupLen)
+				}
+			}
+			got, err := ParsePairingCode(s)
+			if err != nil {
+				t.Fatalf("parse %q: %v", s, err)
+			}
+			if got != in {
+				t.Fatalf("round trip: got %+v want %+v", got, in)
+			}
+		})
+	}
+}
+
+// The checksum exists for exactly one reason: a human mistyped one character, and
+// should be told so here rather than by a connection that fails somewhere else a
+// minute later. So every single-character change to a real code must be caught —
+// including changes to the address, which is why the checksum covers host and port.
+//
+// A failure here is not necessarily a bug in the packing: 14 bits let roughly one
+// damaged code in 16384 through by construction. If one escapes, this fixture hit
+// that blind spot — change v2fixture's bytes, never this assertion.
+func TestPairingV2CatchesASingleCharacterTypo(t *testing.T) {
+	in := v2fixture("gw.example.com")
+	s := in.String()
+	at := strings.Index(s, "/v2/pair/") + len("/v2/pair/")
+	payload := s[at:]
+
+	for i, orig := range []byte(payload) {
+		if orig == '-' {
+			continue
+		}
+		for _, sub := range []byte(crockfordLower) {
+			if sub == orig {
+				continue
+			}
+			damaged := []byte(payload)
+			damaged[i] = sub
+			if _, err := ParsePairingCode(s[:at] + string(damaged)); err == nil {
+				t.Errorf("accepted a code with %q at position %d changed to %q", string(orig), i, string(sub))
+			}
+		}
+	}
+
+	// The address is part of what the checksum protects: a code pasted against a
+	// hostname someone edited names a machine the gateway never vouched for.
+	for _, host := range []string{"gw.exarnple.com", "gw.example.co", "gw.example.com."} {
+		if _, err := ParsePairingCode(strings.Replace(s, "gw.example.com", host, 1)); err == nil {
+			t.Errorf("accepted a code whose host was changed to %q", host)
+		}
+	}
+	if _, err := ParsePairingCode(strings.Replace(s, ":8474", ":8475", 1)); err == nil {
+		t.Errorf("accepted a code whose port was changed")
+	}
+}
+
+// A code is transcribed by humans over voice, chat and paper, so the parser folds
+// the ways it comes back: any case, any grouping, and Crockford's confusable
+// letters. The fold is lossless — the alphabet has no i, l, o or u to overwrite.
+func TestPairingV2NormalizesHowItWasTyped(t *testing.T) {
+	in := v2fixture("gw.example.com")
+	s := in.String()
+	at := strings.Index(s, "/v2/pair/") + len("/v2/pair/")
+	head, payload := s[:at], s[at:]
+
+	// The fixture's own payload must exercise the confusable fold, or the "typed
+	// an I for a 1" cases below prove nothing.
+	if !strings.ContainsAny(payload, "01") {
+		t.Fatalf("fixture payload %q has no 0 or 1 — pick fixture bytes that do", payload)
+	}
+	confusable := strings.NewReplacer("1", "I", "0", "O").Replace(payload)
+
+	for name, typed := range map[string]string{
+		"upper case":     strings.ToUpper(payload),
+		"no groups":      strings.ReplaceAll(payload, "-", ""),
+		"spaced groups":  strings.ReplaceAll(payload, "-", " "),
+		"confusables":    confusable,
+		"trailing space": payload + " ",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParsePairingCode(head + typed)
+			if err != nil {
+				t.Fatalf("rejected %q: %v", typed, err)
+			}
+			if got != in {
+				t.Fatalf("got %+v want %+v", got, in)
+			}
+		})
+	}
+}
+
+// A payload of the wrong length is a truncated or doubled paste, not a typo, and it
+// is refused before any bit is unpacked.
+func TestPairingV2RejectsWrongLength(t *testing.T) {
+	in := v2fixture("gw.example.com")
+	s := in.String()
+	at := strings.Index(s, "/v2/pair/") + len("/v2/pair/")
+	payload := strings.ReplaceAll(s[at:], "-", "")
+
+	for name, typed := range map[string]string{
+		"one short": payload[:len(payload)-1],
+		"one long":  payload + "7",
+		"doubled":   payload + payload,
+		"empty":     "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParsePairingCode(s[:at] + typed); err == nil {
+				t.Errorf("accepted a %s payload %q", name, typed)
+			}
+		})
 	}
 }
 

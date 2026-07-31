@@ -146,7 +146,7 @@ persisted to config.
 | Invite retention | dead (consumed/expired) tickets keep their honest error for 7 d, then prune at the next issue | `agentstore.go inviteRetention` |
 | "New" agent badge | 24 h after enrollment | `Agents.tsx NEW_AGENT_MS` |
 | Agent allowlist | `gateway_agents.json` (`0600`, atomic write + AV-retry): identity + scope + desired config per agent | `gateway/agentstore.go AgentStore` |
-| Pairing code | `pxf://host:port/v1/pair/<tkt>#sha256:<64hex>`, ≤ 512 B before parse | `link/pairing.go ParsePairingCode` |
+| Pairing code | `pxf://host:port/v2/pair/<30 Crockford base32 in 6 groups of 5>` = 80-bit cert pin ‖ 56-bit ticket ‖ 14-bit checksum; ≤ 512 B before parse; v1 (`/v1/pair/<tkt>#sha256:<64hex>`) still parses | `link/pairing.go ParsePairingCode v2Symbols` |
 | Agent auth | Ed25519 proof-of-possession over `proxyforward-agent-auth-v1` + gateway cert FP — no bearer token in steady state | `link/cred.go AgentAuthMessage` |
 | Perf floor | ≥20 MiB/s, worst cross-stream RTT ≤500 ms (64 MiB loopback burst); per-transport twins `TestBurstThroughputPerConn` / `TestBurstThroughputQUIC` | `e2e_test.go runBurst` |
 | Blur ladder | control 4, bloom frame 5, card 4, chrome 8, island 8, float 10, pop 12 px (water, not frost) | `tokens.css` |
@@ -349,13 +349,20 @@ so a scoped agent can never bind outside its grant by any route (`gateway/agents
 `gateway/gateway.go validSpecs`). Regressions: `TestGatewayConfigScopeNarrowingHidesTunnel`,
 `gateway/scope_test.go`.
 
-**Pairing scheme & click-to-pair.** The pairing code is `pxf://host:port/v1/pair/<tkt>#sha256:<hex>`
-(`link/pairing.go PairingCode`). `pxf` is a permanent brand *and* the OS deep-link scheme
-(`wails.json` registers it via the NSIS macros); the `/v1/` segment versions the code's *shape*
-independently of the wire `ProtocolVersion`; the `/pair/` segment is a role/kind marker so a
-wrong-kind link fails loudly instead of half-parsing (`link/pairing.go tokenFromV1Path`). The
-parser caps input at 512 bytes before parsing and validates host, port, and the 64-hex
-fingerprint; it is fuzzed (`link/pairing_fuzz_test.go FuzzParsePairingCode`). A clicked `pxf://`
+**Pairing scheme & click-to-pair.** The pairing code is
+`pxf://host:port/v2/pair/<6 groups of 5>` (`link/pairing.go PairingCode`). `pxf` is a permanent
+brand *and* the OS deep-link scheme (`wails.json` registers it via the NSIS macros); the `/v2/`
+segment versions the code's *shape* independently of the wire `ProtocolVersion`; the `/pair/`
+segment is a role/kind marker so a wrong-kind link fails loudly instead of half-parsing
+(`link/pairing.go partsFromPath`). v1 — a free-form token plus a 64-hex fingerprint in the
+fragment — still parses, because an older gateway's codes may be live; which shape `String`
+emits follows from the parts' widths, so no version field is carried
+(`link/pairing.go v2Parts`). The v2 payload packs pin ‖ ticket ‖ checksum into 150 bits of
+Crockford base32, and the parser folds case, grouping and confusable letters before unpacking
+(`v2Payload`, `normalizeV2Payload`); the checksum covers host and port, so an edited address
+fails in the paste box (`v2Checksum`, `TestPairingV2CatchesASingleCharacterTypo`). The parser
+caps input at 512 bytes before parsing and validates host and port; it is fuzzed
+(`link/pairing_fuzz_test.go FuzzParsePairingCode`). A clicked `pxf://`
 link reaches the app as `os.Args` on a cold launch or via single-instance forwarding on a warm
 one (`main.go deepLinkArg`, `app/app.go HandleDeepLink TakePendingDeepLink`); the frontend drains
 it on mount and opens the wizard straight onto the agent paste step with the code prefilled —
