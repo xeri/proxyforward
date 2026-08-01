@@ -196,3 +196,8 @@ export const IconEye = (p: IconProps) => (
 export const IconEyeOff = (p: IconProps) => (
   <Base {...p}><path d="M9.9 5.2A9.5 9.5 0 0 1 12 5c6.5 0 10 7 10 7a13.2 13.2 0 0 1-2.2 2.9M6.1 6.1A13.2 13.2 0 0 0 2 12s3.5 7 10 7a9.5 9.5 0 0 0 4-.9M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3 3l18 18"/></Base>
 )
+// The three finder squares of a QR symbol — the shape a camera looks for, and the
+// only part of one that reads at 16px.
+export const IconQR = (p: IconProps) => (
+  <Base {...p}><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M20.5 17.5v3.5M14 21h1"/></Base>
+)

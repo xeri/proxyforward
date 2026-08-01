@@ -1,6 +1,7 @@
 import {useEffect, useMemo, useState} from 'react'
 import {GetConfig, IssuePairingCode, SetupAgent, SetupGateway} from '../../wailsjs/go/app/App'
-import {Button, Codebox, CopyButton, Disclosure, ErrorBanner, FatalStatement, Field, Overline, Spinner, TextInput, Toggle} from '../components/ui'
+import {Button, CopyButton, Disclosure, ErrorBanner, FatalStatement, Field, Overline, Spinner, TextInput, Toggle} from '../components/ui'
+import {PairingPlaque} from '../components/PairingPlaque'
 import {Emblem} from '../components/Emblem'
 import {ImportSetupFlow} from '../components/SetupBackup'
 import {IconCheck, IconGlobe, IconRefresh, IconServer, IconShield, IconSpark} from '../components/icons'
@@ -240,7 +241,7 @@ function GatewayLive({status, controlPort, onDone}: {
         Copy this one-time pairing code and paste it into proxyforward on your Minecraft machine:
       </p>
       {code
-        ? <Codebox size="lg" text={code} action={<CopyButton text={code} />} />
+        ? <PairingPlaque code={code} actions={<CopyButton text={code} />} />
         : err
           ? <ErrorBanner message={err} onDismiss={() => setErr('')} />
           : reusable

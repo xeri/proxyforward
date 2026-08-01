@@ -3,6 +3,7 @@ package link
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -86,6 +87,20 @@ const (
 	// symbols by construction, and a whole number of groups.
 	v2Symbols  = (v2PinBytes*8 + v2TicketBytes*8 + v2SumBits) / 5
 	v2GroupLen = 5
+)
+
+// Parse failures a caller may want to tell apart, because they call for different
+// words in front of a human: a code still being typed is not a mistake, a code with
+// a character wrong is a mistake with an obvious fix, and everything else is the
+// wrong string entirely. Everything below wraps one of these or returns a plain
+// error for the "wrong string entirely" case.
+var (
+	// ErrCodeIncomplete means the payload is not yet the length a code is — the
+	// ordinary state of a box someone is still typing into.
+	ErrCodeIncomplete = errors.New("pairing code is not complete")
+	// ErrCodeChecksum means the code is the right shape but its checksum does not
+	// hold: a character is wrong, or the address was edited.
+	ErrCodeChecksum = errors.New("pairing code has a typo")
 )
 
 // IsPairingURL reports whether s carries the pxf:// pairing scheme, a cheap sniff
@@ -291,7 +306,8 @@ func v2Payload(host string, port int, pin, ticket []byte) string {
 func parseV2Payload(host string, port int, payload string) (pin, ticket []byte, err error) {
 	sym := normalizeV2Payload(payload)
 	if len(sym) != v2Symbols {
-		return nil, nil, fmt.Errorf("pairing code should be %d characters in %d groups of %d; this one has %d — re-copy the whole line", v2Symbols, v2Symbols/v2GroupLen, v2GroupLen, len(sym))
+		return nil, nil, fmt.Errorf("%w: it should be %d characters in %d groups of %d, and this one has %d",
+			ErrCodeIncomplete, v2Symbols, v2Symbols/v2GroupLen, v2GroupLen, len(sym))
 	}
 	var (
 		raw = make([]byte, 0, v2PinBytes+v2TicketBytes+1)
@@ -314,7 +330,7 @@ func parseV2Payload(host string, port int, payload string) (pin, ticket []byte, 
 	pin, ticket = raw[:v2PinBytes], raw[v2PinBytes:v2PinBytes+v2TicketBytes]
 	sum := uint16(raw[len(raw)-1])<<6 | uint16(acc&0x3f)
 	if sum != v2Checksum(host, port, pin, ticket) {
-		return nil, nil, fmt.Errorf("that pairing code has a typo — one character is off, or the address was edited; re-copy the whole line from the gateway")
+		return nil, nil, fmt.Errorf("%w — one character is off, or the address was edited; re-copy the whole line from the gateway", ErrCodeChecksum)
 	}
 	return pin, ticket, nil
 }

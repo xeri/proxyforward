@@ -9,6 +9,7 @@ import {prefersReduced} from '../motion'
 import {agent, app} from '../../wailsjs/go/models'
 import {proposalAge, ProposalDiff, specsOf, useAgentConsent} from '../consent'
 import {BandwidthPanel} from '../components/BandwidthChart'
+import {PairingPlaque} from '../components/PairingPlaque'
 import {NumberTicker} from '../components/NumberTicker'
 import {
   Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, ErrorBanner,
@@ -698,17 +699,16 @@ function PairingCodeRow({label, hint, hintAfter, cta, fetch, reissuable}: {
   // still hands over the real code.
   const box = code
     ? <div className="pf-fade">
-        <Codebox
-          size="lg"
-          text={shown ? code : '•'.repeat(28)} selectable={shown}
-          action={
-            <div className="flex items-center gap-1.5">
+        <PairingPlaque
+          code={code} masked={!shown}
+          actions={
+            <>
               {reissuable && <IconButton title="Issue a fresh code" onClick={() => setGen(g => g + 1)}><IconRefresh size={16} /></IconButton>}
               <IconButton title={shown ? 'Hide pairing code' : 'Reveal pairing code'} onClick={() => setShown(s => !s)}>
                 {shown ? <IconEyeOff size={16} /> : <IconEye size={16} />}
               </IconButton>
               <CopyButton text={code} label="Copy" />
-            </div>
+            </>
           }
         />
       </div>

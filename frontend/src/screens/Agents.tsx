@@ -6,12 +6,13 @@ import {
 } from '../../wailsjs/go/app/App'
 import {app, control, engine, gateway} from '../../wailsjs/go/models'
 import {GroupsPanel} from '../components/GroupsPanel'
+import {PairingPlaque} from '../components/PairingPlaque'
 import {PauseControl, PausedBadge, pausedLabel} from '../components/PauseControl'
 import {proposalAge, ProposalDiff, specsOf} from '../consent'
 import {BandwidthPanel} from '../components/BandwidthChart'
 import {Emblem} from '../components/Emblem'
 import {
-  Badge, Banner, Button, Card, Codebox, CopyButton, CopyIcon, Disclosure, EmptyState, ErrorBanner,
+  Badge, Banner, Button, Card, CopyButton, CopyIcon, Disclosure, EmptyState, ErrorBanner,
   Field, Modal, MonoChip, Overline, PageHeader, SegmentedControl, Skeleton, StatTile, StatusDot, TextInput,
 } from '../components/ui'
 import {
@@ -474,7 +475,7 @@ function IssuePairingModal({onClose}: {onClose: () => void}) {
           <ErrorBanner message={err} onDismiss={() => setErr('')} />
         ) : code ? (
           <div className="space-y-2">
-            <Codebox size="lg" text={code} action={<CopyButton text={code} />} />
+            <PairingPlaque code={code} actions={<CopyButton text={code} />} />
             <div className="flex items-center justify-between gap-3">
               <span className="min-w-0 text-xs text-[var(--text-3)]">
                 {reusable

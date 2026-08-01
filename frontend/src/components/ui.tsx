@@ -1300,10 +1300,11 @@ export function Modal({title, onClose, children, footer, wide}: {
 
 /** Codebox: a selectable, monospaced value with a copy affordance.
  *
- * `size="lg"` is the ceremonial artifact — the pairing code or address you
- * hand to another human renders as a plaque: larger mono, letterspaced,
- * generous padding. Never case-transformed at any size: codes are
- * credentials.
+ * `size="lg"` is the ceremonial artifact — an address you hand to another human
+ * renders as a plaque: larger mono, letterspaced, generous padding. Never
+ * case-transformed at any size: codes are credentials. A *pairing* code has a
+ * shape worth laying out (six groups, a gateway, a QR) and gets its own
+ * component — `PairingPlaque`.
  *
  * `selectable={false}` for a MASKED value: the mask is real text, so a
  * select-all drag off a masked pairing code hands out a string of bullets that

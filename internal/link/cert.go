@@ -53,6 +53,13 @@ func Pin(der []byte, n int) string {
 // the trust root from the outside.
 const MinPinBytes = 10
 
+// IsShortPin reports whether a fingerprint is a pin rather than the whole hash —
+// which is to say, whether it came from a v2 pairing code or an agent that has not
+// connected yet. Surfaces use it to tell an old code from a current one.
+func IsShortPin(fingerprint string) bool {
+	return len(fingerprint) < len("sha256:")+sha256.Size*2
+}
+
 // pinMatches reports whether a certificate's full fingerprint begins with the
 // pinned prefix, in constant time. A full-length pin is the ordinary case and
 // compares whole; a truncated one (from a v2 pairing code) compares over its own

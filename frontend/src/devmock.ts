@@ -576,11 +576,25 @@ export function installDevMock() {
   // Live pairing codes (ListInvites / RevokeInvite / IssuePairingCode): a plain
   // mutable array so mint and revoke land on the next poll, mirroring the real
   // write-then-repoll loop. Handles are fixed fakes; codes carry a fake ticket.
+  // A v2 payload shaped like the real thing — 30 Crockford base32 characters in
+  // six groups of five, derived from the handle so each minted code looks
+  // different. The checksum is not real (no hashing here); CheckPairingCode's
+  // mock below judges shape only, so the mock stays self-consistent.
+  const mkPayload = (handle: string) => {
+    const alphabet = '0123456789abcdefghjkmnpqrstvwxyz'
+    let seed = 0
+    for (const c of handle + 'pxf') seed = (seed * 31 + c.charCodeAt(0)) >>> 0
+    const chars = Array.from({length: 30}, () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0
+      return alphabet[seed % 32]
+    }).join('')
+    return chars.replace(/(.{5})(?=.)/g, '$1-')
+  }
   const mkInvite = (o: any) => ({
     handle: o.handle, label: o.label || '', reusable: !!o.reusable,
     issuedAtMs: o.issuedAtMs || now0, expiresAtMs: o.expiresAtMs || 0, uses: o.uses || 0,
     scopePorts: o.scopePorts || [], scopeTunnels: o.scopeTunnels || [],
-    code: `pxf://play.example.com:8474/v1/pair/tkt_${o.handle}f00d600df00d600d#sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08`,
+    code: `pxf://play.example.com:8474/v2/pair/${mkPayload(o.handle)}`,
   })
   const invites: any[] = []
   if (axisInvites === 'friend' || axisInvites === 'both') {
@@ -1346,6 +1360,59 @@ export function installDevMock() {
         return iv.code
       }),
     ListInvites: () => Promise.resolve(state.role === 'gateway' && axisFleet !== 'old' ? invites.map(iv => ({...iv})) : []),
+    // Shape-only judgment: there is no hashing here, so the mock cannot check a
+    // real checksum. It tells the same four answers apart by length and spelling,
+    // which is what the paste box's states need to be exercised — and a code
+    // ending in "zzzzz" reports a typo, so that state is reachable in the mock.
+    CheckPairingCode: (code: string) => {
+      const m = /^pxf:\/\/([^/:]+):(\d+)\/v(1|2)\/pair\/(.+)$/.exec(code.trim())
+      if (!m) {
+        return Promise.resolve(code.trim() === ''
+          ? {kind: 'incomplete', problem: '', host: '', port: 0, legacy: false}
+          : {kind: 'unusable', problem: 'that does not look like a pairing code — paste the whole pxf://… line the gateway printed', host: '', port: 0, legacy: false})
+      }
+      const legacy = m[3] === '1'
+      const payload = m[4].replace(/[\s\-_]/g, '').toLowerCase()
+      if (!legacy && payload.length !== 30) {
+        return Promise.resolve({kind: 'incomplete', problem: '', host: '', port: 0, legacy: false})
+      }
+      if (payload.endsWith('zzzzz')) {
+        return Promise.resolve({kind: 'typo', problem: 'pairing code has a typo — one character is off, or the address was edited; re-copy the whole line from the gateway', host: '', port: 0, legacy: false})
+      }
+      return Promise.resolve({kind: 'ok', problem: '', host: m[1], port: parseInt(m[2], 10), legacy})
+    },
+    // A fake symbol: the real encoder is Go, and the mock only has to prove the
+    // panel's geometry and its four states. A code containing "noqr" renders the
+    // unavailable state so that one is reachable too.
+    PairingQR: (code: string) => {
+      if (code.includes('noqr')) return Promise.reject(new Error('this code is too long to render as a QR'))
+      const size = 33
+      let seed = 7
+      let path = ''
+      // Three finder patterns, the timing runs between them, and speckle for the
+      // rest — enough that the panel is judged on its layout rather than on a
+      // black square. It encodes nothing; the real symbol comes from Go.
+      const finderAt = (x: number, y: number): boolean | null => {
+        for (const [fx, fy] of [[0, 0], [size - 7, 0], [0, size - 7]]) {
+          if (x >= fx - 1 && x < fx + 8 && y >= fy - 1 && y < fy + 8) {
+            const d = Math.max(Math.abs(x - fx - 3), Math.abs(y - fy - 3))
+            return d <= 3 && d !== 2
+          }
+        }
+        return null
+      }
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          seed = (seed * 1103515245 + 12345) >>> 0
+          const f = finderAt(x, y)
+          const dark = f !== null ? f
+            : x === 6 || y === 6 ? (x + y) % 2 === 0
+              : (seed >>> 16) % 2 === 0 // a high bit: an LCG's low bit barely varies
+          if (dark) path += `M${x} ${y}h1v1h-1z`
+        }
+      }
+      return Promise.resolve({size, path})
+    },
     RevokeInvite: (handle: string) => gated(() => {
       const i = invites.findIndex(iv => iv.handle === handle)
       if (i < 0) throw new Error('that invite is no longer live — it may have been used up or already revoked')
