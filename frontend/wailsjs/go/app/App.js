@@ -142,6 +142,10 @@ export function OpenExternal(arg1) {
   return window['go']['app']['App']['OpenExternal'](arg1);
 }
 
+export function PairingQR(arg1) {
+  return window['go']['app']['App']['PairingQR'](arg1);
+}
+
 export function PeakMatrix(arg1) {
   return window['go']['app']['App']['PeakMatrix'](arg1);
 }

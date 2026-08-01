@@ -81,6 +81,8 @@ export function OpenCreatorURL():Promise<void>;
 
 export function OpenExternal(arg1:string):Promise<void>;
 
+export function PairingQR(arg1:string):Promise<app.QRCode>;
+
 export function PeakMatrix(arg1:number):Promise<analytics.PeakMatrix>;
 
 export function PeerStats():Promise<Array<stats.PeerStat>>;
