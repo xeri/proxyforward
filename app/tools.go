@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -192,7 +193,20 @@ func writeDiagnosticsTo(w io.Writer, cfg *config.Config, configDir string, statu
 // not a licence — secrets still must not be logged in the first place, because this
 // only knows the values config holds. Values shorter than minScrubLen are skipped:
 // they carry little entropy and would smear over unrelated log text.
+//
+// The one exception is the pairing code, and it is not a guess: a pxf:// link is a
+// *syntactic* form that is always a credential, whoever minted it. It needs its own
+// rule because a v2 code packs the ticket and the pin into base32 rather than
+// spelling them out — so the exact values above no longer appear in it, and a
+// logged code would sail straight past a scrubber that only knows this machine's
+// config. That is the exact escape route this scrubber exists to close
+// (gateway.go RunStarted keeps codes off slog in the first place).
 type logScrubber struct{ pairs []string } // old1, new1, old2, new2 … for strings.NewReplacer
+
+// pairingCodeRe matches a pxf:// link of any version, up to the first character
+// that cannot appear in one. Deliberately greedy about the tail: half a redacted
+// code is still a code someone can finish guessing.
+var pairingCodeRe = regexp.MustCompile(`pxf://[^\s"'` + "`" + `,)\]}<>]+`)
 
 // minScrubLen is the shortest value worth exact-matching in log text. Below this a
 // "secret" is more likely to collide with ordinary words than to be the secret.
@@ -222,8 +236,10 @@ func newLogScrubber(cfg *config.Config) *logScrubber {
 	return s
 }
 
-// clean returns line with every known secret replaced.
+// clean returns line with every known secret replaced, and any pairing code
+// removed whole.
 func (s *logScrubber) clean(line string) string {
+	line = pairingCodeRe.ReplaceAllString(line, "[redacted-pairing-code]")
 	if len(s.pairs) == 0 {
 		return line
 	}

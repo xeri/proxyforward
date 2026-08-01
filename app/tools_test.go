@@ -28,6 +28,14 @@ func sampleConfig() *config.Config {
 	return cfg
 }
 
+// A v2 pairing code and the payload inside it. The payload shares no substring
+// with sampleConfig's ticket or fingerprint — that is the point: it is what a real
+// code looks like, and exact-value scrubbing is blind to it.
+const (
+	v2LeakPayload = "k3m7q-x2vn8-p4rt6-9wzhd-2xkb4-m7q3n"
+	v2LeakCode    = "pxf://play.example.com:8474/v2/pair/" + v2LeakPayload
+)
+
 func TestRedactConfigMasksEverySecret(t *testing.T) {
 	cfg := sampleConfig()
 	orig := *cfg
@@ -183,6 +191,10 @@ func TestWriteDiagnosticsNoLeaks(t *testing.T) {
 	}
 	logger.Info("pairing code", "code",
 		"pxf://"+cfg.Gateway.PublicHost+":8474/v1/pair/"+cfg.Agent.EnrollTicket+"#"+cfg.Agent.CertFingerprint)
+	// And a v2 code, which spells out none of the values above: it packs the
+	// ticket and the pin into base32, so exact-value scrubbing cannot see it and
+	// only the pxf:// rule catches it. Logged the way a careless call site would.
+	logger.Info("pairing code", "code", v2LeakCode)
 	logger.Info("agent connected", "agentId", cfg.Agent.AgentID, "gateway", cfg.Agent.GatewayHost)
 	logger.Warn("dial failed", "local", cfg.Agent.Tunnels[0].LocalAddr, "bind", cfg.Gateway.BindAddr)
 	if err := closeLog(); err != nil {
@@ -264,6 +276,9 @@ func TestWriteDiagnosticsNoLeaks(t *testing.T) {
 		"AGENTTOKENSECRET", "GWTOKENSECRET", "AGENTIDSECRET", "deadbeefsecret",
 		"gw.secret.example.com", "public.secret.example.com", "192.168.50.1",
 		"10.9.8.7", "127.0.0.99", "203.0.113.77", "alices-laptop",
+		// The v2 code's payload: none of the values above appear in it, so this is
+		// the only thing that proves a logged code is caught by its shape.
+		v2LeakPayload,
 	} {
 		if strings.Contains(all, secret) {
 			t.Errorf("diagnostics bundle leaked %q", secret)
