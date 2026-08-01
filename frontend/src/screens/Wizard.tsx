@@ -1,10 +1,11 @@
-import {useEffect, useMemo, useState} from 'react'
-import {GetConfig, IssuePairingCode, SetupAgent, SetupGateway} from '../../wailsjs/go/app/App'
+import {useEffect, useRef, useState} from 'react'
+import {CheckPairingCode, GetConfig, IssuePairingCode, SetupAgent, SetupGateway} from '../../wailsjs/go/app/App'
 import {Button, CopyButton, Disclosure, ErrorBanner, FatalStatement, Field, Overline, Spinner, TextInput, Toggle} from '../components/ui'
 import {PairingPlaque} from '../components/PairingPlaque'
 import {Emblem} from '../components/Emblem'
 import {ImportSetupFlow} from '../components/SetupBackup'
 import {IconCheck, IconGlobe, IconRefresh, IconServer, IconShield, IconSpark} from '../components/icons'
+import {retype} from '../pairing'
 import {fmtRtt, hasRtt, UIStatus} from '../state'
 
 const DEFAULT_CONTROL_PORT = 8474
@@ -64,7 +65,7 @@ export function Wizard({status, onDone, deepLink}: {status: UIStatus | null; onD
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
-  const parsed = useMemo(() => parsePairing(pairing), [pairing])
+  const verdict = usePairingVerdict(pairing)
 
   return (
     <div className="flex h-full items-center justify-center overflow-y-auto overscroll-y-contain p-6">
@@ -155,20 +156,11 @@ export function Wizard({status, onDone, deepLink}: {status: UIStatus | null; onD
               <span className="mt-0.5 shrink-0 text-[var(--good)]"><IconShield size={16} /></span>
               <span>
                 <b className="text-[var(--text)]">Nothing to forward on this machine.</b> The agent only makes an
-                outbound connection{parsed ? <> to <span className="font-mono">{parsed.host}:{parsed.port}</span></> : ' to the gateway'} —
+                outbound connection{verdict.kind === 'ok' ? <> to <span className="font-mono">{verdict.host}:{verdict.port}</span></> : ' to the gateway'} —
                 router and firewall changes happen on the gateway side only.
               </span>
             </div>
-            <Field label="Pairing code" hint="Shown by the gateway right after you set it up. Starts with pxf://">
-              <TextInput value={pairing} onChange={setPairing} placeholder="pxf://host:8474/v1/pair/…#sha256:…" mono autoFocus />
-            </Field>
-            {pairing.trim() && (
-              parsed
-                ? <div className="pf-fade mt-2 flex items-center gap-2 text-xs text-[var(--good)]">
-                    <IconCheck size={14} /> Gateway {parsed.host}:{parsed.port} · certificate pinned
-                  </div>
-                : <div className="mt-2 text-xs text-[var(--warn)]">That doesn't look like a complete pairing code yet.</div>
-            )}
+            <PairingField value={pairing} onChange={setPairing} verdict={verdict} />
             <div className="mt-4 grid grid-cols-2 gap-3">
               <Field label="Local server address" hint="Usually the default.">
                 <TextInput value={localAddr} onChange={setLocalAddr} mono />
@@ -179,7 +171,7 @@ export function Wizard({status, onDone, deepLink}: {status: UIStatus | null; onD
             </div>
             <div className="mt-5 flex justify-between">
               <Button variant="ghost" onClick={() => setAct('role')}>Back</Button>
-              <Button onClick={doAgent} disabled={busy || !parsed}>{busy ? 'Connecting…' : 'Connect'}</Button>
+              <Button onClick={doAgent} disabled={busy || verdict.kind !== 'ok'}>{busy ? 'Connecting…' : 'Connect'}</Button>
             </div>
           </Panel>
         )}
@@ -451,13 +443,77 @@ function Panel({children}: {children: React.ReactNode}) {
   return <div className="pf-rise pf-card p-5">{children}</div>
 }
 
-/** Lightweight client-side parse for instant feedback; the Go side does the
- * authoritative validation on submit. */
-function parsePairing(s: string): {host: string; port: number} | null {
-  const t = s.trim()
-  const m = /^pxf:\/\/(\[[^\]]+\]|[^/:]+):(\d+)\/v1\/pair\/([^/#]+)#sha256:[0-9a-fA-F]{64}$/.exec(t)
-  if (!m) return null
-  const port = parseInt(m[2], 10)
-  if (port < 1 || port > 65535) return null
-  return {host: m[1].replace(/^\[|\]$/g, ''), port}
+type Verdict = {kind: 'incomplete' | 'ok' | 'typo' | 'unusable'; host: string; port: number; problem: string; legacy: boolean}
+
+/** Go error strings are lowercase by convention; a sentence shown to someone is
+ * not. The parser's messages are written as prose for exactly this spot, so the
+ * only thing missing is the capital. */
+const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+const BLANK: Verdict = {kind: 'incomplete', host: '', port: 0, problem: '', legacy: false}
+
+/** usePairingVerdict asks the engine what a half-typed code is. The judgment is
+ * deliberately not reimplemented here: a checksum written twice is two
+ * implementations of the format, and the first time they disagreed this box would
+ * confidently reject a code the engine accepts (`app/pairing.go CheckPairingCode`).
+ *
+ * Debounced, because it runs per keystroke, and sequence-guarded, because two
+ * answers can land out of order and the older one must not win. */
+function usePairingVerdict(code: string): Verdict {
+  const [verdict, setVerdict] = useState<Verdict>(BLANK)
+  const seq = useRef(0)
+  useEffect(() => {
+    if (!code.trim()) { seq.current++; setVerdict(BLANK); return }
+    const mine = ++seq.current
+    const t = setTimeout(() => {
+      CheckPairingCode(code)
+        .then(v => { if (seq.current === mine) setVerdict(v as Verdict) })
+        .catch(() => { if (seq.current === mine) setVerdict(BLANK) })
+    }, 120)
+    return () => clearTimeout(t)
+  }, [code])
+  return verdict
+}
+
+/** PairingField: the box someone pastes or retypes a pairing code into.
+ *
+ * It forgives how the code arrives — any case, any grouping, Crockford's
+ * confusable letters — and tidies it back into the canonical spelling as it is
+ * typed. Two rules keep that from fighting the typist: a deletion is never
+ * reformatted (otherwise a backspace over a hyphen looks stuck), and anything that
+ * is not recognisably a v2 code is left exactly as typed, because rewriting text
+ * we cannot parse is how a paste box eats the one character that would have
+ * explained the problem.
+ *
+ * Four states, all written: nothing yet, still typing (silent — a half-typed code
+ * is not a mistake), one character wrong, and the wrong string entirely. */
+function PairingField({value, onChange, verdict}: {
+  value: string; onChange: (v: string) => void; verdict: Verdict
+}) {
+  const prev = useRef(value)
+  const handle = (next: string) => {
+    // Shrinking means a deletion; leave it alone so the caret can get past a
+    // separator this would otherwise put straight back.
+    const tidy = next.length < prev.current.length ? next : retype(next)
+    prev.current = tidy
+    onChange(tidy)
+  }
+  return (
+    <>
+      <Field label="Pairing code" hint="Shown by the gateway right after you set it up. Starts with pxf://">
+        <TextInput value={value} onChange={handle} placeholder="pxf://host:8474/v2/pair/…" mono autoFocus />
+      </Field>
+      {value.trim() && verdict.kind !== 'incomplete' && (
+        verdict.kind === 'ok'
+          ? <div className="pf-fade mt-2 flex items-center gap-2 text-xs text-[var(--good)]">
+              <IconCheck size={14} />
+              Gateway {verdict.host}:{verdict.port} · certificate pinned
+              {verdict.legacy && <span className="text-[var(--text-3)]">&nbsp;· older-format code, still fine</span>}
+            </div>
+          : <div className={`pf-fade mt-2 text-xs ${verdict.kind === 'typo' ? 'text-[var(--warn)]' : 'text-[var(--text-3)]'}`}>
+              {sentence(verdict.problem)}
+            </div>
+      )}
+    </>
+  )
 }

@@ -29,6 +29,8 @@ export function BrowseMMDB(arg1:string):Promise<string>;
 
 export function CheckForUpdate():Promise<app.UpdateInfo>;
 
+export function CheckPairingCode(arg1:string):Promise<app.PairingCheck>;
+
 export function ChooseAndInspectSetupFile():Promise<app.SetupFileInfo>;
 
 export function CreatorAvatar():Promise<string>;

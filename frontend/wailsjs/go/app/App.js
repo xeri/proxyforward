@@ -38,6 +38,10 @@ export function CheckForUpdate() {
   return window['go']['app']['App']['CheckForUpdate']();
 }
 
+export function CheckPairingCode(arg1) {
+  return window['go']['app']['App']['CheckPairingCode'](arg1);
+}
+
 export function ChooseAndInspectSetupFile() {
   return window['go']['app']['App']['ChooseAndInspectSetupFile']();
 }

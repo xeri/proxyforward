@@ -706,6 +706,26 @@ export namespace app {
 	        this.clockSyncCaveat = source["clockSyncCaveat"];
 	    }
 	}
+	export class PairingCheck {
+	    kind: string;
+	    problem: string;
+	    host: string;
+	    port: number;
+	    legacy: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PairingCheck(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.problem = source["problem"];
+	        this.host = source["host"];
+	        this.port = source["port"];
+	        this.legacy = source["legacy"];
+	    }
+	}
 	export class QRCode {
 	    size: number;
 	    path: string;
