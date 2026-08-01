@@ -14,9 +14,9 @@ identity, enrollment & revocation". Neither is restated here.
 
 **TLS 1.3 both sides, no CA, ever.** Trust is the gateway's self-signed ECDSA
 P-256 cert, pinned by SHA-256 fingerprint carried out-of-band in the pairing code
-`pxf://host:port/v1/pair/<token>#sha256:<hex>` (`link/pairing.go`,
+`pxf://host:port/v2/pair/<30 Crockford base32 in 6 groups of 5>` (`link/pairing.go`,
 `cert.go GatewayTLSConfig`/`AgentTLSConfig`). `pxf` doubles as the OS deep-link
-scheme; `/v1/pair/` is a format-version + role marker so a wrong-kind link fails
+scheme; `/v2/pair/` is a format-version + role marker so a wrong-kind link fails
 loudly rather than half-working. The pinned fingerprint compares in constant time
 (`crypto/subtle` — `cert.go pinMatches`).
 

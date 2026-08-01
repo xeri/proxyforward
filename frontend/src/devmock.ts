@@ -1481,7 +1481,7 @@ export function installDevMock() {
     // The real app pulls this once on mount to open straight into pairing when
     // launched via a clicked pxf:// link. In browser dev &deeplink=1 simulates one.
     TakePendingDeepLink: () => ok(axisDeepLink
-      ? 'pxf://play.example.com:8474/v1/pair/tkt_0123456789abcdef0123456789abcdef#sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      ? 'pxf://play.example.com:8474/v2/pair/k3m7q-x2vn8-p4rt6-9wzhd-2xkb4-m7q3n'
       : ''),
     Version: () => ok('0.1.0-dev'),
     LogsSince: (seq: number) => ok(axisAttached ? [] : logs.filter(l => l.seq > seq)),
