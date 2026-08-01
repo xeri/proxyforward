@@ -285,8 +285,9 @@ func (a *App) startEngineLocked() {
 		// engine-side change crosses to reach the document the settings screens
 		// read.
 		eng.Agent.SetEnrollmentPersister(a.persistEnrollment)
-		// Same for the pause bits.
+		// Same for the pause bits, and for the pin a first handshake widens.
 		eng.Agent.SetPausePersister(a.persistPause)
+		eng.Agent.SetPinPersister(a.persistPin)
 	}
 	// A lifecycle op over the pipe (an attached GUI, or another GUI driving this
 	// engine) persists the stopped flag through a.mu, so it lands in the document
@@ -1067,6 +1068,15 @@ func (a *App) persistEnrollment(assignedID string) error {
 	defer a.mu.Unlock()
 	a.cfg.Agent.AgentID = assignedID
 	a.cfg.Agent.EnrollTicket = ""
+	return a.cfg.Save(a.configPath)
+}
+
+// persistPin widens the stored pin to the whole fingerprint the gateway proved at
+// the handshake, into the document the settings screens read.
+func (a *App) persistPin(fingerprint string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfg.Agent.CertFingerprint = fingerprint
 	return a.cfg.Save(a.configPath)
 }
 

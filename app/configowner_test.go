@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"proxyforward/internal/config"
@@ -10,7 +11,7 @@ func agentCfg() *config.Config {
 	cfg := config.Default()
 	cfg.Role = config.RoleAgent
 	cfg.Agent.GatewayHost = "gw.example.com"
-	cfg.Agent.CertFingerprint = "sha256:" + "ab"
+	cfg.Agent.CertFingerprint = "sha256:" + strings.Repeat("ab", 32)
 	cfg.Agent.AgentID = "agt_original"
 	cfg.Agent.Tunnels = []config.Tunnel{{
 		ID: "tnl_mc", Name: "Minecraft", Type: config.TunnelTCP,

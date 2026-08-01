@@ -148,6 +148,15 @@ func (e *Engine) persistEnrollment(assignedID string) error {
 	return e.saveConfig()
 }
 
+// persistPin widens the stored pin to the whole fingerprint the handshake proved,
+// so the prefix a v2 pairing code delivered is the trust root for the pairing act
+// and nothing after it. Same split as persistEnrollment: the agent has already
+// made this edit to the document it reads from, and this write makes it durable.
+func (e *Engine) persistPin(fingerprint string) error {
+	e.cfgWrite(func(c *config.Config) { c.Agent.CertFingerprint = fingerprint })
+	return e.saveConfig()
+}
+
 // saveConfig serializes the configuration document to disk under whatever lock
 // protects it. A hostless engine hands its own document to the agent, whose
 // control reader swaps the tunnel set and whose GUI ops flip pause bits — so
@@ -203,6 +212,7 @@ func New(cfg *config.Config, configDir, configPath string, logger *slog.Logger) 
 		// The gateway-assigned identity must outlive the process; a GUI host
 		// overrides this with its lock-taking hook (mirrors SetStoppedPersister).
 		e.Agent.SetEnrollmentPersister(e.persistEnrollment)
+		e.Agent.SetPinPersister(e.persistPin)
 		// Same split for the pause bits: hostless runs write their own config,
 		// a GUI host overrides with its lock-taking hook.
 		e.Agent.SetPausePersister(e.persistPause)

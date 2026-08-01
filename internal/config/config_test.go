@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"proxyforward/internal/link"
 )
 
 func validAgentConfig() *Config {
@@ -204,6 +206,17 @@ func TestValidateCatches(t *testing.T) {
 		"agent missing host":  {func(c *Config) { c.Agent.GatewayHost = "" }, "gateway_host"},
 		"missing fingerprint": {func(c *Config) { c.Agent.CertFingerprint = "" }, "cert_fingerprint"},
 		"bad fingerprint":     {func(c *Config) { c.Agent.CertFingerprint = "md5:zz" }, "cert_fingerprint"},
+		// A pin narrower than the forgery floor must be refused when the config is
+		// read, not once per reconnect at the handshake.
+		"pin below the floor": {func(c *Config) {
+			c.Agent.CertFingerprint = "sha256:" + strings.Repeat("ab", link.MinPinBytes-1)
+		}, "cert_fingerprint"},
+		"pin half a byte wide": {func(c *Config) {
+			c.Agent.CertFingerprint = "sha256:" + strings.Repeat("ab", link.MinPinBytes) + "c"
+		}, "cert_fingerprint"},
+		"pin wider than the hash": {func(c *Config) {
+			c.Agent.CertFingerprint = "sha256:" + strings.Repeat("ab", 33)
+		}, "cert_fingerprint"},
 		"bad transport":       {func(c *Config) { c.Agent.Transport = "carrier-pigeon" }, "transport"},
 		"bad tunnel type":     {func(c *Config) { c.Agent.Tunnels[0].Type = "sctp" }, "type"},
 		"bad local addr":      {func(c *Config) { c.Agent.Tunnels[0].LocalAddr = "localhost" }, "local_addr"},

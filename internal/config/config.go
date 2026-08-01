@@ -4,6 +4,7 @@ package config
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"sync"
 
 	toml "github.com/pelletier/go-toml/v2"
+	"proxyforward/internal/link"
 	"proxyforward/internal/secureio"
 )
 
@@ -560,10 +562,17 @@ func (c *Config) validateAgent() []error {
 	if err := validPort(a.GatewayPort); err != nil {
 		errs = append(errs, fmt.Errorf("agent.gateway_port: %w", err))
 	}
+	// The pin may be the whole hash or the prefix a v2 pairing code carries — but
+	// never narrower than the width at which forging a second certificate stops
+	// being purchasable. That floor belongs here too, not only at the comparison
+	// (link.pinMatches): a config that would be refused at every handshake should
+	// say so when it is read, not once per reconnect.
 	if a.CertFingerprint == "" {
 		errs = append(errs, errors.New("agent.cert_fingerprint: required (pair with a gateway first)"))
 	} else if !strings.HasPrefix(a.CertFingerprint, "sha256:") {
 		errs = append(errs, fmt.Errorf("agent.cert_fingerprint: must start with \"sha256:\", got %q", a.CertFingerprint))
+	} else if n := len(a.CertFingerprint) - len("sha256:"); n%2 != 0 || n < link.MinPinBytes*2 || n > sha256.Size*2 {
+		errs = append(errs, fmt.Errorf("agent.cert_fingerprint: must carry between %d and %d hex characters of the certificate hash, got %d (re-pair with the gateway's current pairing code)", link.MinPinBytes*2, sha256.Size*2, n))
 	}
 	switch a.Transport {
 	case TransportMux, TransportPerConn, TransportQUIC, TransportAuto:

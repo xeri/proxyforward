@@ -377,6 +377,20 @@ func TestTruncatedPinPairsAndConnects(t *testing.T) {
 			})
 			addr := h.waitPublicPort()
 			roundTrip(t, addr, []byte("paired from a short code"))
+
+			// And the narrow window closes: having met the certificate, the agent
+			// keeps the whole hash, so the 80-bit pin is the trust root for the
+			// pairing act and nothing after it.
+			deadline := time.Now().Add(5 * time.Second)
+			var stored string
+			for time.Now().Before(deadline) {
+				h.agent.ReadConfig(func(c *config.Config) { stored = c.Agent.CertFingerprint })
+				if stored == h.gw.Fingerprint() {
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			t.Fatalf("pin was not widened after connecting: config holds %q, want %q", stored, h.gw.Fingerprint())
 		})
 	}
 }

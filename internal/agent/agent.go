@@ -199,6 +199,10 @@ type Agent struct {
 	// notification; the engine always wires one in production.
 	enrollPersister atomic.Pointer[EnrollmentPersister]
 
+	// pinPersister widens a stored pin to the whole fingerprint once a handshake
+	// has proved it (see PinPersister). nil (bare test agents) drops the write.
+	pinPersister atomic.Pointer[PinPersister]
+
 	// headless mirrors into Hello.Headless: this process runs with no GUI
 	// attached (service/CLI), so nobody may be watching for a consent proposal
 	// or a pause notice. Set before Run, immutable after.
@@ -285,6 +289,46 @@ type EnrollmentPersister func(assignedID string) error
 // SetEnrollmentPersister installs the hook that persists the gateway-assigned
 // identity and clears the spent enrollment ticket.
 func (a *Agent) SetEnrollmentPersister(fn EnrollmentPersister) { a.enrollPersister.Store(&fn) }
+
+// PinPersister persists the gateway's whole certificate fingerprint once a
+// handshake has proved it. It exists for the same reason EnrollmentPersister does:
+// the host owns the durable document, and in a GUI-hosted run a separate copy of it.
+type PinPersister func(fingerprint string) error
+
+// SetPinPersister installs the hook that widens a stored pin to the fingerprint
+// the gateway actually presented.
+func (a *Agent) SetPinPersister(fn PinPersister) { a.pinPersister.Store(&fn) }
+
+// widenPin records the whole fingerprint the handshake proved, replacing the
+// prefix a v2 pairing code delivered. A pin is only as strong as it is wide, and
+// 80 bits is chosen to survive the pairing act, not the installation's life — so
+// the moment the agent has met the certificate, it keeps the whole hash and every
+// later connection is pinned to exactly that one.
+//
+// Runs after a successful hello, on the session goroutine, so a reconnect that
+// re-reads the config sees the wider pin. A failed persist is not fatal: the
+// in-memory PinnedPeer has already tightened for this process, and the next
+// successful connect tries the write again.
+func (a *Agent) widenPin() {
+	proved := a.pinned.Fingerprint()
+	if proved == "" {
+		return
+	}
+	a.cfgMu.Lock()
+	if a.cfg.Agent.CertFingerprint == proved {
+		a.cfgMu.Unlock()
+		return // already the whole thing — a v1 code, or a later reconnect
+	}
+	a.cfg.Agent.CertFingerprint = proved
+	a.cfgMu.Unlock()
+
+	a.logger.Info("pinned the gateway's full certificate fingerprint")
+	if p := a.pinPersister.Load(); p != nil {
+		if err := (*p)(proved); err != nil {
+			a.logger.Warn("wider pin not persisted; the pairing code's prefix stays in the config", "err", err)
+		}
+	}
+}
 
 // finishEnrollment hands the gateway-assigned identity to the persister when the
 // hello that carried it completed (or repeated) an enrollment. It runs on the
@@ -902,6 +946,9 @@ func (a *Agent) helloExchange(rw helloConn, remoteAddr string, offer []string) (
 		// take the smaller of the two rather than the number we were handed.
 		a.poolGrant.Store(int32(min(ok.PoolSize, poolReq)))
 		a.finishEnrollment(ok.AssignedAgentID)
+		// Only after the gateway has accepted us: a certificate that satisfies the
+		// pin but fails the hello is not one to widen the pin to.
+		a.widenPin()
 		a.logger.Info("connected to gateway", "gateway", remoteAddr, "generation", ok.SessionGeneration, "gateway_version", ok.AppVersion, "gateway_host", ok.Hostname, "observed_ip", ok.ObservedIP, "capabilities", ok.Capabilities)
 		_ = rw.SetDeadline(time.Time{})
 		return control.NewCapSet(ok.Capabilities), nil

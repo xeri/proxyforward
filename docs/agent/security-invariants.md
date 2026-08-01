@@ -29,7 +29,13 @@ P-256 keygen and a self-sign — not a birthday collision. `pinMatches` refuses
 anything under `MinPinBytes` outright rather than comparing it, because a short
 pin is not a weaker pin, it is a forgeable one, and accepting one would let a
 pasted code downgrade the trust root from the outside
-(`TestPinIsWideEnoughToBeUnforgeable`).
+(`TestPinIsWideEnoughToBeUnforgeable`), and `config.Validate` refuses one at load
+rather than once per reconnect. The narrow window closes on first contact: the
+agent learns the whole fingerprint during the handshake, signs *that* (the
+gateway has only its own full fingerprint to check against), and persists it — so
+the prefix is the trust root for the pairing act and the whole hash for every
+moment after it (`link/cert.go PinnedPeer`, `agent/agent.go widenPin`,
+`TestTruncatedPinPairsAndConnects`).
 
 **Per-agent identity is the trust model.** Each agent proves possession of a
 long-term Ed25519 key the gateway allowlists. Its derived `agentID` (`agt_…`) is
