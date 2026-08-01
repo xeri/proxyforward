@@ -32,12 +32,15 @@ func Fingerprint(der []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// Pin returns the first n bytes of a certificate's fingerprint, in the same
-// "sha256:<hex>" spelling — the form a pairing code carries and an agent stores
-// until its first handshake teaches it the whole hash.
-func Pin(der []byte, n int) string {
-	sum := sha256.Sum256(der)
-	return "sha256:" + hex.EncodeToString(sum[:n])
+// PinOf truncates a rendered fingerprint to the width a pairing code carries —
+// the form an agent stores until its first handshake teaches it the whole hash.
+// A fingerprint already at or under that width is returned unchanged, so this is
+// safe to apply twice.
+func PinOf(fingerprint string) string {
+	if len(fingerprint) <= len("sha256:")+MinPinBytes*2 {
+		return fingerprint
+	}
+	return fingerprint[:len("sha256:")+MinPinBytes*2]
 }
 
 // MinPinBytes is the shortest prefix of a certificate hash this code will trust,

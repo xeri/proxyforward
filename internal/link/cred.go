@@ -30,11 +30,18 @@ import (
 // agt_/gw_/tnl_ ids above. It must stay distinct from a 32-hex shared token.
 const enrollTicketPrefix = "tkt_"
 
-// NewEnrollTicket mints a random single-use enrollment ticket (128-bit nonce)
-// carrying the tkt_ prefix. The gateway stores it and embeds it in a pairing code;
-// the agent replays it once to join the allowlist.
+// NewEnrollTicket mints a random single-use enrollment ticket carrying the tkt_
+// prefix. The gateway stores it and embeds it in a pairing code; the agent replays
+// it once to join the allowlist.
+//
+// The width is v2TicketBytes because that is what a pairing code carries, and a
+// ticket wider than its code would be a ticket nobody can hand over. It is not a
+// key: a ticket can only be *guessed*, online, against a gateway that rate-limits
+// per source network (limits.go authFailNets) and bounds the unauthenticated set
+// outright (preAuthGate). At an absurd thousand guesses a second, 56 bits is
+// millions of years.
 func NewEnrollTicket() (string, error) {
-	var raw [16]byte
+	var raw [v2TicketBytes]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", fmt.Errorf("generate enrollment ticket: %w", err)
 	}

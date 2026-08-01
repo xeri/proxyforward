@@ -276,7 +276,7 @@ func (e *Engine) pairingCodeFor(ticket string) (string, error) {
 		Host:        host,
 		Port:        addr.(*net.TCPAddr).Port,
 		Token:       ticket,
-		Fingerprint: e.Gateway.Fingerprint(),
+		Fingerprint: link.PinOf(e.Gateway.Fingerprint()),
 	}
 	return code.String(), nil
 }

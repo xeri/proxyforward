@@ -17,6 +17,7 @@ import (
 	"proxyforward/internal/engine"
 	"proxyforward/internal/gateway"
 	"proxyforward/internal/ipc"
+	"proxyforward/internal/link"
 )
 
 // TestCLIDrivesALiveDaemon below starts a real Engine, which serves the IPC
@@ -269,6 +270,22 @@ func TestCLIDrivesALiveDaemon(t *testing.T) {
 	code := strings.TrimSpace(out.String())
 	if !strings.HasPrefix(code, "pxf://gw.example:") {
 		t.Fatalf("issued code = %q, want a finished pxf:// code carrying the configured host", code)
+	}
+	// What is minted is what an agent pastes, so it must be the current format and
+	// must survive the parser — the mint composes the pin and ticket by hand, and a
+	// width that stopped matching would produce a code nothing can read.
+	if !strings.Contains(code, "/v2/pair/") {
+		t.Errorf("issued code is not in the current format: %q", code)
+	}
+	parsed, perr := link.ParsePairingCode(code)
+	if perr != nil {
+		t.Fatalf("the daemon issued a code its own parser rejects: %v (%q)", perr, code)
+	}
+	if !link.IsEnrollTicket(parsed.Token) {
+		t.Errorf("issued code carries %q, want a tkt_ enrollment ticket", parsed.Token)
+	}
+	if !link.IsShortPin(parsed.Fingerprint) {
+		t.Errorf("issued code carries the whole fingerprint %q; a v2 code carries the pin", parsed.Fingerprint)
 	}
 
 	out.Reset()

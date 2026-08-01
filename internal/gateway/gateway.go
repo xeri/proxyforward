@@ -180,7 +180,7 @@ func RunStarted(ctx context.Context, g *Gateway, cfg *config.Config, logger *slo
 				Host:        host,
 				Port:        g.ControlAddr().(*net.TCPAddr).Port,
 				Token:       ticket,
-				Fingerprint: g.Fingerprint(),
+				Fingerprint: link.PinOf(g.Fingerprint()),
 			}
 			// The pairing code is a live credential, so it goes to the console and
 			// nowhere else. slog would fan it out to three places that outlive the
