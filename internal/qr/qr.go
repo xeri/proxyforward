@@ -16,6 +16,20 @@
 // its variable-length ones (format and version information) are computed with the
 // BCH codes the standard specifies, because a transcribed table is a typo waiting
 // to become an unscannable symbol.
+//
+// Cross-checked once against an independent implementation (kazuhikoarase's
+// qrcode-generator), module for module, at versions 1, 5 and 6 — which covers
+// alignment patterns, multi-block interleaving, both character-count widths, and
+// the format and version information. To repeat it: dump this encoder's matrices
+// as rows of 0/1 and compare against `qrcode(0,'M').addData(text,'Byte')`.
+//
+// The two agree everywhere except which of the eight masks they pick, and that
+// difference is the reference's: its penalty rule 3 omits the four light modules
+// the current standard requires beside the finder-like pattern, and its rule 4
+// does not floor the dark-ratio deviation to a multiple of five. Either choice
+// yields a valid symbol — the format information names the mask — so this follows
+// the standard's text rather than the reference. Forcing the reference's mask
+// reproduces its matrices exactly.
 package qr
 
 import (
