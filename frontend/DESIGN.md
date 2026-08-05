@@ -1,126 +1,179 @@
-# ProxyForward Visual Charter — Abyssal Bloom
+# ProxyForward Visual Charter — Abyssal Bloom, direction 3a
 
-> **"A deep-sea research instrument: the abyss out the porthole, jade
-> bioluminescence for life-signs, and every element an organism drifting in
-> the water column."**
+> **"The Sounding Line, Trued."** A deep-sea instrument read in the dark: strict
+> hairline structure, one metric ladder, and exactly one living, glowing
+> organism per screen.
 
-ProxyForward is not a SaaS dashboard. It is an instrument lowered into a live
-network, read in the dark. The design language is deep-sea bioluminescence:
-the page is the abyss (`#02090f`), panels are volumes of trench water you look
-into, and light is never decoration — **jade is a life-signal, current blue is
-flow, coral is distress**. Every design decision is held to these rules:
+Locked direction: **3a**, from `Layout Brainstorm.dc.html#3a`, specified in
+`Abyssal Bloom Spec.dc.html` (v2, the Build Constitution). This file is the
+binding restatement of both. Where this file and a screen disagree, this file
+wins.
 
-1. **Every page has one identity surface.** Everything else recedes around it.
-   - Overview — *Connection*: the pipeline is the sculpture (the bloom frame).
-   - Traffic — *Motion*: the bandwidth graph itself, bare. The graph is the artwork.
-   - Analytics — *Time & place*: the world map, huge and bare.
-   - Players — *People*: the wall of faces.
-   - Agents (gateway) — *Fleet*: the roster of machine health cards. Quiet
-     trench glass, never the bloom frame — N equal cards can't each answer the
-     pointer (rule 2). The drill-in borrows Traffic's bare bandwidth hero,
-     scoped to one agent.
-   - Settings — *Precision*: no identity surface. IDE-quiet.
-   - Activity — *Sediment*: the log well, near-zero decoration. Events settle
-     downward; the newest surfaces with a rise and holds the light.
-   - Tunnels — *Passage*: the port ledger — hairline rows, no bloom frame (a
-     config surface, not live traffic).
+## What changed, and why there are two charters
 
-   Each page's theme word is spoken aloud: it is the masthead eyebrow
-   (`PageHeader eyebrow`), lowercase, accent-inked, above the title.
+The previous charter — preserved verbatim as `DESIGN-glass-legacy.md` — is also
+called Abyssal Bloom, and shares its palette floor and its two display voices.
+It is nonetheless a different system. It is the **glass** one: trench-water
+panel fills, a seven-step blur ladder, card shadows, a light theme, and an
+accent ramp that re-tints per role.
 
-2. **Everything is water. The reward is the surface that answers you.**
-   Standard cards (`.pf-card`) are **quiet trench glass**: trench water at
-   ~60%, a ridge rim, symmetric resting corners. Controls (`.pf-control`) are
-   recessed wells of deeper water. They smear what passes behind them — and
-   that is all they do. The signature material, the **bloom frame** (Signal
-   Glass, `.pf-signal`), is the only surface that *reacts*: the one
-   asymmetric 28/10 frame per screen, fed by an accent bloom from its corner,
-   standing in its own glow; its rim and surface follow the pointer, caustics
-   drift across it while someone is there, and it ignites when the agent
-   connects. One per screen, only on surfaces that represent live network
-   activity.
-   So the hierarchy is not *glass vs. not-glass* — it is **behavior**. Never
-   give a card the caustics, the bloom gradient, or the pointer-wake: the
-   moment a second surface answers the pointer, the page has two identity
-   surfaces and rule 1 is broken.
-   **Asymmetry is importance** and it is rationed the same way: the 28/10
-   swell belongs to the bloom frame, modals, and the command palette; buttons
-   carry 14/6, inputs 10/4, chips 8/3; a quiet card stays symmetric. Nothing
-   important is symmetric, and nothing symmetric begs for attention.
+3a retires all of that. The box budget for a whole screen is now:
 
-3. **Motion is water physics, and it communicates network state — never
-   decoration.** Two curves carry everything: the *current*
-   (`--ease-out`) for arrivals, hovers, and glow; *propulsion*
-   (`--ease-spring`) for presses and toggles. Births bloom, deaths sink,
-   nothing moves linearly. Conduit dashes swim when packets flow and stop
-   when the link is down. The pipeline ignites when the agent connects. A
-   country pulses when a player joins. Organisms (the Emblem, the plankton)
-   wobble and drift on individual clocks — alive things move, dormant things
-   freeze mid-wobble. Idle UI is still UI. Everything gates on
-   `prefersReduced()`: under reduced motion the sea goes completely still —
-   plankton included, which mounts nothing at all.
-   The sole exception is **tactility** — motion that answers the user's own
-   hand: the press squish, the hover lift, the rubber band at a scroller's
-   end (`frontend/src/rubberband.ts`). It exists to make the instrument feel
-   physical, so it must always be a *reply* to input and must never play on
-   its own.
+- the bloom,
+- its code wells,
+- the chrome pod.
 
-4. **Color is a life-signal, not branding.** Jade (`#2fffc0`) is life: the
-   agent role, good, live, the primary flow. Current blue (`#1c8bff`) is the
-   open water: the gateway role, the return flow. Coral (`--bad`) is distress
-   only — never decoration. The glow fields, the Emblem organism, and the
-   role hues are the product's identity — keep them concentrated. Accent
-   appears only on: the backdrop glow, the sidebar identity, active
-   navigation (the lit lure), primary buttons, live status, the bloom
-   frame, and the eyebrow tier (the masthead's theme word, the wizard's act
-   numbers). Status hues (`--good/--warn/--bad`) and chart series colors are
-   data. Everything else is silt and foam. Only living things glow, and glow
-   radius tracks health; a warning's urgency is a tempo (distress breathes
-   fast, information breathes slow).
+Nothing else may be a box. No card grids, no panel backgrounds, no nested
+containers. Everything that is not the bloom is **typography on 1px rules**.
 
-5. **Whitespace is an active design element.** 48px of dark water between
-   major page groups, 24px within a group, 16px grid gaps. Metadata lives as
-   typography on whitespace, not in boxes. Vary the primitives — hero,
-   metric row, divider, chart, list, code block — never card-card-card.
-   Tables are hairline rows, never zebra.
+Those two systems cannot both be true at once, so they live in separate files
+and screens cross over one at a time:
 
-6. **Two voices, strictly cast — and scale is the instrument's drama.** The
-   working voice is **Spline Sans Mono** (variable, self-hosted, italic axis
-   loaded): body, data, labels, chrome — lowercase by default, tabular
-   numerals. The display voice is **Cormorant Unicase** (500/700,
-   self-hosted): mastheads, panel titles, headline metrics, and the go-live /
-   fatal statements — and nothing else; never body copy.
-   - **The ladder** (design-width px; every step is a `--fs-*` token exposed
-     as a `text-*` utility, and `--ui-scale` steps the whole scale with the
-     viewport). Display: 56 *colossal* — ceremony, twice in the product (the
-     wizard's brand lockup, "Handshake complete."); 42 *hero* — mastheads;
-     38 *metric-hero* — the one hero figure per page, and the go-live/fatal
-     statements; 26 *metric*; 21 *metric-sm* — dense 3-up grids; 19 *title* —
-     panel h2s. Mono: 16 *code* — the pairing plaque; 13 *emphasis*;
-     12.5 *body*; 11.5 *sub*; 10.5 *caption* — labels; 10 *micro* — chips.
-   - **Hierarchy is casting, not new sizes.** Panel titles are one recipe
-     (`PanelTitle`): Cormorant 700 full-ink when the panel is the page's
-     subject, `--w-display-quiet` (500; 600 on light) receded ink when it
-     serves. Mono 600 is emphasis; mono 700 retreats to buttons and codes.
-   - **Italic is the annotation voice**: hints, empty-state prose,
-     placeholders, provisional/awaiting/offline states. Never for emphasis —
-     weight does that.
-   - **Labels are lowercase** — caption, 600, `--tracking-label`, silt ink
-     (`Overline`): the instrument murmurs its labels, it does not bark them.
-     The **eyebrow** (`Overline variant="eyebrow"`: `--tracking-eyebrow`,
-     accent ink) is the louder cousin, reserved for mastheads and the
-     wizard's act numbers — never row labels. Chips and badges may stay
-     uppercase (LAN, log levels): they are hardware stampings, not labels.
-     Buttons are the one place type raises its voice: uppercase,
-     `--tracking-btn`, bold (`.pf-btn`). Codes are credentials — never
-     case-transformed, `--tracking-code` on the plaque.
-   The jump between levels — and between the two faces — is what creates
-   hierarchy. Impact comes from scale contrast on whitespace, never from
-   decorating: when something matters, say it huge in Cormorant and leave
-   the water around it empty.
+| | glass (legacy) | 3a (this charter) |
+| --- | --- | --- |
+| tokens | `src/styles/tokens.css` | `src/styles/abyssal-3a.css` |
+| classes | `.pf-*` | `.a3-*` |
+| status | what the 9 screens still render | the target |
 
-7. **Users should remember one composition from every page.** One deliberate
-   grid break (the Overview pipeline runs full-bleed), one bloom of light,
-   one place the eye lands first. The atmosphere holds the rest: depth
-   gradient, dot-grid seafloor, drifting plankton, scanlines over the top —
-   all pointer-transparent, all deferential to the content.
+A screen is "3a" only once it is rebuilt on the `.a3-*` primitives **and**
+passes the growth checklist at the bottom of this file. Until then it keeps the
+glass look, and that is expected rather than a bug. The 3a stylesheet declares
+no bare element selectors, so it cannot half-apply itself to a screen nobody has
+reviewed yet.
+
+## 1. The closed palette. Never add a hue.
+
+Seven colors and two text tiers, each with exactly one job.
+
+| token | value | job |
+| --- | --- | --- |
+| `--a3-abyss` | `#02090f` | the only page background |
+| `--a3-hairline` | `#0d2b33` | structure — every rule, 1px, always |
+| `--a3-border` | `#124450` | the outline of an interactive thing, 1px, always |
+| `--a3-mint` | `#2fffc0` | **alive**: agents, live data, the one primary action |
+| `--a3-current` | `#1c8bff` | **machine**: gateway, this device, secondary signal |
+| `--a3-waiting` | `#e8b34b` | pending states, and nothing else |
+| `--a3-coral` | `#ff5d73` | danger, stop, close, POOR, and nothing else |
+| `--a3-text` | `#bdfbe6` | primary ink |
+| `--a3-muted` | `#3e6a74` | secondary ink |
+
+**Two text tiers only.** Anything reaching for a third is over-nested — flatten
+it instead. **Status is never color alone**: every colored dot carries its word
+beside it. Ambient light is capped at two radial washes per screen, painted on
+the frame and never on content. At most **one solid-mint filled element per
+screen** — copy buttons sitting near codes stay hairline.
+
+## 2. Six voices, fixed jobs, no seventh
+
+| voice | font | job |
+| --- | --- | --- |
+| ceremonial | Cormorant Unicase 700 | titles 44px, stat words 28px, names 18px. Never below 16px, never a number, never mid-sentence. |
+| workhorse | Gruppo | labels, captions, nav, tags, 11–14px. Lowercase, always. |
+| human | MuseoModerno | helper sentences only. The one font allowed a marine metaphor. |
+| machine-verbatim | Red Hat Mono | codes, hosts, urls, commands, log lines, config. Lowercase, always. |
+| instrument | Doto 900 | **every free-standing number** — telemetry, counts, countdowns, ports, PIDs, versions, percentages. |
+| action | Genos 700 | button labels only. Genos on something unclickable is a bug. |
+
+Only numerals locked inside verbatim mono text escape Doto. Mint 600 + glow in a
+code well means **secret** — a command is the same plaque with the mint switched
+off, and nothing else earns the glow.
+
+## 3. One metric ladder. Nothing off-scale.
+
+`4` micro · `7` dot-to-word · `12` in-band · `14` band padding · `20` block
+rhythm · `24` gutter · `28` page margin (top 24, bottom 20).
+
+**Nothing touches a border**: 14px clearance at every hairline, 24px at every
+vertical rule. The content grid is `1.55fr / 1fr` with a 24px gutter, **two
+columns maximum** — a would-be third becomes a band below.
+
+A feature that "needs" 17px of padding is a feature whose type scale is wrong.
+Fix the type; keep the ladder.
+
+## 4. Shape: grown, not stamped
+
+Asymmetric radii, mirrored on the diagonal, A B A B: frame `34/14` · bloom
+`26/10` · code well `24/10` · chrome pod `0 0 18/8` · buttons `12/5` (secondary
+`10/4`, paired icon buttons mirror `10/4` ↔ `4/10`) · state badge `7/3` · `999px`
+pills for tiny role tags only, never a container.
+
+No symmetric rounded rectangles except those pills. No 90° corners except
+hairline rules. The dashed well inside the bloom is **retired** — 3a proved the
+code well alone is enough. One box fewer, always.
+
+## 5. The one-bloom rule
+
+Exactly one breathing, glowing organism per screen. Its anatomy is fixed:
+
+1. header line — label left, state word right in Doto, never floating over content
+2. organisms, **top-aligned** so the tether meets both blob centers regardless of caption length
+3. code well pinned to the bottom, full bloom width
+
+Capacity is capped at header + one organism pair + one code well + one hairline
+footer row. **A new feature never adds a second bloom.** If it genuinely deserves
+the bloom it takes over and the previous occupant demotes to the ladder — never
+both. Overflow migrates to its own station.
+
+Living entities wobble. An absent one is a dashed muted outline at 0.55 opacity,
+because "not here yet" is a real state and should look like one.
+
+## 6. The instrument ladder
+
+Everything that is not the bloom is typography on 1px `--a3-hairline` rules:
+14px band padding, one shared baseline grid, **≤3 stats per band**, one concern
+per rung (link health gets its own rung rather than crowding the hero numerals).
+A 4th stat opens a new band below. **Ladders grow down, never sideways.**
+
+## 7. Nav — the sounding line
+
+96px rail. Doto 12px depth marks stepping 200 from `0200`. Rotated Gruppo 14px
+station labels. **Hard cap 8 stations** — a 9th nests inside an existing station
+as hairline tabs rather than lengthening the rail. Exactly one active, ever
+(2px mint left border + wash). Settings anchors the foot.
+
+The chrome pod is **absolutely molded to the frame**: `position:absolute; top:0;
+right:26px`. Never negative margins, never inline in the strip. The surface strip
+owes it ≥240px of right padding so a long title can never collide with it.
+
+## 8. Glow and motion budgets
+
+Glow rides ≤2 hero numerals and the code groups. Dot glows ≤8px.
+
+**Three keyframes exist** — `lb-wobble` (7–8s, living blobs), `lb-breathe` (6s,
+the bloom), `lb-pulse` (2.5–3s, status dots). A fourth never ships. Nothing
+slides, scales, spins, or enters. Hover is a brightness or border shift, ≤160ms.
+Under `prefers-reduced-motion` the sea goes completely still.
+
+## 9. Data honesty
+
+Unmeasured renders `—` in muted. A measured zero renders as a real `0 B/S` in its
+signal color. **Never a fake number.** Addresses in flowing text are Gruppo 12px
+muted; anything copyable is Red Hat Mono inside a code well.
+
+## 10. Resilience — nothing breaks by growth
+
+Every label, stat, and button is `white-space:nowrap`. The flexible child of a
+row is always the text column (`min-width:0`); actions are `flex-shrink:0` with
+`margin-left:auto`. Chrome never depends on a flow neighbour. Page actions center
+to the title block, never to its baseline.
+
+Assigned overflow exits: 4th stat → new band · 9th station → nested tabs · 2nd
+secret → footer row, not a second well · bloom overflow → its own station.
+
+**The squeeze test:** narrow any screen 20%. No button may wrap, no code group
+may split mid-group, no text may touch a rule.
+
+## Growth checklist — run before adding any feature
+
+Every "no" is a redesign, not a patch.
+
+1. Exactly one bloom, one solid-mint action, one active station?
+2. Did the feature enter as hairline typography rather than as its own box?
+3. Is every color one of the seven, used for its assigned meaning?
+4. Every number Doto, every label lowercase Gruppo, every button Genos, every code lowercase Red Hat Mono in a well?
+5. Every gap and padding off the §3 ladder, with nothing touching a border?
+6. Glow within budget (≤2 hero numerals), nothing new moving?
+7. Nav still ≤8 stations?
+8. Squeeze test passed?
+9. Every value real — `—` when unmeasured, signal-colored when a measured zero?
+10. Delete-test: strip the feature's decoration. Does it still read on type and hairlines alone?

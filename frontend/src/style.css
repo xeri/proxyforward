@@ -3,6 +3,10 @@
 @import "./styles/base.css";
 @import "./styles/glass.css";
 @import "./styles/motion.css";
+/* Locked direction 3a. Imported last so its namespaced .a3-* primitives win
+   over anything the glass system sets on a shared element; screens move onto
+   it one at a time (see styles/abyssal-3a.css and DESIGN.md). */
+@import "./styles/abyssal-3a.css";
 
 @theme {
   --font-sans: "Spline Sans Mono Variable", "Cascadia Mono", ui-monospace, Consolas, monospace;

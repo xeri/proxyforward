@@ -1,0 +1,468 @@
+/* ---------------------------------------------------------------------------
+   Abyssal Bloom — locked direction 3a, "The Sounding Line, Trued".
+
+   This file is the whole design system: the closed palette, the six voices,
+   the one metric ladder, the shape pairs, the three animations, and the
+   primitives built out of them. It is deliberately separate from tokens.css.
+
+   tokens.css is the PREVIOUS Abyssal Bloom — the glass one: panel fills, a
+   blur ladder, card shadows, a light theme, a role-swapped accent ramp. 3a
+   retires all of that. The box budget is now the bloom, its code wells, and
+   the chrome pod; everything else is typography on 1px rules. Those two
+   systems cannot both be true, so they do not share a file, and screens move
+   across one at a time rather than in a single unreviewable sweep.
+
+   While a screen still consumes tokens.css it keeps the old look. Once it is
+   rebuilt on the .a3-* primitives below it is 3a and must satisfy the growth
+   checklist in DESIGN.md. Nothing here overrides tokens.css — no bare element
+   selectors, every class namespaced — so the migration cannot half-apply
+   itself to a screen nobody has looked at yet.
+--------------------------------------------------------------------------- */
+
+:root {
+  /* ---- the closed palette. never add a hue. ------------------------------
+     Seven colors and two text tiers, each with one job. A feature that
+     "needs" an eighth color is a feature whose meaning is unclear. */
+  --a3-abyss: #02090f;        /* the only page background */
+  --a3-abyss-top: #04141d;    /* top stop of the frame gradient */
+  --a3-hairline: #0d2b33;     /* structure: every rule, 1px, always */
+  --a3-border: #124450;       /* outline of an interactive thing, 1px, always */
+  --a3-mint: #2fffc0;         /* alive: agents, live data, the one primary action */
+  --a3-current: #1c8bff;      /* machine: gateway, this device, secondary signal */
+  --a3-waiting: #e8b34b;      /* amber. pending states ONLY */
+  --a3-coral: #ff5d73;        /* danger, stop, close, POOR. ONLY */
+  --a3-text: #bdfbe6;
+  --a3-muted: #3e6a74;        /* two text tiers exist. a third means it is over-nested */
+
+  /* ---- the six voices, fixed jobs, no seventh -------------------------- */
+  --a3-display: "Cormorant Unicase", Georgia, serif;      /* titles, stat words, names */
+  --a3-label: Gruppo, ui-sans-serif, sans-serif;           /* labels, nav, captions */
+  --a3-helper: MuseoModerno, ui-sans-serif, sans-serif;    /* helper sentences only */
+  --a3-code: "Red Hat Mono", ui-monospace, Consolas, monospace; /* machine-verbatim */
+  --a3-num: Doto, ui-sans-serif, sans-serif;               /* every free-standing number */
+  --a3-action: Genos, ui-sans-serif, sans-serif;           /* button labels only */
+
+  /* ---- the one metric ladder. nothing off-scale. ----------------------- */
+  --a3-micro: 4px;      /* label to value; kicker to title */
+  --a3-dot-gap: 7px;    /* a status dot to its word */
+  --a3-row: 12px;       /* gaps inside a band */
+  --a3-band: 14px;      /* vertical padding above and below every hairline */
+  --a3-rhythm: 20px;    /* between skeleton blocks */
+  --a3-gutter: 24px;    /* column gutters; inset from vertical rules */
+  --a3-margin: 28px;    /* content sides. top is 24, bottom is 20 */
+
+  /* ---- shape: asymmetric pairs, mirrored on the diagonal --------------- */
+  --a3-r-frame: 34px 14px 34px 14px;
+  --a3-r-bloom: 26px 10px 26px 10px;
+  --a3-r-well: 24px 10px 24px 10px;
+  --a3-r-pod: 0 0 18px 8px;
+  --a3-r-btn: 12px 5px 12px 5px;
+  --a3-r-btn-sm: 10px 4px 10px 4px;
+  --a3-r-btn-mirror: 4px 10px 4px 10px;  /* the second of a paired icon button */
+  --a3-r-badge: 7px 3px 7px 3px;
+  --a3-r-pill: 999px;                     /* tiny role tags only, never a container */
+
+  /* ---- fixed geometry -------------------------------------------------- */
+  --a3-rail-w: 96px;      /* the sounding line. not negotiable */
+  --a3-pod-reserve: 240px; /* right padding the surface strip owes the pod */
+  --a3-icon-w: 30px;
+  --a3-icon-h: 26px;
+}
+
+/* ---------------------------------------------------------------------------
+   The three animations. A fourth never ships.
+--------------------------------------------------------------------------- */
+@keyframes lb-wobble {
+  0%, 100% { border-radius: 60% 40% 55% 45% / 50% 60% 40% 55%; }
+  25% { border-radius: 44% 56% 38% 62% / 62% 40% 60% 38%; }
+  50% { border-radius: 56% 44% 64% 36% / 40% 56% 44% 62%; }
+  75% { border-radius: 38% 62% 46% 54% / 58% 38% 62% 42%; }
+}
+@keyframes lb-breathe {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.2); }
+}
+@keyframes lb-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* Reduced motion stops the sea completely. Dormant things freeze mid-wobble
+   rather than snapping to a circle, so the shape stays grown, not stamped. */
+@media (prefers-reduced-motion: reduce) {
+  .a3-wobble, .a3-bloom, .a3-dot { animation: none !important; }
+}
+
+/* ---------------------------------------------------------------------------
+   Type. Each voice is a class; the class carries the whole recipe so a
+   caller never restates a font stack, a case rule, or a tracking value.
+--------------------------------------------------------------------------- */
+
+/* Ceremonial. Never below 16px, never a number, never inside a sentence. */
+.a3-title { font-family: var(--a3-display); font-weight: 700; color: var(--a3-text); font-size: 44px; line-height: 1.05; }
+.a3-stat-word { font-family: var(--a3-display); font-weight: 700; color: var(--a3-text); font-size: 28px; }
+.a3-name { font-family: var(--a3-display); font-weight: 700; color: var(--a3-text); font-size: 18px; }
+
+/* Workhorse. Labels are lowercase — the instrument murmurs them. */
+.a3-label {
+  font-family: var(--a3-label);
+  font-size: 12px;
+  color: var(--a3-muted);
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+.a3-label-sm { font-family: var(--a3-label); font-size: 11px; color: var(--a3-muted); text-transform: lowercase; white-space: nowrap; }
+/* The kicker is the louder cousin: mint, tracked, mastheads only. */
+.a3-kicker {
+  font-family: var(--a3-label);
+  font-size: 12px;
+  color: var(--a3-mint);
+  letter-spacing: 0.2em;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
+/* The human voice. Sentences only, and the only font allowed a metaphor. */
+.a3-helper { font-family: var(--a3-helper); font-size: 13px; color: var(--a3-muted); }
+.a3-helper-sm { font-family: var(--a3-helper); font-size: 11px; color: var(--a3-muted); }
+
+/* Machine-verbatim. Lowercase always. Mint + glow means SECRET and nothing
+   else earns it: a command is the same plaque with the mint switched off. */
+.a3-code { font-family: var(--a3-code); font-weight: 400; font-size: 12px; color: var(--a3-muted); text-transform: lowercase; }
+.a3-secret {
+  font-family: var(--a3-code);
+  font-weight: 600;
+  font-size: 19px;
+  letter-spacing: 0.06em;
+  color: var(--a3-mint);
+  text-shadow: 0 0 16px rgba(47, 255, 192, 0.35);
+}
+.a3-command { font-family: var(--a3-code); font-weight: 400; font-size: 13px; color: var(--a3-text); }
+
+/* The instrument. EVERY free-standing number. Only numerals locked inside
+   verbatim mono text escape Doto. */
+.a3-num-hero { font-family: var(--a3-num); font-weight: 900; font-size: 30px; color: var(--a3-text); white-space: nowrap; }
+.a3-num-hero-mint { color: var(--a3-mint); text-shadow: 0 0 20px rgba(47, 255, 192, 0.45); }
+.a3-num-hero-current { color: var(--a3-current); text-shadow: 0 0 20px rgba(28, 139, 255, 0.45); }
+.a3-num { font-family: var(--a3-num); font-weight: 900; font-size: 20px; color: var(--a3-text); }
+.a3-num-count { font-family: var(--a3-num); font-weight: 900; font-size: 15px; color: var(--a3-text); }
+.a3-num-depth { font-family: var(--a3-num); font-weight: 900; font-size: 12px; color: var(--a3-muted); }
+.a3-num-version { font-family: var(--a3-num); font-weight: 700; font-size: 11px; color: var(--a3-muted); }
+/* Unmeasured renders as an em dash in muted. A measured zero is a real "0 B/S"
+   in signal color. Never a fake number. */
+.a3-unmeasured { color: var(--a3-muted); text-shadow: none; }
+
+/* ---------------------------------------------------------------------------
+   The frame, the pod, the surface strip.
+--------------------------------------------------------------------------- */
+.a3-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--a3-hairline);
+  border-radius: var(--a3-r-frame);
+  background-color: var(--a3-abyss);
+  /* Two ambient washes, on the frame only, and never a third. */
+  background-image:
+    radial-gradient(circle at 78% -4%, rgba(47, 255, 192, 0.09), transparent 46%),
+    radial-gradient(circle at 6% 100%, rgba(28, 139, 255, 0.11), transparent 42%),
+    linear-gradient(180deg, var(--a3-abyss-top), var(--a3-abyss));
+}
+
+/* Absolutely molded to the frame's top edge. Never negative margins, never
+   inline in the strip — the pod must not depend on a flow neighbour. */
+.a3-pod {
+  position: absolute;
+  top: 0;
+  right: 26px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--a3-row);
+  padding: 8px 16px 9px;
+  border: 1px solid var(--a3-border);
+  border-top: none;
+  border-radius: var(--a3-r-pod);
+  background: linear-gradient(180deg, rgba(9, 42, 53, 0.95), rgba(4, 20, 28, 0.9));
+  -webkit-app-region: drag;
+}
+.a3-pod > * { -webkit-app-region: no-drag; }
+.a3-pod-divider { width: 1px; height: 14px; background: var(--a3-border); }
+
+.a3-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--a3-band);
+  padding: 12px var(--a3-pod-reserve) 12px var(--a3-gutter);
+  border-bottom: 1px solid var(--a3-hairline);
+  -webkit-app-region: drag;
+}
+.a3-strip > * { -webkit-app-region: no-drag; }
+
+/* ---------------------------------------------------------------------------
+   The sounding line. 96px, depth marks stepping 200, hard cap 8 stations —
+   a 9th nests inside an existing station as hairline tabs, it does not
+   lengthen the rail.
+--------------------------------------------------------------------------- */
+.a3-rail {
+  width: var(--a3-rail-w);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 0 var(--a3-band);
+  border-right: 1px solid var(--a3-hairline);
+  background: linear-gradient(180deg, rgba(28, 139, 255, 0.06), rgba(2, 9, 15, 0.4));
+}
+.a3-station {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 0 13px 16px;
+  border-left: 2px solid transparent;
+  background: none;
+  cursor: pointer;
+  transition: filter 160ms ease, border-color 160ms ease;
+}
+.a3-station:hover { filter: brightness(1.3); }
+/* Exactly one active station, ever. */
+.a3-station[aria-current="page"] {
+  border-left-color: var(--a3-mint);
+  background: linear-gradient(90deg, rgba(47, 255, 192, 0.12), transparent);
+}
+.a3-station-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-family: var(--a3-label);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--a3-muted);
+  text-transform: lowercase;
+}
+.a3-station[aria-current="page"] .a3-station-label { color: var(--a3-text); }
+.a3-station[aria-current="page"] .a3-num-depth { color: var(--a3-mint); }
+.a3-rail-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding-top: var(--a3-row);
+  border-top: 1px solid var(--a3-hairline);
+}
+
+/* ---------------------------------------------------------------------------
+   The content column and its skeleton. Blocks stack on the 20px rhythm.
+--------------------------------------------------------------------------- */
+.a3-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--a3-rhythm);
+  padding: var(--a3-gutter) var(--a3-margin) var(--a3-rhythm);
+}
+
+/* The page action is centered to the title block, never baselined, so a long
+   title cannot make it sink or wrap. */
+.a3-header { display: flex; align-items: center; gap: var(--a3-rhythm); }
+.a3-header-text { min-width: 0; }
+.a3-header-action { margin-left: auto; flex-shrink: 0; white-space: nowrap; }
+
+/* Typography on hairlines. Three word-stats maximum; a fourth opens a new
+   band below. Ladders grow down, never sideways. */
+.a3-status-band {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--a3-hairline);
+  border-bottom: 1px solid var(--a3-hairline);
+}
+.a3-status-cell { padding: var(--a3-band) var(--a3-gutter); border-right: 1px solid var(--a3-hairline); }
+.a3-status-cell:first-child { padding-left: 0; }
+.a3-status-cell:last-child { padding-right: 0; border-right: none; }
+
+/* Two content columns maximum. A would-be third becomes a band below. */
+.a3-grid {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: var(--a3-gutter);
+  flex: 1;
+  align-items: stretch;
+}
+
+/* The instrument ladder: every non-bloom concern, one per rung. */
+.a3-ladder { min-width: 0; display: flex; flex-direction: column; padding-top: 6px; }
+.a3-rung { padding: var(--a3-band) 0; border-bottom: 1px solid var(--a3-hairline); }
+.a3-rung-row { display: flex; align-items: center; gap: var(--a3-row); }
+.a3-rung-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--a3-row); }
+.a3-rung-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--a3-row); }
+
+.a3-floor {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: var(--a3-row);
+  border-top: 1px solid var(--a3-hairline);
+}
+
+/* ---------------------------------------------------------------------------
+   The bloom. Exactly one breathing, glowing organism per screen.
+
+   A new feature never adds a second bloom. If it genuinely deserves the
+   bloom it TAKES OVER and the previous occupant demotes to the ladder —
+   never both. Capacity is capped at header line + one organism pair + one
+   code well + one hairline footer row; past that the feature migrates to
+   its own station.
+--------------------------------------------------------------------------- */
+.a3-bloom {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--a3-rhythm) 22px;
+  border: 1px solid rgba(47, 255, 192, 0.35);
+  border-radius: var(--a3-r-bloom);
+  background: radial-gradient(circle at 74% 16%, rgba(47, 255, 192, 0.14), rgba(6, 34, 43, 0.7) 58%, rgba(2, 9, 15, 0.85));
+  box-shadow: 0 0 30px rgba(47, 255, 192, 0.13);
+  animation: lb-breathe 6s ease-in-out infinite;
+}
+/* The state word rides the header line, right — never floating over content. */
+.a3-bloom-header { display: flex; align-items: center; gap: 8px; }
+
+/* A living entity. An absent one is a dashed muted outline at 0.55 opacity,
+   because "not here yet" is a real state and deserves to look like one. */
+.a3-wobble { animation: lb-wobble 8s ease-in-out infinite; }
+.a3-absent { border: 1px dashed var(--a3-muted); border-radius: 50% 45% 55% 48%; opacity: 0.55; }
+/* Organisms top-align so the tether always meets both blob centers no matter
+   how long a caption runs. */
+.a3-tether {
+  flex: 1;
+  height: 1px;
+  margin: 23px 16px 0;
+  background: repeating-linear-gradient(90deg, var(--a3-border) 0 8px, transparent 8px 16px);
+}
+
+/* ---------------------------------------------------------------------------
+   The code well — the one plaque every secret uses. Full width of its
+   holder, sitting directly on it. The dashed wrapper is retired: 3a proved
+   the well alone is enough. One box fewer, always.
+
+   A second secret does NOT get a second well; it rides a hairline footer row
+   below (.a3-well-footer).
+--------------------------------------------------------------------------- */
+.a3-well {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: var(--a3-band) 18px;
+  border: 1px solid var(--a3-border);
+  border-radius: var(--a3-r-well);
+  background: rgba(2, 11, 17, 0.92);
+}
+.a3-well-host { display: flex; align-items: baseline; gap: 6px; }
+.a3-well-host-colon { color: var(--a3-border); }
+/* Six 5-char groups on one line. Narrowed, they break 3+3 — the type never
+   drops below 19px, never uppercases, never splits mid-group. */
+.a3-well-groups { display: flex; justify-content: space-between; gap: var(--a3-row); flex-wrap: wrap; }
+.a3-well-footer { display: flex; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid var(--a3-hairline); }
+/* Commands are the same plaque with the mint off. Logs are NOT wells: they
+   are hairline rungs, Red Hat Mono 12px, no background and no glow. */
+.a3-well-command .a3-well-groups { color: var(--a3-text); }
+.a3-log-rung { display: flex; align-items: baseline; gap: var(--a3-row); padding: 6px 0; border-bottom: 1px solid var(--a3-hairline); font-family: var(--a3-code); font-size: 12px; }
+
+/* ---------------------------------------------------------------------------
+   Buttons. Genos, and if Genos appears on something unclickable it is wrong.
+   At most ONE solid-mint filled element per screen: copy buttons near codes
+   stay hairline.
+--------------------------------------------------------------------------- */
+.a3-btn {
+  font-family: var(--a3-action);
+  font-weight: 700;
+  font-size: 14px;
+  padding: 3px 16px;
+  border: 1px solid var(--a3-border);
+  border-radius: var(--a3-r-btn);
+  background: none;
+  color: var(--a3-text);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: filter 160ms ease, border-color 160ms ease;
+}
+.a3-btn:hover { filter: brightness(1.3); }
+.a3-btn-mint { border-color: var(--a3-mint); color: var(--a3-mint); }
+.a3-btn-danger { border-color: var(--a3-coral); color: var(--a3-coral); }
+/* The one filled element. Budget: one per screen. */
+.a3-btn-fill {
+  background: var(--a3-mint);
+  border-color: var(--a3-mint);
+  color: var(--a3-abyss);
+  box-shadow: 0 0 14px rgba(47, 255, 192, 0.3);
+}
+/* The page action sits a size up. */
+.a3-btn-page { font-size: 16px; padding: 7px 22px; border-radius: 14px 6px 14px 6px; }
+.a3-btn-sm { border-radius: var(--a3-r-btn-sm); }
+/* Paired icon buttons mirror each other's radii on the diagonal. */
+.a3-icon-btn {
+  width: var(--a3-icon-w);
+  height: var(--a3-icon-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--a3-code);
+  font-size: 13px;
+  border: 1px solid var(--a3-border);
+  border-radius: var(--a3-r-btn-sm);
+  background: none;
+  color: var(--a3-muted);
+  cursor: pointer;
+  transition: filter 160ms ease;
+}
+.a3-icon-btn:hover { filter: brightness(1.4); }
+.a3-icon-btn + .a3-icon-btn { border-radius: var(--a3-r-btn-mirror); }
+
+/* ---------------------------------------------------------------------------
+   Status. A dot is never allowed to carry meaning alone — it always sits
+   beside its word.
+--------------------------------------------------------------------------- */
+.a3-status { display: inline-flex; align-items: center; gap: var(--a3-dot-gap); white-space: nowrap; }
+.a3-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.a3-dot-live { background: var(--a3-mint); box-shadow: 0 0 8px var(--a3-mint); animation: lb-pulse 2.5s ease-in-out infinite; }
+.a3-dot-waiting { background: var(--a3-waiting); box-shadow: 0 0 7px rgba(232, 179, 75, 0.6); animation: lb-pulse 3s ease-in-out infinite; }
+.a3-dot-machine { background: var(--a3-current); box-shadow: 0 0 8px var(--a3-current); }
+.a3-dot-bad { background: var(--a3-coral); box-shadow: 0 0 8px rgba(255, 93, 115, 0.6); }
+.a3-dot-off { background: var(--a3-muted); }
+
+/* Tinted fill never exceeds 0.15 alpha of its own state color. */
+.a3-badge {
+  font-family: var(--a3-num);
+  font-weight: 900;
+  font-size: 11px;
+  padding: 2px 9px;
+  border: 1px solid currentColor;
+  border-radius: var(--a3-r-badge);
+  white-space: nowrap;
+}
+.a3-badge-bad { color: var(--a3-coral); background: rgba(255, 93, 115, 0.15); }
+.a3-badge-waiting { color: var(--a3-waiting); background: rgba(232, 179, 75, 0.15); }
+.a3-badge-live { color: var(--a3-mint); background: rgba(47, 255, 192, 0.15); }
+
+/* Tiny role tags only. Never a container. */
+.a3-pill {
+  font-family: var(--a3-label);
+  font-size: 11px;
+  padding: 2px 10px;
+  border: 1px solid var(--a3-border);
+  border-radius: var(--a3-r-pill);
+  color: var(--a3-current);
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+.a3-pill-mint { color: var(--a3-mint); }
+
+/* ---------------------------------------------------------------------------
+   Resilience. Nothing here is optional: it is what makes the squeeze test
+   (20% narrower — no wrapped action, no split code group, no text touching
+   a rule) pass by construction rather than by luck.
+--------------------------------------------------------------------------- */
+.a3-nowrap { white-space: nowrap; }
+.a3-flex-text { min-width: 0; }              /* the flexible child is always the text column */
+.a3-actions { flex-shrink: 0; margin-left: auto; }
