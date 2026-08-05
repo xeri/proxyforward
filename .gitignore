@@ -13,3 +13,6 @@ frontend/.ds-css/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+
+# Local scratch analysis. Not published.
+/note.txt
