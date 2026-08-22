@@ -11,7 +11,7 @@ require (
 	github.com/energye/systray v1.0.3
 	github.com/hashicorp/yamux v0.1.2
 	github.com/kardianos/service v1.3.0
-	github.com/oschwald/maxminddb-golang/v2 v2.4.1
+	github.com/oschwald/maxminddb-golang/v2 v2.5.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/quic-go/quic-go v0.60.0
 	github.com/spf13/cobra v1.10.2
