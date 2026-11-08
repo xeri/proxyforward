@@ -80,8 +80,10 @@ machine's router changes; only the gateway forwards a port.
 
 Grab the installer or the portable exe from the
 [latest release](https://github.com/xeri/proxyforward/releases/latest). Windows 10/11 x64;
-you need it on **both** machines. There is no Linux or macOS build — the engine is
-Windows-only (named pipes, service, firewall integration).
+you need it on **both** machines. There is no packaged Linux or macOS build. Linux
+builds from source and runs both roles, GUI included (recipe in
+[`docs/agent/commands.md`](docs/agent/commands.md)); the Windows service and firewall
+integration have no Linux equivalent.
 
 The binaries are **not code-signed**, so SmartScreen will warn on first run
 ("unknown publisher"). Rather than asking you to trust that, every release is built by
@@ -340,7 +342,8 @@ the Go→JS boundary is coalesced into one `tick` event so the UI never touches 
   count, so a legitimately flapping agent is never locked out while a brute-forcer is.
 - **Connection gates** — 4096 global / 32 per-IP, plus a public-port allowlist.
 - **Locked-down IPC** — the GUI attaches to the engine over a named pipe whose ACL admits
-  only Administrators, SYSTEM, and the interactive user.
+  only Administrators, SYSTEM, and the interactive user (on Linux, a unix socket in a
+  private `0700` directory whose peers are checked by uid).
 - **Redacted diagnostics** — bundles strip every secret, host, IP, and identity; peer IPs
   become stable `sha256` pseudonyms, leak-tested in CI.
 

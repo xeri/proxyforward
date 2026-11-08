@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -28,7 +26,7 @@ func TestAttachedAnalytics(t *testing.T) {
 	// A private pipe: parallel test binaries (and a live daemon) must never
 	// share the production name.
 	old := ipc.PipeName
-	ipc.PipeName = fmt.Sprintf(`\\.\pipe\proxyforward-e2e-attach-%d`, os.Getpid())
+	ipc.PipeName = ipc.PrivatePipeName("e2e-attach")
 	t.Cleanup(func() { ipc.PipeName = old })
 
 	dir := t.TempDir()

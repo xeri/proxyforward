@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -19,7 +18,7 @@ import (
 // binary a private pipe so it can never collide with the ipc/engine test
 // packages running in parallel or with a live daemon on the machine.
 func init() {
-	ipc.PipeName = fmt.Sprintf(`\\.\pipe\proxyforward-apptest-%d`, os.Getpid())
+	ipc.PipeName = ipc.PrivatePipeName("apptest")
 }
 
 // newTestAppDir builds an App rooted in a temp config dir.

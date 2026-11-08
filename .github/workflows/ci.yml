@@ -9,10 +9,10 @@
 #  2. gofmt only means anything because of .gitattributes (eol=lf). Windows
 #     runners check out CRLF by default, which makes gofmt reject every file.
 #
-# The Go jobs run on Windows because the engine is Windows-only in practice
-# (named pipes, service, firewall). The linux/macos build jobs prove the tree
-# still compiles elsewhere; their binaries are NOT shippable — see the Reality
-# check in CLAUDE.md.
+# The Go jobs run on Windows because Windows is the only shipped platform
+# (named-pipe IPC, service, firewall). The linux/macos build jobs prove the tree
+# still compiles elsewhere; their binaries are artifacts, NOT release assets —
+# see the Reality check in CLAUDE.md.
 name: ci
 
 on:
@@ -163,9 +163,8 @@ jobs:
           }
 
   # Runs on WINDOWS, not ubuntu: build tags make linting GOOS-sensitive. On linux
-  # the linter sees the !windows build, where Windows-only symbols look dead
-  # (`unused` flags ipc.go's maxIPCEntries, which server_windows.go uses). Lint
-  # the platform that ships.
+  # the linter sees the !windows build, where helpers used only from _windows.go
+  # files look dead to `unused`. Lint the platform that ships.
   lint:
     needs: frontend
     runs-on: windows-latest
@@ -300,9 +299,9 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  # Linux and macOS binaries are built to keep the *_other.go stubs honest and to
-  # make the eventual port a small step. They are NOT shipped: ipc.Serve returns
-  # ErrUnsupported off Windows, so the engine cannot start. See CLAUDE.md.
+  # Linux and macOS binaries are built so the non-Windows paths (unix-socket IPC,
+  # the *_other.go stubs) keep compiling. They run, but are artifacts only, never
+  # release assets: there is no packaging story yet. See CLAUDE.md.
   build-linux:
     needs: frontend
     runs-on: ubuntu-latest

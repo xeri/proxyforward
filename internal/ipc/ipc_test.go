@@ -1,14 +1,10 @@
-//go:build windows
-
 package ipc
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +15,7 @@ import (
 // A private pipe keeps this binary from colliding with parallel test
 // packages that serve IPC (engine, app, e2e) or a live daemon.
 func init() {
-	PipeName = fmt.Sprintf(`\\.\pipe\proxyforward-ipctest-%d`, os.Getpid())
+	PipeName = PrivatePipeName("ipctest")
 }
 
 func TestPipeStatusRoundTrip(t *testing.T) {
