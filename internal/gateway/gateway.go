@@ -136,6 +136,16 @@ func RunStarted(ctx context.Context, g *Gateway, cfg *config.Config, logger *slo
 	if err := g.Start(ctx); err != nil {
 		return err
 	}
+	if !cfg.Gateway.AcceptSharedToken {
+		// The shared-token code is useless while that path is off (the
+		// validator refuses it), and it would still put the token on screen.
+		// Agents join with an enrollment ticket instead (issue_pairing).
+		logger.Info("gateway ready — shared-token pairing is off; agents enroll with a ticket")
+		fmt.Println("\nshared-token pairing is off: agents join with an enrollment ticket (issue one from the GUI or over IPC).")
+		<-ctx.Done()
+		g.Shutdown()
+		return nil
+	}
 	code := link.PairingCode{
 		Host:        "YOUR-PUBLIC-ADDRESS",
 		Port:        g.ControlAddr().(*net.TCPAddr).Port,
