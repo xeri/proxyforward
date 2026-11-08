@@ -236,9 +236,9 @@ Nothing enforces this; it is judgment, and ignoring it has already cost a sessio
 ## Enforcement — what is a gate, not advice
 
 Blocks a merge → CI. `.github/workflows/ci.yml`: gofmt, vet, `go test -short` (unit +
-e2e + goleak + doccheck), `-race` (CI is the **only** place it runs — it needs cgo),
-the burst floor (own job, best-of-3 — never lower the floor to go green),
-`golangci-lint` (`.golangci.yml`), a TODO/FIXME ban, `actionlint`, the naming gate
+e2e + goleak + doccheck; on Windows, and on Linux in `test-linux`), `-race` (CI is the
+**only** place it runs — it needs cgo), the burst floor (own job, best-of-3 — never
+lower the floor to go green), `golangci-lint` (`.golangci.yml`), a TODO/FIXME ban, `actionlint`, the naming gate
 (plan jargon + attribution trailers anywhere in a PR — `docs/agent/naming.md`), and a
 stale-`frontend/wailsjs` check. `.github/workflows/security.yml`: CodeQL, govulncheck,
 gitleaks, dependency-review, npm audit (gosec/zizmor/Scorecard are advisory → Security
