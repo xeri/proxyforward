@@ -11,6 +11,7 @@ import (
 
 	"proxyforward/internal/config"
 	"proxyforward/internal/ipc"
+	"proxyforward/internal/link"
 	"proxyforward/internal/setup"
 )
 
@@ -112,5 +113,39 @@ func TestExportRefusedWithoutRole(t *testing.T) {
 	err := a.exportSetupToPath(filepath.Join(t.TempDir(), "x"+setup.FileExt), "")
 	if err == nil || !strings.Contains(err.Error(), "no role") {
 		t.Fatalf("want no-role refusal, got %v", err)
+	}
+}
+
+// TestSetupAgentWithEnrollmentTicket: the wizard's default pairing code carries a
+// tkt_ enrollment ticket and no shared token. SetupAgent must save and start
+// that config — Validate once demanded agent.token, so every ticket pairing
+// failed with "refusing to save invalid config".
+func TestSetupAgentWithEnrollmentTicket(t *testing.T) {
+	ticket, err := link.NewEnrollTicket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := link.PairingCode{
+		Host:        "127.0.0.1",
+		Port:        1, // nothing listens; the agent just retries
+		Token:       ticket,
+		Fingerprint: "sha256:" + strings.Repeat("ab", 32),
+	}.String()
+
+	a := newTestAppDir(t, config.Default()) // fresh install, wizard state
+	if err := a.SetupAgent(code, "", 0); err != nil {
+		t.Fatalf("SetupAgent with a ticket: %v", err)
+	}
+	defer a.Shutdown(context.Background())
+
+	if a.cfg.Agent.EnrollTicket != ticket || a.cfg.Agent.Token != "" {
+		t.Fatalf("ticket routed wrong: enroll_ticket=%q token=%q", a.cfg.Agent.EnrollTicket, a.cfg.Agent.Token)
+	}
+	saved, err := config.Load(a.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Agent.EnrollTicket != ticket {
+		t.Fatalf("saved enroll_ticket = %q, want the pasted ticket", saved.Agent.EnrollTicket)
 	}
 }
