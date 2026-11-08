@@ -459,10 +459,10 @@ func runGUI(deepLink string) error {
 	wailsLog := wailslogger.NewFileLogger(filepath.Join(config.DefaultDir(false), "logs", "wails.log"))
 	return wails.Run(&options.App{
 		Title:     "proxyforward",
-		Width:     1360,
-		Height:    820,
-		MinWidth:  1280,
-		MinHeight: 760,
+		Width:     windowWidth,
+		Height:    windowHeight,
+		MinWidth:  windowMinWidth,
+		MinHeight: windowMinHeight,
 		// One GUI window owns the pairing flow: a second launch (e.g. clicking
 		// another pxf:// link) is forwarded here and exits, so the link always
 		// lands in the running window instead of opening a duplicate.
@@ -492,7 +492,10 @@ func runGUI(deepLink string) error {
 			WebviewGpuPolicy: wailslinux.WebviewGpuPolicyAlways,
 			ProgramName:      "proxyforward",
 		},
-		OnStartup:          a.Startup,
+		OnStartup: func(ctx context.Context) {
+			fitWindowToScreen(ctx) // before the page loads, so it never shows oversized
+			a.Startup(ctx)
+		},
 		OnShutdown:         a.Shutdown,
 		Bind:               []interface{}{a},
 		Logger:             wailsLog,
