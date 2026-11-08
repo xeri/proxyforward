@@ -1,7 +1,8 @@
 import {useEffect, useState} from 'react'
 import {SetTheme} from '../wailsjs/go/app/App'
-import {Environment, WindowSetBackgroundColour} from '../wailsjs/runtime/runtime'
+import {WindowSetBackgroundColour} from '../wailsjs/runtime/runtime'
 import {prefersReduced} from './motion'
+import {hostPlatform, onHostPlatform} from './platform'
 
 /**
  * Tri-state theme engine: Dark, Light, or System (follows the OS live).
@@ -32,18 +33,10 @@ export function resolvedTheme(): ResolvedTheme {
 // Windows-only call. The platform arrives asynchronously; until it does
 // nothing is sent, and Windows syncs once it is known (main.go
 // startupBackground already painted the first frame).
-let nativeBackground = false
-try {
-  Environment().then(env => {
-    nativeBackground = env.platform === 'windows'
-    syncNativeBackground(resolvedTheme())
-  }, () => {})
-} catch {
-  /* plain browser (vite dev) */
-}
+onHostPlatform(() => syncNativeBackground(resolvedTheme()))
 
 function syncNativeBackground(t: ResolvedTheme) {
-  if (!nativeBackground) return
+  if (hostPlatform() !== 'windows') return
   try {
     if (t === 'light') WindowSetBackgroundColour(236, 238, 246, 255)
     else WindowSetBackgroundColour(11, 13, 19, 255)
