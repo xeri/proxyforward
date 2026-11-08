@@ -529,6 +529,17 @@ func linuxGraphicsDefaults() {
 			os.Setenv(kv.key, kv.val)
 		}
 	}
+	// On NVIDIA's driver, WebKit's web process segfaults inside
+	// libnvidia-eglcore from its Skia GPU painting threads, minutes into a
+	// session — and a dead web process takes the whole app down. Paint page
+	// content with Skia's CPU rasteriser instead; compositing (transform and
+	// opacity animation, backdrop blur) stays on the GPU, so motion stays
+	// smooth. Mesa drivers keep GPU painting.
+	if _, err := os.Stat("/proc/driver/nvidia/version"); err == nil {
+		if _, set := os.LookupEnv("WEBKIT_SKIA_ENABLE_CPU_RENDERING"); !set {
+			os.Setenv("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1")
+		}
+	}
 }
 
 // startupBackground picks the pre-paint window colour so the first frame (and
