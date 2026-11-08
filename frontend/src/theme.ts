@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react'
 import {SetTheme} from '../wailsjs/go/app/App'
-import {WindowSetBackgroundColour} from '../wailsjs/runtime/runtime'
+import {Environment, WindowSetBackgroundColour} from '../wailsjs/runtime/runtime'
 import {prefersReduced} from './motion'
 
 /**
@@ -26,17 +26,38 @@ export function resolvedTheme(): ResolvedTheme {
   return pref
 }
 
+// The native pre-paint colour exists for WebView2's resize/restore flash. On
+// Linux, Wails routes the same call into WebKitGTK + GTK CSS on the GTK
+// thread, and a theme switch there segfaults the whole app — so it is a
+// Windows-only call. The platform arrives asynchronously; until it does
+// nothing is sent, and Windows syncs once it is known (main.go
+// startupBackground already painted the first frame).
+let nativeBackground = false
+try {
+  Environment().then(env => {
+    nativeBackground = env.platform === 'windows'
+    syncNativeBackground(resolvedTheme())
+  }, () => {})
+} catch {
+  /* plain browser (vite dev) */
+}
+
+function syncNativeBackground(t: ResolvedTheme) {
+  if (!nativeBackground) return
+  try {
+    if (t === 'light') WindowSetBackgroundColour(236, 238, 246, 255)
+    else WindowSetBackgroundColour(11, 13, 19, 255)
+  } catch {
+    /* plain browser (vite dev) */
+  }
+}
+
 function apply() {
   const t = resolvedTheme()
   document.documentElement.setAttribute('data-theme', t)
   // Keep the native window's pre-paint colour in sync so resize flashes and
-  // restore frames match the theme. No-op outside the WebView2 host.
-  try {
-    if (t === 'light') WindowSetBackgroundColour(236, 238, 246, 1)
-    else WindowSetBackgroundColour(11, 13, 19, 1)
-  } catch {
-    /* plain browser (vite dev) */
-  }
+  // restore frames match the theme.
+  syncNativeBackground(t)
   listeners.forEach(fn => fn())
 }
 

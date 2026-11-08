@@ -518,10 +518,12 @@ func linuxGraphicsDefaults() {
 
 // startupBackground picks the pre-paint window colour so the first frame (and
 // resize flash) matches the theme the frontend is about to render. "system"
-// resolves in the frontend; dark is the safer first frame for it here.
+// resolves in the frontend; dark is the safer first frame for it here. Alpha
+// is a real 0-255 alpha on Linux (WebKitGTK), so it must be 255 there; Wails'
+// Windows backend rounds any non-zero alpha up to 255 anyway.
 func startupBackground(theme string) *options.RGBA {
 	if theme == "light" {
-		return &options.RGBA{R: 236, G: 238, B: 246, A: 1}
+		return &options.RGBA{R: 236, G: 238, B: 246, A: 255}
 	}
-	return &options.RGBA{R: 11, G: 13, B: 19, A: 1}
+	return &options.RGBA{R: 11, G: 13, B: 19, A: 255}
 }
