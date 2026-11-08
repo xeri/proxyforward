@@ -500,19 +500,31 @@ func runGUI(deepLink string) error {
 	})
 }
 
-// linuxGraphicsDefaults works around NVIDIA's EGL Wayland layer turning on
-// explicit sync for the window surface: GTK3 then commits frames without the
-// acquire point it promised, and the compositor drops the connection ("explicit
-// sync is used, but no acquire point is set", Wayland error 71) the moment the
-// GPU-composited webview paints. It must run before GTK/EGL initialise, and it
-// only fills in an unset variable, so a user's explicit value wins. Drivers
-// other than NVIDIA's never read it.
+// linuxGraphicsDefaults sets the environment the GPU-composited webview needs
+// on Linux. It must run before GTK/EGL initialise (the web process inherits
+// it), and it only fills in unset variables, so a user's explicit value wins.
 func linuxGraphicsDefaults() {
 	if runtime.GOOS != "linux" {
 		return
 	}
-	if _, set := os.LookupEnv("__NV_DISABLE_EXPLICIT_SYNC"); !set {
-		os.Setenv("__NV_DISABLE_EXPLICIT_SYNC", "1")
+	for _, kv := range [...]struct{ key, val string }{
+		// NVIDIA's EGL Wayland layer turns on explicit sync for the window
+		// surface; GTK3 then commits frames without the acquire point it
+		// promised, and the compositor drops the connection ("explicit sync
+		// is used, but no acquire point is set", Wayland error 71) the moment
+		// the webview paints. Other drivers never read it.
+		{"__NV_DISABLE_EXPLICIT_SYNC", "1"},
+		// WebKit tiles large GPU layers (512 px by default). The ambient
+		// aurora is a viewport-sized layer drifting by sub-pixel translate and
+		// scale, and with the 2x buffers GTK3 uses under fractional scaling
+		// every tile edge resamples differently each frame: a flickering seam
+		// grid, plain on the dark theme. One tile covers the whole layer at
+		// normal window sizes.
+		{"WEBKIT_LAYERS_TILE_SIZE", "4096x4096"},
+	} {
+		if _, set := os.LookupEnv(kv.key); !set {
+			os.Setenv(kv.key, kv.val)
+		}
 	}
 }
 

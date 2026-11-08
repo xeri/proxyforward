@@ -51,7 +51,9 @@ toolbox run -c proxyforward build/bin/proxyforward             # run the GUI
   sets `__NV_DISABLE_EXPLICIT_SYNC=1`, or the first GPU frame ends the session with
   Wayland error 71 ("explicit sync is used, but no acquire point is set" — confirm
   with `WAYLAND_DEBUG=1`). Don't reach for `WEBKIT_DISABLE_DMABUF_RENDERER=1`: it
-  doesn't fix that and costs the zero-copy path.
+  doesn't fix that and costs the zero-copy path. It also raises WebKit's layer tile
+  size (`WEBKIT_LAYERS_TILE_SIZE`): at the default 512 px the drifting aurora layer
+  shows a flickering grid of tile seams under fractional scaling.
 - `wails build -platform windows/amd64` cross-compiles the Windows exe from Linux
   (no cgo on that target).
 - Go newer than the Wails CLI's `golang.org/x/tools` breaks `wails build` with
