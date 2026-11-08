@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -18,6 +19,7 @@ import (
 	wailslogger "github.com/wailsapp/wails/v2/pkg/logger"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	wailslinux "github.com/wailsapp/wails/v2/pkg/options/linux"
 	wailswin "github.com/wailsapp/wails/v2/pkg/options/windows"
 
 	"proxyforward/app"
@@ -419,6 +421,7 @@ func newFirewallCmd() *cobra.Command {
 }
 
 func runGUI(deepLink string) error {
+	linuxGraphicsDefaults()
 	configPath := config.DefaultPath(false)
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -480,12 +483,37 @@ func runGUI(deepLink string) error {
 		Windows: &wailswin.Options{
 			Theme: wailswin.SystemDefault,
 		},
+		// Without Linux options Wails defaults WebKitGTK to
+		// WebviewGpuPolicyNever: every frame is painted on the CPU, and the
+		// glass surfaces' backdrop blurs then pin a core at a few fps. Always
+		// keeps compositing on the GPU. ProgramName becomes the Wayland app
+		// id, so the desktop shell matches the window to proxyforward.desktop.
+		Linux: &wailslinux.Options{
+			WebviewGpuPolicy: wailslinux.WebviewGpuPolicyAlways,
+			ProgramName:      "proxyforward",
+		},
 		OnStartup:          a.Startup,
 		OnShutdown:         a.Shutdown,
 		Bind:               []interface{}{a},
 		Logger:             wailsLog,
 		LogLevelProduction: wailslogger.ERROR,
 	})
+}
+
+// linuxGraphicsDefaults works around NVIDIA's EGL Wayland layer turning on
+// explicit sync for the window surface: GTK3 then commits frames without the
+// acquire point it promised, and the compositor drops the connection ("explicit
+// sync is used, but no acquire point is set", Wayland error 71) the moment the
+// GPU-composited webview paints. It must run before GTK/EGL initialise, and it
+// only fills in an unset variable, so a user's explicit value wins. Drivers
+// other than NVIDIA's never read it.
+func linuxGraphicsDefaults() {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	if _, set := os.LookupEnv("__NV_DISABLE_EXPLICIT_SYNC"); !set {
+		os.Setenv("__NV_DISABLE_EXPLICIT_SYNC", "1")
+	}
 }
 
 // startupBackground picks the pre-paint window colour so the first frame (and

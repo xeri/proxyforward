@@ -45,8 +45,13 @@ toolbox run -c proxyforward build/bin/proxyforward             # run the GUI
   otherwise, and current distros ship only 4.1.
 - `-skipbindings` keeps `frontend/wailsjs` untouched (CI's stale-bindings check is
   the Windows build's job).
-- A blank or black window on NVIDIA is WebKitGTK's DMA-BUF renderer: run with
-  `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
+- Rendering is GPU-composited because `main.go runGUI` passes Linux options:
+  without them Wails defaults WebKitGTK to `WebviewGpuPolicyNever` (CPU painting,
+  a few fps under the glass blurs). On NVIDIA + Wayland, `linuxGraphicsDefaults`
+  sets `__NV_DISABLE_EXPLICIT_SYNC=1`, or the first GPU frame ends the session with
+  Wayland error 71 ("explicit sync is used, but no acquire point is set" — confirm
+  with `WAYLAND_DEBUG=1`). Don't reach for `WEBKIT_DISABLE_DMABUF_RENDERER=1`: it
+  doesn't fix that and costs the zero-copy path.
 - `wails build -platform windows/amd64` cross-compiles the Windows exe from Linux
   (no cgo on that target).
 - Go newer than the Wails CLI's `golang.org/x/tools` breaks `wails build` with
