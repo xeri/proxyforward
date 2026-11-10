@@ -105,7 +105,7 @@ persisted to config.
 | Rollup cadence | 5 min + on start + final on close | `rollup.go:22`, `db.go writer` |
 | Resolver | bulk 10 names / 2 s coalesce; 1 rps burst 3; +TTL 30 d, −TTL 24 h; profile re-check 24 h | `players/resolver.go:24-50` |
 | Avatars | sizes 16–128 (default 64), 8×8 master; Mojang spacing 60 s/player, 1 rps burst 3; miss TTL 15 min; evict 4000 files / 64 MiB / 6 h | `app/avatars.go:37-56` |
-| Pipe | 5 s request / 2 min idle timeouts; ACL BA+SY+IU | `ipc/server_windows.go` |
+| Pipe | 5 s request / 2 min idle timeouts; ACL BA+SY+IU (unix: 0700 dir, 0600 socket, peer uid = self or root) | `ipc/server.go`, `ipc/server_windows.go`, `ipc/ipc_unix.go` |
 | Cert | ECDSA P-256, 20-year validity (trust = pin, not expiry) | `link/cert.go:86` |
 | Key exchange | X25519MLKEM768 (PQ hybrid, Go default; `CurvePreferences` unset) | `link/cert.go`, `link/pq_test.go` |
 | Agent identity | Ed25519 (`agent_identity.key`, PKCS#8 PEM, `0600`); `agentID` = `agt_` + 8-char Crockford base32 of sha256(pubkey)[:5] = 40 bits | `link/cred.go LoadOrCreateIdentity fingerprint` |

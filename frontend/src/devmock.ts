@@ -80,6 +80,7 @@ export function installDevMock() {
     WindowMinimise: () => {},
     WindowToggleMaximise: () => {},
     WindowSetBackgroundColour: () => {},
+    Environment: () => Promise.resolve({buildType: 'dev', platform: 'windows', arch: 'amd64'}),
     Quit: () => { console.info('[devmock] Quit()') },
     ClipboardSetText: (text: string) => navigator.clipboard.writeText(text).then(() => true, () => false),
   }, {get: (t, p) => (p in t ? (t as any)[p] : () => {})})

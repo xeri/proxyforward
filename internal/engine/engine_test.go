@@ -13,12 +13,18 @@ import (
 
 	"proxyforward/internal/analytics"
 	"proxyforward/internal/config"
+	"proxyforward/internal/ipc"
 )
 
+// Run serves IPC, and a second server on one endpoint is fatal, so this test
+// binary gets a private pipe — a live daemon on the dev machine (or a
+// parallel test package) would otherwise stop the engine under test.
+func init() {
+	ipc.PipeName = ipc.PrivatePipeName("enginetest")
+}
+
 // TestStatsLifecycle runs a real gateway engine briefly and verifies the
-// stats store samples and lands in the analytics database at shutdown. The
-// IPC pipe may be owned by another process on a dev machine; that only fails
-// Run's error path, not the store lifecycle this test asserts on.
+// stats store samples and lands in the analytics database at shutdown.
 func TestStatsLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	// Config validation requires a concrete port; borrow a free one.

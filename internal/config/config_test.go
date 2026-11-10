@@ -170,6 +170,10 @@ func TestValidateAccepts(t *testing.T) {
 		"bandwidth cap with empty scope": func(c *Config) {
 			c.Agent.Tunnels[0].Options.BandwidthLimitMbps = 5 // empty scope normalizes to combined
 		},
+		"enrollment ticket instead of a shared token": func(c *Config) {
+			c.Agent.Token = ""
+			c.Agent.EnrollTicket = "tkt_abc"
+		},
 		"bandwidth scope ignored without a cap": func(c *Config) {
 			c.Agent.Tunnels[0].Options.BandwidthLimitScope = "sideways" // no cap, so not validated
 		},

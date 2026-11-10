@@ -12,8 +12,8 @@
 An ngrok-style reverse tunnel that makes a Minecraft server behind NAT public. One
 Windows binary, two roles: the **agent** (beside Minecraft, dials OUT) and the
 **gateway** (publicly reachable, accepts players, relays traffic back through that one
-outbound TLS link). Stack: Go engine → Wails v2 shell → React 19 GUI (`main.go`).
-The tunnel works; the current phase is performance, stability, and above all UI/UX
+outbound TLS link). Stack: Go engine → Wails v2 shell → React 19 GUI (`main.go`,
+`gui.go`); on Linux the same binary runs headless only. The tunnel works; the current phase is performance, stability, and above all UI/UX
 polish. Protect what works; be honest about what doesn't exist yet (Reality check).
 
 ## Where everything lives
@@ -102,7 +102,11 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   ID can never name an enrolled one (`link/cred.go IsDerivedAgentID`, `gateway/auth.go
   sharedTokenValidator`). Disabling `AcceptSharedToken` once every agent is enrolled closes it.
 - The IPC pipe ACL admits Administrators, SYSTEM, and the interactive user only
-  (`ipc/server_windows.go pipeSecurity`).
+  (`ipc/server_windows.go pipeSecurity`). Off Windows the same principals — this user
+  and root — via a checked 0700 socket directory, a 0600 socket, and on Linux a
+  per-connection `SO_PEERCRED` uid check (`ipc/ipc_unix.go checkPrivateDir`,
+  `ipc/peercred_linux.go peerAllowed`). The pipe carries gateway admin ops, so this
+  is a security boundary.
 - Diagnostics bundles redact every secret, host, IP, and identity; peer IPs become
   stable sha256 pseudonyms (`app/tools.go`, leak-tested in `app/tools_test.go`).
   Anything new that exports data must pass the same no-leak test style — seeding
@@ -138,9 +142,13 @@ Each entry: the rule, why, and the symbol that embodies it today. Numbers live i
   evicting one agent leaves the others' listeners and connections untouched (the
   per-agent mux is the connection-drain boundary). (`actor.go evict` / `bindLocked`;
   regressions: e2e `TestAgentRestartRebinds`, `TestEvictionIsolatesAndDrains`.)
-- Exactly one process owns ports and config: every engine serves the named pipe
-  `\\.\pipe\proxyforward`; a GUI that finds it attaches as a thin client; pipe
-  conflict is fatal by design (`engine.go Run`, `app/app.go Startup`).
+- Exactly one process owns ports and config: every engine serves `ipc.PipeName` — the
+  named pipe `\\.\pipe\proxyforward` on Windows, a unix socket under `$XDG_RUNTIME_DIR`
+  elsewhere; a GUI that finds it attaches as a thin client; pipe conflict is fatal by
+  design (`engine.go Run`, `app/app.go Startup`). A socket path doesn't refuse a
+  second listener the way a pipe name does, so the unix side holds an `flock` for the
+  listener's lifetime (`ipc/ipc_unix.go listen`); only the endpoint is per-platform,
+  the request loop and client are shared (`ipc/server.go serveConn`).
 
 ### Hot path & performance budgets (`internal/relay/relay.go`)
 - The splice (`relay.go Splice`): pooled buffers, zero per-iteration allocations,
@@ -196,7 +204,7 @@ The README and the Settings/Tunnels UI **oversell**. Ground truth at 4a8b0c9:
 | UDP tunnels | Not implemented: no UDP socket code, `validateSpec` rejects `type:"udp"`. No longer advertised (the `tunnel-udp` capability was removed); config still accepts `type:"udp"` but the gateway rejects it — a latent gap, not an oversell. |
 | MC status polling (MOTD/players) | Only login sniffing (`mcsniff/`); the health probe is a bare TCP dial (`health.go probeOnce`). |
 | Tray / minimize-to-tray / autostart | Hidden `tray_spike.go` command only; `MinimizeToTray` / `Autostart` stored, unused. |
-| Linux / macOS binaries | CI **builds** them (`.github/workflows/ci.yml`) so the `*_other.go` stubs can't rot, but they **cannot run**: `ipc.Serve` returns `ErrUnsupported` off Windows and every engine must serve the pipe (`engine.go Run`), so the window opens and the engine dies. Unpublished artifacts, never release assets. Fixing this means a real unix-socket IPC port. |
+| Linux / macOS support | Linux is **headless only**: the `gateway`/`pair`/`agent` commands over unix-socket IPC (`ipc/ipc_unix.go`), from a static cgo-free `go build` (recipe in `docs/agent/commands.md`); there is **no Linux GUI** — a bare launch refuses (`gui_linux.go runGUI`). **No packaged build** — CI artifacts only, never release assets — and the Windows integrations stay Windows-only: `service`/`firewall` answer `svc.ErrUnsupported` (`svc/stub_other.go`), no systemd unit. macOS still builds the GUI but has never been run. |
 
 Rules: don't document these as working; don't build UI atop them; trust code over the
 README everywhere. When you implement one, delete its row **in the same commit** (the
@@ -228,9 +236,9 @@ Nothing enforces this; it is judgment, and ignoring it has already cost a sessio
 ## Enforcement — what is a gate, not advice
 
 Blocks a merge → CI. `.github/workflows/ci.yml`: gofmt, vet, `go test -short` (unit +
-e2e + goleak + doccheck), `-race` (CI is the **only** place it runs — it needs cgo),
-the burst floor (own job, best-of-3 — never lower the floor to go green),
-`golangci-lint` (`.golangci.yml`), a TODO/FIXME ban, `actionlint`, the naming gate
+e2e + goleak + doccheck; on Windows, and on Linux in `test-linux`), `-race` (CI is the
+**only** place it runs — it needs cgo), the burst floor (own job, best-of-3 — never
+lower the floor to go green), `golangci-lint` (`.golangci.yml`), a TODO/FIXME ban, `actionlint`, the naming gate
 (plan jargon + attribution trailers anywhere in a PR — `docs/agent/naming.md`), and a
 stale-`frontend/wailsjs` check. `.github/workflows/security.yml`: CodeQL, govulncheck,
 gitleaks, dependency-review, npm audit (gosec/zizmor/Scorecard are advisory → Security
@@ -244,9 +252,9 @@ file and `docs/agent/reasoning.md`. Before adding a rule here, ask which of thos
 homes it belongs in.
 
 Two CI facts that are load-bearing and non-obvious: `.gitattributes` pins `eol=lf`
-(Windows runners check out CRLF, which makes gofmt reject **every** file), and every Go
-job must materialize `frontend/dist` first — `main.go` embeds it, and a `go:embed`
-matching zero files is a compile error.
+(Windows runners check out CRLF, which makes gofmt reject **every** file), and every
+non-linux Go job must materialize `frontend/dist` first — `gui.go` embeds it, and a
+`go:embed` matching zero files is a compile error (linux builds are headless and skip it).
 
 ## Maintaining this file
 

@@ -6,9 +6,11 @@ paths:
 # Test conventions (moved from CLAUDE.md "Conventions in force" + Footguns)
 
 - Table-driven; requirement IDs in comments ("(3.4)", "(A14)", "(D7)").
-- Any test that starts a real Engine / `ipc.Serve` must set a process-private
-  `ipc.PipeName` in `init()` (pattern: `app/setup_test.go`) — otherwise parallel
-  test binaries and a live daemon deadlock each other.
+- Any test that starts a real Engine / `ipc.Serve` must set
+  `ipc.PipeName = ipc.PrivatePipeName("<tag>")` in `init()` (pattern:
+  `app/setup_test.go`) — otherwise parallel test binaries and a live daemon fight
+  over one endpoint. `PrivatePipeName` is platform-correct (pipe name on Windows,
+  socket path elsewhere); never hand-write a `\\.\pipe\…` name in a test.
 - e2e is goleak-verified (`e2e_test.go TestMain`); it must stay green through any
   refactor.
 - Fuzz targets for every internet-facing parser (`internal/mc`, `internal/control`).

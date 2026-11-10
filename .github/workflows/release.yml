@@ -5,8 +5,8 @@
 # exe, pair a loopback gateway+agent, watch bytes move - cannot be automated.
 # The draft exists so a human does that, then presses Publish.
 #
-# Only Windows binaries ship. Linux/macOS build in ci.yml but cannot run: off
-# Windows, ipc.Serve returns ErrUnsupported and the engine never starts.
+# Only Windows binaries ship. Linux/macOS build in ci.yml as artifacts only:
+# they run, but have no packaging story yet (Reality check in CLAUDE.md).
 name: release
 
 on:

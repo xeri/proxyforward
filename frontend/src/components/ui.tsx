@@ -1,6 +1,7 @@
 import {ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react'
 import {createPortal} from 'react-dom'
 import {ClipboardSetText} from '../../wailsjs/runtime/runtime'
+import {hostPlatform} from '../platform'
 import {IconAlert, IconCheck, IconChevronDown, IconCopy, IconEye, IconEyeOff, IconInfo, IconClose} from './icons'
 
 type State = 'good' | 'warn' | 'bad' | 'unknown'
@@ -930,14 +931,46 @@ export function ErrorBanner({message, onDismiss}: {message: string; onDismiss?: 
   return <Banner tone="bad" onDismiss={onDismiss}>{message}</Banner>
 }
 
-/** copyText prefers the Wails runtime clipboard (works in the WebView even
- * without a secure context), falling back to the browser API in dev. */
+/** copyText prefers the Wails runtime clipboard on Windows (works in the
+ * WebView even without a secure context), falling back to the browser API in
+ * dev. On Linux it copies through WebKit itself: Wails' ClipboardSetText
+ * writes PRIMARY right after CLIPBOARD, and under GTK3 on Wayland that second
+ * write empties CLIPBOARD while still reporting success — so every Copy
+ * button silently cleared the clipboard. WebKit's own copy writes CLIPBOARD
+ * only, and must run synchronously inside the click (user activation), so the
+ * Linux branch comes before any await. */
 export async function copyText(text: string): Promise<void> {
+  if (hostPlatform() === 'linux') {
+    if (copyViaWebKit(text)) return
+    await navigator.clipboard?.writeText(text).catch(() => {})
+    return
+  }
   // Real Wails resolves true; the dev mock resolves undefined → fall back.
   const ok = await Promise.resolve()
     .then(() => ClipboardSetText(text))
     .catch(() => false)
-  if (!ok) await navigator.clipboard.writeText(text).catch(() => {})
+  if (!ok) await navigator.clipboard?.writeText(text).catch(() => {})
+}
+
+/** Copies via a throwaway selection and the engine's copy command; returns
+ * whether the engine accepted it. Focus returns to whatever held it. */
+function copyViaWebKit(text: string): boolean {
+  const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.readOnly = true
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none'
+  document.body.appendChild(ta)
+  ta.select()
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } catch {
+    ok = false
+  }
+  ta.remove()
+  prev?.focus()
+  return ok
 }
 
 /** CopyButton with icon + brief confirmation. */

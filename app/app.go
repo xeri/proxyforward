@@ -42,6 +42,14 @@ const (
 const tickInterval = 500 * time.Millisecond
 
 type App struct {
+	// BeforeStartup, when set, runs first in Startup, before the page loads —
+	// main uses it to fit the window to the screen. It is a field, not a wrapper
+	// around Startup: Wails keeps lifecycle callbacks out of the JS bindings by
+	// matching OnStartup's function name against the bound methods, so OnStartup
+	// must be the a.Startup method value itself. Wrap it in a closure and Startup
+	// becomes callable from the frontend (CI's stale-wailsjs check catches it).
+	BeforeStartup func(ctx context.Context)
+
 	ctx        context.Context
 	configPath string
 	configDir  string
@@ -106,6 +114,9 @@ func New(configPath string, cfg *config.Config, ring *logging.Ring, logger *slog
 // process owns it, and begin the status ticker.
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+	if a.BeforeStartup != nil {
+		a.BeforeStartup(ctx)
+	}
 
 	if c, err := ipc.Dial(300 * time.Millisecond); err == nil {
 		if err := c.Ping(); err == nil {

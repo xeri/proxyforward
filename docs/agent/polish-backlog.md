@@ -159,10 +159,12 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
     writing explicit `_ =` assignments with a reason. Worth doing as its own commit;
     it was kept out of the CI suite so the lint gate could be green on day one.
 
-22. **Linux/macOS binaries build but cannot run** — CI compiles them to keep the
-    `*_other.go` stubs honest, but `ipc.Serve` returns `ErrUnsupported` off Windows
-    (`internal/ipc/stub_other.go`), so the engine never starts. Shipping them means a
-    real unix-socket IPC port — an `overhaul`-skill change, not a stub fix.
+22. **Linux runs headless, but nothing about it is packaged** — `gateway`/`pair`/`agent`
+    work over the unix-socket IPC (`internal/ipc/ipc_unix.go`); there is no Linux GUI by
+    design (`gui_linux.go`). Missing: a release asset; a systemd unit (the `service`
+    command answers `svc.ErrUnsupported`); and `service run` resolves
+    `config.DefaultDir(true)` to a relative `C:\ProgramData` path off Windows
+    (`internal/config/paths.go`). Each is small; none blocks running.
 
 ## Agent-management surfacing (backend ahead of the GUI)
 

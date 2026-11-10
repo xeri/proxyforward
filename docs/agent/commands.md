@@ -23,6 +23,36 @@ wails build -ldflags "-X proxyforward/internal/version.Version=vX.Y.Z -X proxyfo
 build/bin/proxyforward.exe --version  # verify the stamp
 ```
 
+## Linux
+
+Linux runs **headless only**: `gateway`, `pair`, `agent`. A bare launch refuses with
+a pointer to them (`gui_linux.go runGUI`) — there is no Linux GUI. `gui.go` (Wails +
+the `frontend/dist` embed) is `!linux`, so a linux build pulls in no Wails, no cgo,
+and no frontend: a fresh clone builds without `npm`, and the binary is static.
+
+```
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o build/bin/proxyforward .
+build/bin/proxyforward gateway                  # first run writes the config + prints the pairing code
+build/bin/proxyforward pair '<pairing-code>'    # on the agent machine
+build/bin/proxyforward agent
+```
+
+- Config, analytics, and logs live in `~/.config/proxyforward` (`config.DefaultDir`);
+  the IPC is a unix socket at `$XDG_RUNTIME_DIR/proxyforward/ipc.sock`. A unix socket
+  path caps at 108 bytes, so a deeply nested `XDG_RUNTIME_DIR` fails the listen.
+- `service` / `firewall` answer `svc.ErrUnsupported` here; there is no systemd unit.
+- `wails build -platform windows/amd64` cross-compiles the Windows GUI exe from Linux
+  (no cgo on that target; it does need `frontend/dist`).
+- `-tags bindings` is the one linux build that compiles `gui.go`: `wails build`
+  generates `frontend/wailsjs` by building the app with that tag for the *host* and
+  running it, so `gui_linux.go` is `linux && !bindings`. The same binary checks the
+  bindings without the wails CLI — `go build -tags bindings -o <tmp>/wb . && <tmp>/wb`
+  from the repo root, then `git diff frontend/wailsjs` (mode-only changes are noise).
+- Go newer than the Wails CLI's `golang.org/x/tools` breaks `wails build` with
+  "package … without types was imported". Build the CLI against a current x/tools
+  (`go get golang.org/x/tools@latest` in a scratch module, then `go build` the
+  `cmd/wails` package) or use the go.mod Go version.
+
 ## UI-only iteration (the mock state matrix)
 
 `http://localhost:5173/?mock=agent` — scenarios `agent|gateway|wizard`, plus
@@ -44,14 +74,15 @@ Private configs keep your real setup untouched (`docs/agent/reasoning.md` step 0
 
 ## Gotchas
 
-- **Fresh clone**: every Go command fails until the frontend has been built once —
-  `main.go` embeds `all:frontend/dist`, which is gitignored, and a `go:embed` matching
-  zero files is a compile error. Run `cd frontend && npm ci && npm run build` first.
-  CI does this in one job and shares `frontend/dist` with every Go job.
-- `GOOS=linux go build ./...` and `GOOS=darwin` now **compile** (CI builds both). They
-  do not *run*: `ipc.Serve` returns `ErrUnsupported` off Windows, so the engine never
-  starts. Cross-compiling darwin from Windows still fails on `energye/systray`, which
-  needs cgo — that's the cross-compile, not the code; the native macOS runner is fine.
+- **Fresh clone**: on Windows/macOS every Go command fails until the frontend has been
+  built once — `gui.go` embeds `all:frontend/dist`, which is gitignored, and a
+  `go:embed` matching zero files is a compile error. Run `cd frontend && npm ci && npm
+  run build` first. CI does this in one job and shares `frontend/dist` with every
+  non-linux Go job; linux builds skip the embed.
+- `GOOS=linux` builds the headless binary (see "Linux" above); `GOOS=darwin` compiles
+  the GUI (CI builds it). Cross-compiling darwin from Windows still fails on
+  `energye/systray`, which needs cgo — that's the cross-compile, not the code; the
+  native macOS runner is fine.
 - `go test -race` needs cgo (a C toolchain); unavailable on machines without one — the
   `race` job in CI is the only place it actually runs.
 - gofmt cleanliness is enforced (edit hook + CI) and depends on `.gitattributes`

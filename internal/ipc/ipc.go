@@ -1,23 +1,25 @@
-// Package ipc is the GUI↔daemon control channel: a named-pipe JSON-RPC
-// carried in the same length-prefixed framing as the wire protocol
-// (internal/control). The daemon (service or headless run) serves it; a GUI
+// Package ipc is the GUI↔daemon control channel: a local JSON-RPC carried in
+// the same length-prefixed framing as the wire protocol (internal/control),
+// over a named pipe on Windows and a unix socket elsewhere. Only the endpoint
+// is per-platform (server_windows.go / ipc_unix.go); the request loop and the
+// client are shared. The daemon (service or headless run) serves it; a GUI
 // that finds the pipe attaches as a thin client instead of starting its own
 // engine, so exactly one process ever owns ports and config.
 package ipc
 
 import (
 	"encoding/json"
-	"errors"
 
 	"proxyforward/internal/conntrack"
 	"proxyforward/internal/stats"
 )
 
-// PipeName is the daemon's well-known local endpoint. It is a var only so
-// test packages that run a real engine can point it at a private name —
-// parallel test binaries (and a developer's live daemon) must never fight
-// over the production pipe.
-var PipeName = `\\.\pipe\proxyforward`
+// PipeName is the daemon's well-known local endpoint: `\\.\pipe\proxyforward`
+// on Windows, a socket path under $XDG_RUNTIME_DIR elsewhere. It is a var
+// only so test packages that run a real engine can point it at
+// PrivatePipeName — parallel test binaries (and a developer's live daemon)
+// must never fight over the production endpoint.
+var PipeName = defaultPipeName()
 
 // Message types (control.Envelope.Type values on the pipe).
 const (
@@ -83,9 +85,6 @@ type HistoryReq struct {
 type PeersResp struct {
 	Peers []stats.PeerStat `json:"peers"`
 }
-
-// ErrUnsupported is returned on platforms without named pipes.
-var ErrUnsupported = errors.New("ipc: only supported on Windows")
 
 // Status is the daemon's self-description, polled by status surfaces.
 type Status struct {

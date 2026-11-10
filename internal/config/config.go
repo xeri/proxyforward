@@ -84,9 +84,11 @@ type AgentConfig struct {
 	Transport       string   `toml:"transport"`        // "auto" | "quic" | "per-conn" | "mux"
 	Tunnels         []Tunnel `toml:"tunnels"`
 	// EnrollTicket is a one-time pairing ticket carried on the first connect to a
-	// gateway running per-agent identity; the agent clears it once the gateway
-	// confirms enrollment. Empty in steady state (the Ed25519 identity authenticates
-	// thereafter).
+	// gateway running per-agent identity. It stays set after enrollment: the
+	// gateway authenticates an allowlisted key first and ignores a spent ticket
+	// (gateway/auth.go identityValidator), and the Ed25519 identity is what
+	// authenticates thereafter. A ticket-paired agent has no Token, so Validate
+	// accepts either as proof of pairing.
 	EnrollTicket string `toml:"enroll_ticket"`
 }
 
@@ -350,7 +352,9 @@ func (c *Config) validateAgent() []error {
 	if err := validPort(a.GatewayPort); err != nil {
 		errs = append(errs, fmt.Errorf("agent.gateway_port: %w", err))
 	}
-	if a.Token == "" {
+	// A pairing code carries exactly one credential (SetupAgent routes it): a
+	// shared Token, or an EnrollTicket for per-agent identity.
+	if a.Token == "" && a.EnrollTicket == "" {
 		errs = append(errs, errors.New("agent.token: required (pair with a gateway first)"))
 	}
 	if a.CertFingerprint != "" && !strings.HasPrefix(a.CertFingerprint, "sha256:") {

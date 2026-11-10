@@ -7,7 +7,6 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -184,10 +183,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			Peers:     e.Peers,
 			Analytics: e.analyticsSource,
 		})
-		if errors.Is(err, ipc.ErrUnsupported) {
-			e.logger.Debug("ipc pipe unsupported on this platform")
-			err = nil
-		} else if err != nil && runCtx.Err() == nil {
+		if err != nil && runCtx.Err() == nil {
 			err = fmt.Errorf("ipc pipe failed (is another proxyforward daemon running?): %w", err)
 		}
 		errCh <- err

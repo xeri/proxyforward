@@ -3,8 +3,10 @@
 # review all change licensing terms if either of those facts changes.
 #
 # Note the recurring constraint from ci.yml: anything that TYPE-CHECKS Go code
-# (CodeQL's manual build, govulncheck's package loader) must materialise
-# frontend/dist first, or the root package fails to compile on `all:frontend/dist`.
+# for a non-linux GOOS (CodeQL's manual build, govulncheck's package loader) must
+# materialise frontend/dist first, or the root package fails to compile on
+# `all:frontend/dist`. Linux builds are headless and skip that embed — so a scan
+# that only sees GOOS=linux never sees the shipped GUI build at all.
 name: security
 
 on:
@@ -84,11 +86,19 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       # govulncheck's source mode loads packages with full type info, so the
-      # embed target has to exist or every package fails to load.
+      # embed target has to exist for the windows pass or every package fails
+      # to load.
       - run: npm ci --prefix frontend && npm run build --prefix frontend
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
       # Reports only vulnerabilities actually reachable from our call graph.
+      # Twice, because reachability is per-GOOS: linux sees only the headless
+      # build (gui.go is !linux), so the shipped Windows build, Wails and all,
+      # gets its own pass.
       - run: govulncheck ./...
+      - name: govulncheck (windows build)
+        env:
+          GOOS: windows
+        run: govulncheck ./...
 
   gitleaks:
     runs-on: ubuntu-latest

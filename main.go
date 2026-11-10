@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,13 +13,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/wailsapp/wails/v2"
-	wailslogger "github.com/wailsapp/wails/v2/pkg/logger"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	wailswin "github.com/wailsapp/wails/v2/pkg/options/windows"
 
-	"proxyforward/app"
 	"proxyforward/internal/config"
 	"proxyforward/internal/engine"
 	"proxyforward/internal/link"
@@ -29,9 +22,6 @@ import (
 	"proxyforward/internal/version"
 	"proxyforward/internal/wincon"
 )
-
-//go:embed all:frontend/dist
-var assets embed.FS
 
 func main() {
 	// Cobra's Windows "mousetrap" exits any Explorer-launched process after a
@@ -113,6 +103,13 @@ func newRootCmd(deepLink string) *cobra.Command {
 	return root
 }
 
+// configFlagUsage is the --config help text. It names the real per-user default
+// (config.DefaultPath): %APPDATA%\proxyforward on Windows, ~/.config/proxyforward
+// on Linux, where these headless commands are the only way to run.
+func configFlagUsage() string {
+	return "path to config.toml (default: " + config.DefaultPath(false) + ")"
+}
+
 // newPairCmd wires an agent to a gateway from a pasted pairing code — the
 // headless counterpart of the GUI wizard.
 func newPairCmd() *cobra.Command {
@@ -168,7 +165,7 @@ func newPairCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "path to config.toml (default: %APPDATA%\\proxyforward\\config.toml)")
+	cmd.Flags().StringVar(&configPath, "config", "", configFlagUsage())
 	cmd.Flags().StringVar(&localAddr, "local", "127.0.0.1:25565", "local Minecraft server address for the default tunnel")
 	cmd.Flags().IntVar(&publicPort, "public-port", config.DefaultPublicPort, "public port to request on the gateway for the default tunnel")
 	return cmd
@@ -248,7 +245,7 @@ func newRoleCmd(role config.Role, short string) *cobra.Command {
 			return runEngineWithIPC(ctx, cfg, configDir, configPath, logger)
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "path to config.toml (default: %APPDATA%\\proxyforward\\config.toml)")
+	cmd.Flags().StringVar(&configPath, "config", "", configFlagUsage())
 	cmd.Flags().StringVar(&logLevel, "log-level", "", "override log level (debug|info|warn|error)")
 	cmd.Flags().BoolVar(&headless, "headless", true, "run without GUI (always true for this subcommand)")
 	return cmd
@@ -416,84 +413,4 @@ func newFirewallCmd() *cobra.Command {
 		},
 	}
 	return cmd
-}
-
-func runGUI(deepLink string) error {
-	configPath := config.DefaultPath(false)
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		// The GUI must still open on a broken config so the user can fix it;
-		// start from defaults and surface the load error in the UI later.
-		cfg = config.Default()
-	}
-	ring := logging.NewRing(2000)
-	var filePath string
-	if cfg.Logging.FileEnabled {
-		filePath = logging.DefaultFilePath(config.DefaultDir(false))
-	}
-	logger, closeLogs, lerr := logging.New(logging.Options{
-		Level:    cfg.Logging.Level,
-		FilePath: filePath,
-		Ring:     ring,
-	})
-	if lerr != nil {
-		return lerr
-	}
-	defer closeLogs()
-	if err != nil {
-		logger.Error("config failed to load; using defaults", "err", err)
-	}
-
-	a := app.New(configPath, cfg, ring, logger)
-	// A cold start via the OS protocol handler: the frontend isn't listening yet,
-	// so stash the link now for it to pull once it mounts (App.TakePendingDeepLink).
-	if deepLink != "" {
-		a.HandleDeepLink(deepLink)
-	}
-	// Wails reports webview/runtime failures through its own logger and can
-	// os.Exit without returning an error; in a windowsgui process that output
-	// is invisible, so route it to a file next to the crash log.
-	wailsLog := wailslogger.NewFileLogger(filepath.Join(config.DefaultDir(false), "logs", "wails.log"))
-	return wails.Run(&options.App{
-		Title:     "proxyforward",
-		Width:     1360,
-		Height:    820,
-		MinWidth:  1280,
-		MinHeight: 760,
-		// One GUI window owns the pairing flow: a second launch (e.g. clicking
-		// another pxf:// link) is forwarded here and exits, so the link always
-		// lands in the running window instead of opening a duplicate.
-		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId: "proxyforward-gui-single-instance",
-			OnSecondInstanceLaunch: func(data options.SecondInstanceData) {
-				a.OnSecondInstance(deepLinkArg(data.Args))
-			},
-		},
-		// The window is frameless: the frontend draws its own title bar and
-		// window controls. DWM decorations stay on (default) so the frameless
-		// window keeps its drop shadow, rounded corners and Snap Layouts.
-		Frameless: true,
-		// The avatar handler serves /pf/avatar/ for paths the bundled assets
-		// don't cover (player heads are fetched and cached at runtime).
-		AssetServer:      &assetserver.Options{Assets: assets, Handler: a.AvatarHandler()},
-		BackgroundColour: startupBackground(cfg.UI.Theme),
-		Windows: &wailswin.Options{
-			Theme: wailswin.SystemDefault,
-		},
-		OnStartup:          a.Startup,
-		OnShutdown:         a.Shutdown,
-		Bind:               []interface{}{a},
-		Logger:             wailsLog,
-		LogLevelProduction: wailslogger.ERROR,
-	})
-}
-
-// startupBackground picks the pre-paint window colour so the first frame (and
-// resize flash) matches the theme the frontend is about to render. "system"
-// resolves in the frontend; dark is the safer first frame for it here.
-func startupBackground(theme string) *options.RGBA {
-	if theme == "light" {
-		return &options.RGBA{R: 236, G: 238, B: 246, A: 1}
-	}
-	return &options.RGBA{R: 11, G: 13, B: 19, A: 1}
 }
