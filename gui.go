@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 	"embed"
 	"path/filepath"
 
@@ -53,6 +52,9 @@ func runGUI(deepLink string) error {
 	}
 
 	a := app.New(configPath, cfg, ring, logger)
+	// Fit before the page loads, so the window never shows oversized. It rides
+	// in Startup rather than wrapping it (see App.BeforeStartup).
+	a.BeforeStartup = fitWindowToScreen
 	// A cold start via the OS protocol handler: the frontend isn't listening yet,
 	// so stash the link now for it to pull once it mounts (App.TakePendingDeepLink).
 	if deepLink != "" {
@@ -88,10 +90,7 @@ func runGUI(deepLink string) error {
 		Windows: &wailswin.Options{
 			Theme: wailswin.SystemDefault,
 		},
-		OnStartup: func(ctx context.Context) {
-			fitWindowToScreen(ctx) // before the page loads, so it never shows oversized
-			a.Startup(ctx)
-		},
+		OnStartup:          a.Startup,
 		OnShutdown:         a.Shutdown,
 		Bind:               []interface{}{a},
 		Logger:             wailsLog,
