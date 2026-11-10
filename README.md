@@ -6,16 +6,25 @@
 
 An ngrok-style reverse tunnel: the machine hosting Minecraft dials *out* to a machine that
 can accept inbound connections, and that machine relays player traffic back through the
-one outbound link. One Windows binary is both halves.
+one outbound link. One binary is both halves — a desktop app on Windows, headless on Linux.
 
-[![CI](https://github.com/xeri/proxyforward/actions/workflows/ci.yml/badge.svg)](https://github.com/xeri/proxyforward/actions/workflows/ci.yml)
-[![Security](https://github.com/xeri/proxyforward/actions/workflows/security.yml/badge.svg)](https://github.com/xeri/proxyforward/actions/workflows/security.yml)
-[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](#)
-[![GUI](https://img.shields.io/badge/GUI-Wails%20%2B%20React%2019-61DAFB?logo=react&logoColor=black)](https://wails.io)
-[![Transports](https://img.shields.io/badge/transports-QUIC%20%C2%B7%20multi--TCP%20%C2%B7%20mux-6E56CF)](#the-tunnel-in-one-link--three-data-planes)
-[![TLS](https://img.shields.io/badge/TLS-1.3%20only-2E7D32)](#-security-model)
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+[![Windows][badge-windows]][download] [![Linux][badge-linux]][download]
+
+[![Go][badge-go]](go.mod) [![GUI][badge-gui]](https://wails.io) [![Transports][badge-transports]](#the-tunnel-in-one-link--three-data-planes)
+
+[![CI][badge-ci]][ci] [![Security][badge-security]][security] [![License][badge-license]](LICENSE)
+
+[download]: #download
+[ci]: https://github.com/xeri/proxyforward/actions/workflows/ci.yml
+[security]: https://github.com/xeri/proxyforward/actions/workflows/security.yml
+[badge-windows]: https://img.shields.io/badge/Windows-GUI%20%C2%B7%20CLI%20%C2%B7%20service-0078D4?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTAgMGgxMS40djExLjRIMHpNMTIuNiAwSDI0djExLjRIMTIuNnpNMCAxMi42aDExLjRWMjRIMHpNMTIuNiAxMi42SDI0VjI0SDEyLjZ6Ii8%2BPC9zdmc%2B
+[badge-linux]: https://img.shields.io/badge/Linux-headless%20CLI-FCC624?logo=linux&logoColor=black
+[badge-go]: https://img.shields.io/github/go-mod/go-version/xeri/proxyforward?label=Go&logo=go&logoColor=white&color=00ADD8
+[badge-gui]: https://img.shields.io/badge/GUI-Wails%20%2B%20React%2019-61DAFB?logo=react&logoColor=black
+[badge-transports]: https://img.shields.io/badge/transports-QUIC%20%C2%B7%20multi--TCP%20%C2%B7%20mux-6E56CF
+[badge-ci]: https://img.shields.io/github/actions/workflow/status/xeri/proxyforward/ci.yml?branch=master&label=CI&logo=githubactions&logoColor=white
+[badge-security]: https://img.shields.io/github/actions/workflow/status/xeri/proxyforward/security.yml?branch=master&label=security&logo=githubactions&logoColor=white
+[badge-license]: https://img.shields.io/badge/license-GPL--3.0-blue
 
 <img src="preview.png" alt="proxyforward dashboard" width="820">
 
