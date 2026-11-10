@@ -13,9 +13,12 @@ on:
   push:
     branches: [master]
   pull_request:
-  schedule:
-    # Mondays 06:00 UTC - catches newly-disclosed CVEs in unchanged code.
-    - cron: "0 6 * * 1"
+  # Deliberately no schedule. The repo can sit idle for months, and GitHub
+  # disables any workflow with a schedule after 60 days without activity - and
+  # a disabled workflow skips push and pull_request too, so every gate here goes
+  # dark. To catch CVEs disclosed in unchanged code after a quiet spell, run it
+  # by hand (Actions tab -> security -> Run workflow).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -89,7 +92,10 @@ jobs:
       # embed target has to exist for the windows pass or every package fails
       # to load.
       - run: npm ci --prefix frontend && npm run build --prefix frontend
-      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      # Pinned, never @latest: @latest raised its Go floor past go.mod's and the
+      # install failed on every run until the toolchain caught up. A pin behaves
+      # the same after months idle; bump it alongside go.mod's go line.
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
       # Reports only vulnerabilities actually reachable from our call graph.
       # Twice, because reachability is per-GOOS: linux sees only the headless
       # build (gui.go is !linux), so the shipped Windows build, Wails and all,
@@ -165,7 +171,8 @@ jobs:
       - name: stub frontend/dist for go:embed
         run: mkdir -p frontend/dist && touch frontend/dist/index.html
       # Install for the HOST (no GOOS here, or we'd build a Windows gosec binary).
-      - run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      # Pinned for the same reason as govulncheck above.
+      - run: go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
       # GOOS=windows on a linux runner is the trick: it analyses the build we
       # actually ship (pipe ACL, service/elevation, netsh) — which the !windows
       # build hides — while still emitting linux-style paths. A gosec run ON
