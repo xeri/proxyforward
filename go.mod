@@ -1,10 +1,13 @@
 module proxyforward
 
-// 1.25.12 is a floor, not a preference: GO-2026-5856 (Encrypted Client Hello
-// privacy leak in crypto/tls) is reachable from control.WriteMsg and every
-// counted TLS read, and is fixed in crypto/tls@go1.25.12. govulncheck in
-// .github/workflows/security.yml enforces this.
-go 1.25.12
+// 1.26.10 is pinned from both sides. Floor: 1.25 left Go's support window when
+// 1.27 shipped (no more stdlib security fixes — govulncheck in
+// .github/workflows/security.yml enforces the stdlib floor), and the govulncheck
+// and gosec versions that workflow pins need go >= 1.26. Ceiling: CI and
+// release.yml build the Wails v2.13 CLI with this toolchain, and that CLI's
+// golang.org/x/tools v0.44 predates 1.27 — newer Go breaks `wails build`
+// (docs/agent/commands.md). Lift the ceiling together with a Wails bump.
+go 1.26.10
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
