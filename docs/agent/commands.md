@@ -43,6 +43,11 @@ build/bin/proxyforward agent
 - `service` / `firewall` answer `svc.ErrUnsupported` here; there is no systemd unit.
 - `wails build -platform windows/amd64` cross-compiles the Windows GUI exe from Linux
   (no cgo on that target; it does need `frontend/dist`).
+- `-tags bindings` is the one linux build that compiles `gui.go`: `wails build`
+  generates `frontend/wailsjs` by building the app with that tag for the *host* and
+  running it, so `gui_linux.go` is `linux && !bindings`. The same binary checks the
+  bindings without the wails CLI — `go build -tags bindings -o <tmp>/wb . && <tmp>/wb`
+  from the repo root, then `git diff frontend/wailsjs` (mode-only changes are noise).
 - Go newer than the Wails CLI's `golang.org/x/tools` breaks `wails build` with
   "package … without types was imported". Build the CLI against a current x/tools
   (`go get golang.org/x/tools@latest` in a scratch module, then `go build` the

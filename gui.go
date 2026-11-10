@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux || bindings
 
 package main
 
@@ -19,6 +19,9 @@ import (
 
 // The GUI is built for Windows (and macOS); Linux runs headless, see gui_linux.go.
 // Only this file embeds the frontend, so a linux build needs no frontend/dist.
+// The bindings tag is the exception: `wails build` generates frontend/wailsjs by
+// building this package with -tags bindings for the HOST and running it, so a
+// linux host still compiles the GUI wiring for that one job (it opens no window).
 
 //go:embed all:frontend/dist
 var assets embed.FS
