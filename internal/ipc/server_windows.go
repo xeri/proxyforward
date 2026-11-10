@@ -34,4 +34,6 @@ func listen() (net.Listener, error) {
 	})
 }
 
-func isListenerClosed(err error) bool { return errors.Is(err, winio.ErrPipeListenerClosed) }
+// winio reports a closed listener as net.ErrClosed (its ErrPipeListenerClosed is
+// a deprecated alias of it).
+func isListenerClosed(err error) bool { return errors.Is(err, net.ErrClosed) }

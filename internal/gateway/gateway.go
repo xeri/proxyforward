@@ -269,6 +269,16 @@ func (g *Gateway) ControlAddr() net.Addr {
 	}
 	return g.controlLn.Addr()
 }
+
+// QUICAddr is the UDP address the QUIC control listener is bound to, or nil
+// when QUIC is off or its bind failed (Start logs that and serves TCP only).
+func (g *Gateway) QUICAddr() net.Addr {
+	if g.quicLn == nil {
+		return nil
+	}
+	return g.quicLn.Addr()
+}
+
 func (g *Gateway) Fingerprint() string { return g.fingerprint }
 
 // GatewayID returns this gateway's derived gw_ display identity (empty before Start).
