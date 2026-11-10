@@ -12,8 +12,8 @@
 An ngrok-style reverse tunnel that makes a Minecraft server behind NAT public. One
 Windows binary, two roles: the **agent** (beside Minecraft, dials OUT) and the
 **gateway** (publicly reachable, accepts players, relays traffic back through that one
-outbound TLS link). Stack: Go engine → Wails v2 shell → React 19 GUI (`main.go`).
-The tunnel works; the current phase is performance, stability, and above all UI/UX
+outbound TLS link). Stack: Go engine → Wails v2 shell → React 19 GUI (`main.go`,
+`gui.go`); on Linux the same binary runs headless only. The tunnel works; the current phase is performance, stability, and above all UI/UX
 polish. Protect what works; be honest about what doesn't exist yet (Reality check).
 
 ## Where everything lives
@@ -204,7 +204,7 @@ The README and the Settings/Tunnels UI **oversell**. Ground truth at 4a8b0c9:
 | UDP tunnels | Not implemented: no UDP socket code, `validateSpec` rejects `type:"udp"`. No longer advertised (the `tunnel-udp` capability was removed); config still accepts `type:"udp"` but the gateway rejects it — a latent gap, not an oversell. |
 | MC status polling (MOTD/players) | Only login sniffing (`mcsniff/`); the health probe is a bare TCP dial (`health.go probeOnce`). |
 | Tray / minimize-to-tray / autostart | Hidden `tray_spike.go` command only; `MinimizeToTray` / `Autostart` stored, unused. |
-| Linux / macOS support | The engine and GUI **run** on Linux (unix-socket IPC, `ipc/ipc_unix.go`; build + toolbox recipe in `docs/agent/commands.md`), but there is **no packaged build** — CI artifacts only, never release assets — and the Windows integrations stay Windows-only: `service`/`firewall` commands and the Settings → System buttons answer `svc.ErrUnsupported` (`svc/stub_other.go`), `pxf://` links aren't registered, and the copy still says "Windows Firewall". macOS compiles and should behave alike, but has never been run. |
+| Linux / macOS support | Linux is **headless only**: the `gateway`/`pair`/`agent` commands over unix-socket IPC (`ipc/ipc_unix.go`), from a static cgo-free `go build` (recipe in `docs/agent/commands.md`); there is **no Linux GUI** — a bare launch refuses (`gui_linux.go runGUI`). **No packaged build** — CI artifacts only, never release assets — and the Windows integrations stay Windows-only: `service`/`firewall` answer `svc.ErrUnsupported` (`svc/stub_other.go`), no systemd unit. macOS still builds the GUI but has never been run. |
 
 Rules: don't document these as working; don't build UI atop them; trust code over the
 README everywhere. When you implement one, delete its row **in the same commit** (the
@@ -252,9 +252,9 @@ file and `docs/agent/reasoning.md`. Before adding a rule here, ask which of thos
 homes it belongs in.
 
 Two CI facts that are load-bearing and non-obvious: `.gitattributes` pins `eol=lf`
-(Windows runners check out CRLF, which makes gofmt reject **every** file), and every Go
-job must materialize `frontend/dist` first — `main.go` embeds it, and a `go:embed`
-matching zero files is a compile error.
+(Windows runners check out CRLF, which makes gofmt reject **every** file), and every
+non-linux Go job must materialize `frontend/dist` first — `gui.go` embeds it, and a
+`go:embed` matching zero files is a compile error (linux builds are headless and skip it).
 
 ## Maintaining this file
 

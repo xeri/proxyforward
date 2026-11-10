@@ -81,8 +81,9 @@ machine's router changes; only the gateway forwards a port.
 Grab the installer or the portable exe from the
 [latest release](https://github.com/xeri/proxyforward/releases/latest). Windows 10/11 x64;
 you need it on **both** machines. There is no packaged Linux or macOS build. Linux
-builds from source and runs both roles, GUI included (recipe in
-[`docs/agent/commands.md`](docs/agent/commands.md)); the Windows service and firewall
+builds from source and runs both roles **headless** — `proxyforward gateway`, or
+`proxyforward pair <code>` then `proxyforward agent`; there is no Linux GUI (recipe in
+[`docs/agent/commands.md`](docs/agent/commands.md)). The Windows service and firewall
 integration have no Linux equivalent.
 
 The binaries are **not code-signed**, so SmartScreen will warn on first run
@@ -448,7 +449,8 @@ wails build              # produces the single Windows/amd64 proxyforward.exe
 ```
 
 A fresh clone must build the frontend once before any Go command
-(`cd frontend && npm ci && npm run build`) — `main.go` embeds `frontend/dist`.
+(`cd frontend && npm ci && npm run build`) — `gui.go` embeds `frontend/dist`. Linux
+builds are headless and skip it.
 
 ## Development
 

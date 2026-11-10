@@ -159,12 +159,12 @@ Ordered by user-visible impact. "Fix" describes the smallest on-system change.
     writing explicit `_ =` assignments with a reason. Worth doing as its own commit;
     it was kept out of the CI suite so the lint gate could be green on day one.
 
-22. **Linux runs, but nothing about it is packaged or polished** — the engine and GUI
-    work over the unix-socket IPC (`internal/ipc/ipc_unix.go`), but: no release asset
-    or `.desktop`/`pxf://` registration; Settings → System still offers "Add rule" and
-    "Install" (both answer `svc.ErrUnsupported`) and the copy says "Windows"; and
-    `service run` resolves `config.DefaultDir(true)` to a relative `C:\ProgramData`
-    path off Windows (`internal/config/paths.go`). Each is small; none blocks running.
+22. **Linux runs headless, but nothing about it is packaged** — `gateway`/`pair`/`agent`
+    work over the unix-socket IPC (`internal/ipc/ipc_unix.go`); there is no Linux GUI by
+    design (`gui_linux.go`). Missing: a release asset; a systemd unit (the `service`
+    command answers `svc.ErrUnsupported`); and `service run` resolves
+    `config.DefaultDir(true)` to a relative `C:\ProgramData` path off Windows
+    (`internal/config/paths.go`). Each is small; none blocks running.
 
 ## Agent-management surfacing (backend ahead of the GUI)
 

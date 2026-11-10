@@ -25,37 +25,24 @@ build/bin/proxyforward.exe --version  # verify the stamp
 
 ## Linux
 
-The engine and GUI run on Linux; the IPC is a unix socket at
-`$XDG_RUNTIME_DIR/proxyforward/ipc.sock`. The GUI needs gtk3 + webkit2gtk-4.1 (dev
-packages to build, runtime libraries to run). On an atomic distro (Silverblue/Kinoite)
-keep both in a toolbox rather than layering them onto the host — the toolbox shares
-`$HOME`, the host network, and `$XDG_RUNTIME_DIR`, so ports bind on the host and the
-config lands in the usual `~/.config/proxyforward`:
+Linux runs **headless only**: `gateway`, `pair`, `agent`. A bare launch refuses with
+a pointer to them (`gui_linux.go runGUI`) — there is no Linux GUI. `gui.go` (Wails +
+the `frontend/dist` embed) is `!linux`, so a linux build pulls in no Wails, no cgo,
+and no frontend: a fresh clone builds without `npm`, and the binary is static.
 
 ```
-toolbox create proxyforward
-toolbox run -c proxyforward sudo dnf install -y golang nodejs npm gcc \
-    pkgconf-pkg-config gtk3-devel webkit2gtk4.1-devel
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0      # inside the toolbox
-wails build -platform linux/amd64 -tags webkit2_41 -s -skipbindings
-toolbox run -c proxyforward build/bin/proxyforward             # run the GUI
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o build/bin/proxyforward .
+build/bin/proxyforward gateway                  # first run writes the config + prints the pairing code
+build/bin/proxyforward pair '<pairing-code>'    # on the agent machine
+build/bin/proxyforward agent
 ```
 
-- `-tags webkit2_41` is required: Wails 2.13 links webkit2gtk-4.0 unless told
-  otherwise, and current distros ship only 4.1.
-- `-skipbindings` keeps `frontend/wailsjs` untouched (CI's stale-bindings check is
-  the Windows build's job).
-- Rendering is GPU-composited because `main.go runGUI` passes Linux options:
-  without them Wails defaults WebKitGTK to `WebviewGpuPolicyNever` (CPU painting,
-  a few fps under the glass blurs). On NVIDIA + Wayland, `linuxGraphicsDefaults`
-  sets `__NV_DISABLE_EXPLICIT_SYNC=1`, or the first GPU frame ends the session with
-  Wayland error 71 ("explicit sync is used, but no acquire point is set" — confirm
-  with `WAYLAND_DEBUG=1`). Don't reach for `WEBKIT_DISABLE_DMABUF_RENDERER=1`: it
-  doesn't fix that and costs the zero-copy path. It also raises WebKit's layer tile
-  size (`WEBKIT_LAYERS_TILE_SIZE`): at the default 512 px the drifting aurora layer
-  shows a flickering grid of tile seams under fractional scaling.
-- `wails build -platform windows/amd64` cross-compiles the Windows exe from Linux
-  (no cgo on that target).
+- Config, analytics, and logs live in `~/.config/proxyforward` (`config.DefaultDir`);
+  the IPC is a unix socket at `$XDG_RUNTIME_DIR/proxyforward/ipc.sock`. A unix socket
+  path caps at 108 bytes, so a deeply nested `XDG_RUNTIME_DIR` fails the listen.
+- `service` / `firewall` answer `svc.ErrUnsupported` here; there is no systemd unit.
+- `wails build -platform windows/amd64` cross-compiles the Windows GUI exe from Linux
+  (no cgo on that target; it does need `frontend/dist`).
 - Go newer than the Wails CLI's `golang.org/x/tools` breaks `wails build` with
   "package … without types was imported". Build the CLI against a current x/tools
   (`go get golang.org/x/tools@latest` in a scratch module, then `go build` the
@@ -82,12 +69,13 @@ Private configs keep your real setup untouched (`docs/agent/reasoning.md` step 0
 
 ## Gotchas
 
-- **Fresh clone**: every Go command fails until the frontend has been built once —
-  `main.go` embeds `all:frontend/dist`, which is gitignored, and a `go:embed` matching
-  zero files is a compile error. Run `cd frontend && npm ci && npm run build` first.
-  CI does this in one job and shares `frontend/dist` with every Go job.
-- `GOOS=linux` and `GOOS=darwin` builds compile (CI builds both) and Linux runs —
-  see "Linux" above. Cross-compiling darwin from Windows still fails on
+- **Fresh clone**: on Windows/macOS every Go command fails until the frontend has been
+  built once — `gui.go` embeds `all:frontend/dist`, which is gitignored, and a
+  `go:embed` matching zero files is a compile error. Run `cd frontend && npm ci && npm
+  run build` first. CI does this in one job and shares `frontend/dist` with every
+  non-linux Go job; linux builds skip the embed.
+- `GOOS=linux` builds the headless binary (see "Linux" above); `GOOS=darwin` compiles
+  the GUI (CI builds it). Cross-compiling darwin from Windows still fails on
   `energye/systray`, which needs cgo — that's the cross-compile, not the code; the
   native macOS runner is fine.
 - `go test -race` needs cgo (a C toolchain); unavailable on machines without one — the

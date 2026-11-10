@@ -2,27 +2,18 @@ package main
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/wailsapp/wails/v2"
-	wailslogger "github.com/wailsapp/wails/v2/pkg/logger"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	wailslinux "github.com/wailsapp/wails/v2/pkg/options/linux"
-	wailswin "github.com/wailsapp/wails/v2/pkg/options/windows"
 
-	"proxyforward/app"
 	"proxyforward/internal/config"
 	"proxyforward/internal/engine"
 	"proxyforward/internal/link"
@@ -31,9 +22,6 @@ import (
 	"proxyforward/internal/version"
 	"proxyforward/internal/wincon"
 )
-
-//go:embed all:frontend/dist
-var assets embed.FS
 
 func main() {
 	// Cobra's Windows "mousetrap" exits any Explorer-launched process after a
@@ -418,138 +406,4 @@ func newFirewallCmd() *cobra.Command {
 		},
 	}
 	return cmd
-}
-
-func runGUI(deepLink string) error {
-	linuxGraphicsDefaults()
-	configPath := config.DefaultPath(false)
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		// The GUI must still open on a broken config so the user can fix it;
-		// start from defaults and surface the load error in the UI later.
-		cfg = config.Default()
-	}
-	ring := logging.NewRing(2000)
-	var filePath string
-	if cfg.Logging.FileEnabled {
-		filePath = logging.DefaultFilePath(config.DefaultDir(false))
-	}
-	logger, closeLogs, lerr := logging.New(logging.Options{
-		Level:    cfg.Logging.Level,
-		FilePath: filePath,
-		Ring:     ring,
-	})
-	if lerr != nil {
-		return lerr
-	}
-	defer closeLogs()
-	if err != nil {
-		logger.Error("config failed to load; using defaults", "err", err)
-	}
-
-	a := app.New(configPath, cfg, ring, logger)
-	// A cold start via the OS protocol handler: the frontend isn't listening yet,
-	// so stash the link now for it to pull once it mounts (App.TakePendingDeepLink).
-	if deepLink != "" {
-		a.HandleDeepLink(deepLink)
-	}
-	// Wails reports webview/runtime failures through its own logger and can
-	// os.Exit without returning an error; in a windowsgui process that output
-	// is invisible, so route it to a file next to the crash log.
-	wailsLog := wailslogger.NewFileLogger(filepath.Join(config.DefaultDir(false), "logs", "wails.log"))
-	return wails.Run(&options.App{
-		Title:     "proxyforward",
-		Width:     windowWidth,
-		Height:    windowHeight,
-		MinWidth:  windowMinWidth,
-		MinHeight: windowMinHeight,
-		// One GUI window owns the pairing flow: a second launch (e.g. clicking
-		// another pxf:// link) is forwarded here and exits, so the link always
-		// lands in the running window instead of opening a duplicate.
-		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId: "proxyforward-gui-single-instance",
-			OnSecondInstanceLaunch: func(data options.SecondInstanceData) {
-				a.OnSecondInstance(deepLinkArg(data.Args))
-			},
-		},
-		// The window is frameless: the frontend draws its own title bar and
-		// window controls. DWM decorations stay on (default) so the frameless
-		// window keeps its drop shadow, rounded corners and Snap Layouts.
-		Frameless: true,
-		// The avatar handler serves /pf/avatar/ for paths the bundled assets
-		// don't cover (player heads are fetched and cached at runtime).
-		AssetServer:      &assetserver.Options{Assets: assets, Handler: a.AvatarHandler()},
-		BackgroundColour: startupBackground(cfg.UI.Theme),
-		Windows: &wailswin.Options{
-			Theme: wailswin.SystemDefault,
-		},
-		// Without Linux options Wails defaults WebKitGTK to
-		// WebviewGpuPolicyNever: every frame is painted on the CPU, and the
-		// glass surfaces' backdrop blurs then pin a core at a few fps. Always
-		// keeps compositing on the GPU. ProgramName becomes the Wayland app
-		// id, so the desktop shell matches the window to proxyforward.desktop.
-		Linux: &wailslinux.Options{
-			WebviewGpuPolicy: wailslinux.WebviewGpuPolicyAlways,
-			ProgramName:      "proxyforward",
-		},
-		OnStartup: func(ctx context.Context) {
-			fitWindowToScreen(ctx) // before the page loads, so it never shows oversized
-			a.Startup(ctx)
-		},
-		OnShutdown:         a.Shutdown,
-		Bind:               []interface{}{a},
-		Logger:             wailsLog,
-		LogLevelProduction: wailslogger.ERROR,
-	})
-}
-
-// linuxGraphicsDefaults sets the environment the GPU-composited webview needs
-// on Linux. It must run before GTK/EGL initialise (the web process inherits
-// it), and it only fills in unset variables, so a user's explicit value wins.
-func linuxGraphicsDefaults() {
-	if runtime.GOOS != "linux" {
-		return
-	}
-	for _, kv := range [...]struct{ key, val string }{
-		// NVIDIA's EGL Wayland layer turns on explicit sync for the window
-		// surface; GTK3 then commits frames without the acquire point it
-		// promised, and the compositor drops the connection ("explicit sync
-		// is used, but no acquire point is set", Wayland error 71) the moment
-		// the webview paints. Other drivers never read it.
-		{"__NV_DISABLE_EXPLICIT_SYNC", "1"},
-		// WebKit tiles large GPU layers (512 px by default). The ambient
-		// aurora is a viewport-sized layer drifting by sub-pixel translate and
-		// scale, and with the 2x buffers GTK3 uses under fractional scaling
-		// every tile edge resamples differently each frame: a flickering seam
-		// grid, plain on the dark theme. One tile covers the whole layer at
-		// normal window sizes.
-		{"WEBKIT_LAYERS_TILE_SIZE", "4096x4096"},
-	} {
-		if _, set := os.LookupEnv(kv.key); !set {
-			os.Setenv(kv.key, kv.val)
-		}
-	}
-	// On NVIDIA's driver, WebKit's web process segfaults inside
-	// libnvidia-eglcore from its Skia GPU painting threads, minutes into a
-	// session — and a dead web process takes the whole app down. Paint page
-	// content with Skia's CPU rasteriser instead; compositing (transform and
-	// opacity animation, backdrop blur) stays on the GPU, so motion stays
-	// smooth. Mesa drivers keep GPU painting.
-	if _, err := os.Stat("/proc/driver/nvidia/version"); err == nil {
-		if _, set := os.LookupEnv("WEBKIT_SKIA_ENABLE_CPU_RENDERING"); !set {
-			os.Setenv("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1")
-		}
-	}
-}
-
-// startupBackground picks the pre-paint window colour so the first frame (and
-// resize flash) matches the theme the frontend is about to render. "system"
-// resolves in the frontend; dark is the safer first frame for it here. Alpha
-// is a real 0-255 alpha on Linux (WebKitGTK), so it must be 255 there; Wails'
-// Windows backend rounds any non-zero alpha up to 255 anyway.
-func startupBackground(theme string) *options.RGBA {
-	if theme == "light" {
-		return &options.RGBA{R: 236, G: 238, B: 246, A: 255}
-	}
-	return &options.RGBA{R: 11, G: 13, B: 19, A: 255}
 }
