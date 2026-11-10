@@ -103,6 +103,13 @@ func newRootCmd(deepLink string) *cobra.Command {
 	return root
 }
 
+// configFlagUsage is the --config help text. It names the real per-user default
+// (config.DefaultPath): %APPDATA%\proxyforward on Windows, ~/.config/proxyforward
+// on Linux, where these headless commands are the only way to run.
+func configFlagUsage() string {
+	return "path to config.toml (default: " + config.DefaultPath(false) + ")"
+}
+
 // newPairCmd wires an agent to a gateway from a pasted pairing code — the
 // headless counterpart of the GUI wizard.
 func newPairCmd() *cobra.Command {
@@ -158,7 +165,7 @@ func newPairCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "path to config.toml (default: %APPDATA%\\proxyforward\\config.toml)")
+	cmd.Flags().StringVar(&configPath, "config", "", configFlagUsage())
 	cmd.Flags().StringVar(&localAddr, "local", "127.0.0.1:25565", "local Minecraft server address for the default tunnel")
 	cmd.Flags().IntVar(&publicPort, "public-port", config.DefaultPublicPort, "public port to request on the gateway for the default tunnel")
 	return cmd
@@ -238,7 +245,7 @@ func newRoleCmd(role config.Role, short string) *cobra.Command {
 			return runEngineWithIPC(ctx, cfg, configDir, configPath, logger)
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "path to config.toml (default: %APPDATA%\\proxyforward\\config.toml)")
+	cmd.Flags().StringVar(&configPath, "config", "", configFlagUsage())
 	cmd.Flags().StringVar(&logLevel, "log-level", "", "override log level (debug|info|warn|error)")
 	cmd.Flags().BoolVar(&headless, "headless", true, "run without GUI (always true for this subcommand)")
 	return cmd
