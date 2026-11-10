@@ -135,12 +135,7 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 		opts.tweakGateway(gwCfg)
 	}
 
-	gwCtx, gwCancel := context.WithCancel(context.Background())
-	gw := gateway.New(gwCfg, t.TempDir(), logger.With("side", "gateway"))
-	if err := gw.Start(gwCtx); err != nil {
-		gwCancel()
-		t.Fatal(err)
-	}
+	gw, gwCancel := startGateway(t, gwCfg, logger.With("side", "gateway"))
 	t.Cleanup(func() {
 		gwCancel()
 		gw.Shutdown()
@@ -197,6 +192,35 @@ func newHarnessWith(t *testing.T, localAddr string, opts harnessOpts) *harness {
 	h.startAgent()
 	t.Cleanup(h.stopAgent)
 	return h
+}
+
+// startGateway starts a gateway on an ephemeral control port, retrying on a
+// fresh port while QUIC is enabled but its UDP bind failed. The gateway binds
+// UDP on whatever number the OS handed out for TCP, and nothing makes that
+// number free for UDP: Windows runners reserve UDP ranges and system services
+// hold UDP ports exclusively, so the bind sporadically fails with WSAEACCES.
+// The gateway then (by design) serves TCP only, and every QUIC test would wait
+// out its deadline on a tunnel that can never come up.
+func startGateway(t *testing.T, cfg *config.Config, logger *slog.Logger) (*gateway.Gateway, context.CancelFunc) {
+	t.Helper()
+	dir := t.TempDir()
+	const attempts = 5
+	for i := 1; ; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		gw := gateway.New(cfg, dir, logger)
+		if err := gw.Start(ctx); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		if !cfg.Gateway.QUICEnabled || gw.QUICAddr() != nil {
+			return gw, cancel
+		}
+		cancel()
+		gw.Shutdown()
+		if i == attempts {
+			t.Fatalf("gateway QUIC listener failed to bind on %d ephemeral ports", attempts)
+		}
+	}
 }
 
 func (h *harness) startAgent() {
