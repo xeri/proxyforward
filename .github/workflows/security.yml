@@ -13,9 +13,12 @@ on:
   push:
     branches: [master]
   pull_request:
-  schedule:
-    # Mondays 06:00 UTC - catches newly-disclosed CVEs in unchanged code.
-    - cron: "0 6 * * 1"
+  # Deliberately no schedule. The repo can sit idle for months, and GitHub
+  # disables any workflow with a schedule after 60 days without activity - and
+  # a disabled workflow skips push and pull_request too, so every gate here goes
+  # dark. To catch CVEs disclosed in unchanged code after a quiet spell, run it
+  # by hand (Actions tab -> security -> Run workflow).
+  workflow_dispatch:
 
 permissions:
   contents: read

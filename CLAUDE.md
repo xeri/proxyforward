@@ -242,7 +242,8 @@ lower the floor to go green), `golangci-lint` (`.golangci.yml`), a TODO/FIXME ba
 (plan jargon + attribution trailers anywhere in a PR — `docs/agent/naming.md`), and a
 stale-`frontend/wailsjs` check. `.github/workflows/security.yml`: CodeQL, govulncheck,
 gitleaks, dependency-review, npm audit (gosec/zizmor/Scorecard are advisory → Security
-tab). `.github/workflows/fuzz.yml` fuzzes the parsers nightly;
+tab). `.github/workflows/fuzz.yml` fuzzes the parsers on master pushes that touch them —
+no workflow runs on a timer (GitHub disables scheduled ones in an idle repo);
 `.github/workflows/release.yml` builds a tag into a **draft** release.
 Must-never-happen at edit time → hook (`.claude/settings.json`: `frontend/wailsjs`
 write-block, per-edit gofmt check). Doc accuracy → the `internal/doccheck` citation

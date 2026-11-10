@@ -1,17 +1,30 @@
-# Nightly fuzzing of the internet-facing parsers.
+# Fuzzing of the internet-facing parsers: on every push to master that touches
+# them, and by hand (Actions tab -> fuzz -> Run workflow, with a longer fuzztime).
 #
 # `go test ./...` only ever runs the SEED corpora of these targets - nothing in
 # the repo actually fuzzes. This does, one target per job (Go permits only one
 # -fuzz target per invocation), and caches the generated corpus so coverage
-# compounds night over night instead of restarting from the seeds each time.
+# compounds run over run instead of restarting from the seeds each time.
+#
+# Never on a timer: the repo can sit idle for months, and GitHub disables any
+# workflow with a schedule after 60 days without activity - at which point it
+# stops running on push too.
 #
 # None of these packages import the root package, so - unlike every job in
 # ci.yml - this workflow needs no frontend/dist.
 name: fuzz
 
 on:
-  schedule:
-    - cron: "0 3 * * *"
+  push:
+    branches: [master]
+    paths:
+      - "internal/control/**"
+      - "internal/link/**"
+      - "internal/mc/**"
+      - "internal/relay/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/fuzz.yml"
   workflow_dispatch:
     inputs:
       fuzztime:
@@ -52,8 +65,8 @@ jobs:
           cache: false
 
       # Go writes generated corpus entries under $GOCACHE/fuzz. Restoring them
-      # is what turns 8 nightly 5-minute runs into a corpus that grows, rather
-      # than 8 cold starts.
+      # is what turns each run's 5 minutes per target into a corpus that grows,
+      # rather than a cold start from the seeds every time.
       - name: resolve GOCACHE
         id: gocache
         run: echo "dir=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"

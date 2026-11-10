@@ -474,8 +474,8 @@ handshake/VarInt/packet, login sniffer, offline responder, pairing code, sniff t
 loopback e2e suite that is goroutine-leak-checked with `goleak` and enforces the
 throughput/latency floor and per-transport twins described [above](#head-of-line-blocking-and-how-each-plane-answers-it).
 
-`go test` runs the fuzz **seed corpora**; the targets are actually fuzzed nightly
-([`fuzz.yml`](.github/workflows/fuzz.yml)). Every push also runs the race detector, the
+`go test` runs the fuzz **seed corpora**; the targets are actually fuzzed on every push
+to master that touches a parser ([`fuzz.yml`](.github/workflows/fuzz.yml)). Every push also runs the race detector, the
 burst floor, CodeQL, and `govulncheck` — see [`ci.yml`](.github/workflows/ci.yml) and
 [`security.yml`](.github/workflows/security.yml).
 
